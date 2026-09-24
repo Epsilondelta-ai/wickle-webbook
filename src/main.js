@@ -22,7 +22,7 @@ const state={completed:Array.isArray(stored.completed)?stored.completed:[],last:
 const save=()=>{try{localStorage.setItem('wickle-book-v02',JSON.stringify(state));}catch{toast('이 브라우저에서는 진도를 저장할 수 없습니다.');}};
 const readHref=p=>'#/read/'+encodeURIComponent(p);
 const chapterGroup=n=>n<=2?'준비 · Rust와 설계':n<=14?'01 · 엔진의 기반':n<=24?'02 · 실행과 확장':n<=36?'03 · 어댑터와 첫 완성':n<=46?'04 · 0.2.0의 새 계약':n<=49?'05 · 중단과 진단':n<=57?'06 · 공급자 연결':'07 · 0.2.0 완성';
-async function getJSON(url){const response=await fetch(url,{signal:AbortSignal.timeout(15000)});if(!response.ok)throw new Error(`자료를 불러오지 못했습니다 (${response.status}).`);return response.json();}
+async function getJSON(url){const response=await fetch(url,{cache:'no-cache',signal:AbortSignal.timeout(15000)});if(!response.ok)throw new Error(`자료를 불러오지 못했습니다 (${response.status}).`);return response.json();}
 function toast(message){$('#toast').textContent=message;$('#toast').classList.add('visible');setTimeout(()=>$('#toast')?.classList.remove('visible'),2600);}
 function progress(){const count=chapters.filter(c=>state.completed.includes(c.path)).length;$('#progress-text').textContent=`${count} / ${chapters.length}장 완료`;$('#progress-bar').style.width=`${count/chapters.length*100}%`;}
 function shell(){
