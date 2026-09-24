@@ -1,0 +1,8 @@
+%%{init: {"theme":"base","themeCSS":"text { font-family: Arial, sans-serif !important; }","themeVariables":{"fontFamily":"Arial, sans-serif","fontSize":"17px","primaryColor":"#e8f2eb","primaryTextColor":"#20382b","primaryBorderColor":"#527d63","lineColor":"#527d63","secondaryColor":"#f7f1e4","tertiaryColor":"#f7f1e4"},"flowchart":{"htmlLabels":false,"curve":"linear","nodeSpacing":28,"rankSpacing":40}}}%%
+graph TD
+accTitle: 저장 근거를 읽는 조회 흐름
+accDescr: run 또는 step ID로 현재 권한을 확인한 뒤 저장 근거를 순수 converter로 변환하여 redacted report를 만든다.
+A["run / step ID"] --> B["현재 권한 확인"]
+B --> C["저장 근거"]
+C --> D["순수 converter"]
+D --> E["redacted report"]

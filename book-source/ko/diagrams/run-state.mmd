@@ -1,0 +1,8 @@
+%%{init: {"theme":"base","themeCSS":"text { font-family: Arial, sans-serif !important; }","themeVariables":{"fontFamily":"Arial, sans-serif","fontSize":"17px","primaryColor":"#e8f2eb","primaryTextColor":"#20382b","primaryBorderColor":"#527d63","lineColor":"#527d63","secondaryColor":"#f7f1e4","tertiaryColor":"#f7f1e4"},"flowchart":{"htmlLabels":false,"curve":"linear","nodeSpacing":28,"rankSpacing":40}}}%%
+graph TD
+accTitle: 실행 상태와 재개
+accDescr: Running은 승인, 입력, 효과 확인이 필요하면 Waiting으로 전환한다. 완료, 실패, 취소, 한도 도달 시 Terminal로 끝난다. Waiting에서 유효한 ResumeCommand를 수락하면 새 Running segment가 시작된다.
+R["Running"] -->|"승인 · 입력 · 효과 확인 필요"| W["Waiting"]
+R -->|"완료 · 실패 · 취소 · 한도"| T["Terminal"]
+W -->|"유효한 ResumeCommand"| N["새 Running segment"]
+style T fill:#f7e9df,stroke:#a57551

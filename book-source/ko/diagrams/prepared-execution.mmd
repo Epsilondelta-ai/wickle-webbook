@@ -1,0 +1,11 @@
+%%{init: {"theme":"base","themeCSS":"text { font-family: Arial, sans-serif !important; }","themeVariables":{"fontFamily":"Arial, sans-serif","fontSize":"17px","primaryColor":"#e8f2eb","primaryTextColor":"#20382b","primaryBorderColor":"#527d63","lineColor":"#527d63","secondaryColor":"#f7f1e4","tertiaryColor":"#f7f1e4"},"flowchart":{"htmlLabels":false,"curve":"linear","nodeSpacing":28,"rankSpacing":40}}}%%
+graph TD
+accTitle: 0.2.0 실행 책임의 분리
+accDescr: 저장된 요청 비교, 실행 구간 수락, 스키마 변환, prepared step, 호출, 입력 복원과 권한 확인, 도구 효과 저장, 실행 구간 결과 고정의 순서다.
+A["인증된 제출<br/>저장 RequestSnapshot 비교<br/>신규 요청만 현재 설정 해석"] --> B["ExecutionSegment 수락<br/>lease / 명령 원자성"]
+B --> C["route / purpose 옵션<br/>canonical model-owned Tool"]
+C --> D["provider schema<br/>제약 설명 + decode plan"]
+D --> E["PreparedStep 저장<br/>physical attempt 원자 예약<br/>adapter 한 번 호출"]
+E --> F["raw proposal → decode / default<br/>Hook / 재검증 → system bind / 권한"]
+F --> G["실제 Tool<br/>효과와 결과 저장"]
+G --> H["stop / Wait / finish<br/>해당 segment outcome 고정"]

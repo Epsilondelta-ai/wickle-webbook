@@ -48,7 +48,7 @@ for (const rel of files.sort()) {
     const rawPath='files/'+id+'-'+path.basename(rel);
     await writeFile(path.join(output,rawPath),body); assets[rel]=rawPath;
     documents.push({ path: rel, id, title, kind, number: isChapter ? rel.slice(3, 6).replace(/-$/, '') : '', excerpt: plain.slice(0, 180), search: kind === 'chapter' || kind === 'guide' ? plain : '', minutes: Math.max(3, Math.ceil(body.length / 1100)) });
-  } else if (rel.startsWith('reference') || ext === '.patch' || ['.json', '.lock', '.png', '.svg'].includes(ext) || rel === 'ko/lab.py') {
+  } else if (rel.startsWith('reference') || ext === '.patch' || ['.json', '.lock', '.png', '.svg', '.mmd', '.excalidraw'].includes(ext) || rel === 'ko/lab.py') {
     const dest = 'files/' + hash(rel).slice(0, 16) + '-' + path.basename(rel);
     await cp(path.join(root, rel), path.join(output, dest)); assets[rel] = dest;
   }

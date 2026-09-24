@@ -24,17 +24,14 @@
 
 ## 2. 정적 의존 방향
 
-```text
-Host 애플리케이션: 인증, 설정, credential, UI/API, Tokio, 운영 작업
-  │ 조립·주입
-  ├── wickle-model-router ────────────┐
-  ├── wickle-state-sqlite ────────────┤
-  ├── wickle-adapter-runtime ─────────┤
-  ├── provider crates / wickle-mcp ───┤
-  │                                  ▼
-  └────────────────────────────── wickle core
-                        타입·Port·검증·Agent 상태 기계
-```
+<figure class="book-diagram">
+<div class="diagram-viewport" tabindex="0" role="region" aria-label="Rust crate의 정적 의존 방향: 가로로 스크롤할 수 있는 도해">
+<img src="diagrams/core-dependencies.svg" alt="Host가 어댑터를 조립·주입하며, Host와 각 어댑터는 타입·Port·검증·상태 기계를 정의하는 wickle core에 의존한다.">
+</div>
+<figcaption>Rust crate의 정적 의존 방향. 좁은 화면에서는 도해를 좌우로 스크롤할 수 있습니다.</figcaption>
+</figure>
+
+[SVG 내려받기](diagrams/core-dependencies.svg) · [Mermaid 원본](diagrams/core-dependencies.mmd) · [편집용 Excalidraw](diagrams/core-dependencies.excalidraw)
 
 화살표는 Rust dependency 방향이다. 실행 중에는 core가 주입받은 adapter의 메서드를 호출하지만, core Cargo.toml은 해당 concrete adapter를 의존하지 않는다. “호출 방향”과 “소스 의존 방향”이 다를 수 있다는 것이 의존성 역전의 핵심이다.
 
@@ -42,20 +39,14 @@ Host 애플리케이션: 인증, 설정, credential, UI/API, Tokio, 운영 작�
 
 ## 3. 실행의 흐름과 신뢰 경계
 
-```text
-RunRequest + 인증된 ExecutionContext
-  → 현재 admission 정책 → 같은 요청 조회
-  → profile/route/prompt/input snapshot 고정 → atomic admission
-  → lease 획득 → segment 자원 열기
-  → context 조회·권한 확인·projection
-  → model attempt 예약 저장 → 재검사 → ModelPort
-  → 완전한 response 검증·저장
-  → tool plan 저장
-  → input 확정 저장 → 현재 tool 정책 → attempt/dispatch 저장
-  → ToolExecutor → 효과·결과·메시지·이벤트 원자 저장
-  → 다음 모델 step 또는 wait/verify/finish
-  → durable outcome → observers → 자원 close
-```
+<figure class="book-diagram">
+<div class="diagram-viewport" tabindex="0" role="region" aria-label="실행 흐름과 신뢰 경계: 가로로 스크롤할 수 있는 도해">
+<img src="diagrams/execution-flow.svg" alt="인증된 요청 → admission 정책·기존 요청 조회 → snapshot·atomic admission → lease·자원 열기 → context·권한 → 모델 호출·응답 저장 → 도구 계획·정책·dispatch → 효과 원자 저장 → 다음 step 또는 대기·검증·종료 → outcome·관찰·자원 닫기.">
+</div>
+<figcaption>실행 흐름과 신뢰 경계. 좁은 화면에서는 도해를 좌우로 스크롤할 수 있습니다.</figcaption>
+</figure>
+
+[SVG 내려받기](diagrams/execution-flow.svg) · [Mermaid 원본](diagrams/execution-flow.mmd) · [편집용 Excalidraw](diagrams/execution-flow.excalidraw)
 
 model text, user input, retrieved document는 도구 실행 권한이 아니다. 신뢰된 Host는 credential과 소유 scope를 제공하고 core는 규칙을 강제한다. Port 구현이 악성이라면 같은 프로세스에서 파일을 몰래 읽는 행동까지 Rust trait이 차단하지는 않는다. 신뢰할 수 없는 코드를 실행할 때 필요한 OS 격리는 Host가 맡는다.
 
@@ -91,13 +82,14 @@ Strategy가 제안한 결과도 그대로 믿지 않는다. ContextStrategy가 i
 
 ResumeCommand와 도구 call은 행위의 의도를 데이터로 저장하는 Command다. 저장 가능한 명령에는 stable identity, exact target, revision이 필요하다. 명령을 재전송해도 중복 효과가 생기지 않게 acceptance를 기록한다.
 
-```text
-Running ──승인/입력/효과 확인 필요──> Waiting
-   │                                 │
-   │ 완료·실패·취소·한도              │ 유효한 ResumeCommand
-   ▼                                 ▼
-Terminal                         새 Running segment
-```
+<figure class="book-diagram">
+<div class="diagram-viewport" tabindex="0" role="region" aria-label="실행 상태와 재개: 가로로 스크롤할 수 있는 도해">
+<img src="diagrams/run-state.svg" alt="Running에서 승인·입력·효과 확인이 필요하면 Waiting으로, 완료·실패·취소·한도 도달 시 Terminal로 전환한다. Waiting에서 유효한 ResumeCommand를 수락하면 새 Running segment를 시작한다.">
+</div>
+<figcaption>실행 상태와 재개. 좁은 화면에서는 도해를 좌우로 스크롤할 수 있습니다.</figcaption>
+</figure>
+
+[SVG 내려받기](diagrams/run-state.svg) · [Mermaid 원본](diagrams/run-state.mmd) · [편집용 Excalidraw](diagrams/run-state.excalidraw)
 
 그림은 강의용 단순화다. 정확한 variant와 전이는 run.rs와 resume/recovery 구현을 읽는다. Waiting은 terminal과 같지 않으며, terminal Run을 새 명령으로 되살릴 수 없다. 명령형 코드보다 상태 자료형이 많아지지만 crash와 중복 요청의 의미가 명시된다. [16장](16-tools.md), [17장](17-resume.md), [24장](24-recovery.md).
 
@@ -150,18 +142,23 @@ ContextProjection은 저장 표현을 외부 표현으로 명시적으로 변환
 
 ## 13. 0.2.0에서 추가로 분리한 책임
 
-```text
-인증된 제출 → 저장 RequestSnapshot 비교 → 신규 요청만 현재 설정 해석
-  → ExecutionSegment 수락 + lease/명령 원자성
-  → route/purpose 옵션 → canonical model-owned Tool
-  → provider schema + 제약 설명 + decode plan
-  → PreparedStep 저장 → physical attempt 원자 예약 → adapter 한 번 호출
-  → raw proposal → decode/default → Hook/재검증 → system bind/권한
-  → 실제 Tool → 효과와 결과 저장
-  → stop/Wait/finish: 해당 segment outcome 고정
+<figure class="book-diagram">
+<div class="diagram-viewport" tabindex="0" role="region" aria-label="0.2.0 실행 책임의 분리: 가로로 스크롤할 수 있는 도해">
+<img src="diagrams/prepared-execution.svg" alt="인증된 제출과 저장 RequestSnapshot 비교 → 신규 요청 설정 해석 → ExecutionSegment·lease 수락 → 옵션·도구 계약·provider schema → PreparedStep·attempt·호출 → 입력 복원·재검증·권한 → 도구 실행·효과 저장 → segment outcome 고정.">
+</div>
+<figcaption>0.2.0 실행 책임의 분리. 좁은 화면에서는 도해를 좌우로 스크롤할 수 있습니다.</figcaption>
+</figure>
 
-조회: run/step ID → 현재 권한 → 저장 근거 → 순수 converter → redacted report
-```
+[SVG 내려받기](diagrams/prepared-execution.svg) · [Mermaid 원본](diagrams/prepared-execution.mmd) · [편집용 Excalidraw](diagrams/prepared-execution.excalidraw)
+
+<figure class="book-diagram">
+<div class="diagram-viewport" tabindex="0" role="region" aria-label="저장 근거를 읽는 조회 흐름: 가로로 스크롤할 수 있는 도해">
+<img src="diagrams/inspection-flow.svg" alt="run/step ID → 현재 권한 → 저장 근거 → 순수 converter → redacted report.">
+</div>
+<figcaption>저장 근거를 읽는 조회 흐름. 좁은 화면에서는 도해를 좌우로 스크롤할 수 있습니다.</figcaption>
+</figure>
+
+[SVG 내려받기](diagrams/inspection-flow.svg) · [Mermaid 원본](diagrams/inspection-flow.mmd) · [편집용 Excalidraw](diagrams/inspection-flow.excalidraw)
 
 | 경계·패턴 | 추가로 분리한 책임 | 장점 | 비용·주의 |
 | --- | --- | --- | --- |

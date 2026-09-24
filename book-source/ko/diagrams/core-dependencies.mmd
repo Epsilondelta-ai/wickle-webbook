@@ -1,0 +1,14 @@
+%%{init: {"theme":"base","themeCSS":"text { font-family: Arial, sans-serif !important; }","themeVariables":{"fontFamily":"Arial, sans-serif","fontSize":"17px","primaryColor":"#e8f2eb","primaryTextColor":"#20382b","primaryBorderColor":"#527d63","lineColor":"#527d63","secondaryColor":"#f7f1e4","tertiaryColor":"#f7f1e4"},"flowchart":{"htmlLabels":false,"curve":"linear","nodeSpacing":28,"rankSpacing":40}}}%%
+graph TD
+accTitle: Rust crate 의존 방향
+accDescr: Host는 어댑터를 조립하고 주입한다. Host와 각 어댑터 crate가 wickle core에 의존한다. Core는 구체적인 어댑터에 의존하지 않는다.
+H["Host 애플리케이션<br/>인증 · 설정 · credential · UI/API<br/>Tokio · 운영 작업"]
+H --> M["wickle-model-router"]
+H --> S["wickle-state-sqlite"]
+H --> A["wickle-adapter-runtime"]
+H --> P["provider crates / wickle-mcp"]
+H --> C["wickle core<br/>타입 · Port · 검증 · Agent 상태 기계"]
+M --> C
+S --> C
+A --> C
+P --> C

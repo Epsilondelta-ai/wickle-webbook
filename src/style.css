@@ -9,3 +9,5 @@
 @media print{.topbar,.sidebar,.page-toc,.chapter-finish,.pagination,.code-bar button{display:none}.reader{margin:0;width:100%;padding:0}.reader-grid{display:block}.prose pre{max-height:none;white-space:pre-wrap}.code-wrap{break-inside:avoid}.prose{font-size:11pt}:root{--bg:white;--ink:black;--border:#bbb}}
 
 .download-book{display:block;margin-top:11px;font-size:11px;color:var(--accent)}
+
+.book-diagram{margin:28px 0}.diagram-viewport{overflow-x:auto;border:1px solid var(--border);border-radius:8px;background:#fff;padding:20px}.diagram-viewport img{display:block;width:auto;height:auto;max-width:none;margin:0 auto}.book-diagram figcaption{font-size:12px;color:var(--muted);margin-top:10px;line-height:1.8}

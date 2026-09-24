@@ -33,3 +33,11 @@ Rust 버튼이 외부 Playground URL에 코드를 전달하는 형식과 다운�
 스테이징된 전체 파일을 부모 교재 폴더가 없는 임시 디렉터리에 checkout하고 `npm ci`, `npm run build`, `npm test`를 실행해 통과했다. 생성된 content release hash도 원 작업 디렉터리와 같다. 자체 포함 교재는 `book-source/`에 저장한다.
 
 공개 콘텐츠 검사에서 release의 `.env.example`까지 비밀 파일로 오분류한 초기 테스트를 수정했다. 실제 `.env` 및 그 변형은 제외하고 placeholder `.env.example`만 허용한다. 수정 후 9개 검사와 6개 브라우저 흐름 모두 통과했다. staged secret scan은 HIGH 0이며 MEDIUM은 코드 변수·타입, 합성 credential fixture, 예제 계정 숫자·timestamp, 로컬 테스트 URL과 binary patch encoding으로 확인했다.
+
+## SVG architecture diagrams
+
+- Replaced four text diagrams with five SVG figures (execution and inspection have separate figures).
+- Included Mermaid, PNG, and editable Excalidraw assets in the downloadable study bundle.
+- Automated: production build and 9 unit/content tests passed; existing 6 browser tests passed before the final font and intrinsic-size adjustment.
+- Direct Chromium verification after the final adjustment: all five images loaded, SVG download and Mermaid/Excalidraw links worked, mobile ArrowRight scrolling worked, dark mode preserved contrast, and the document did not overflow horizontally.
+- Visually inspected the state, dependency, and prepared-execution diagrams plus the desktop reader. Screenshots remain local verification artifacts.

@@ -1,9 +1,9 @@
 {
-  "release": "v0.2.0-0ffb021462a1",
+  "release": "v0.2.0-1c704c121e31",
   "files": [
     {
       "path": "catalog.json",
-      "sha256": "e344e0c1c0c9da238b528b4f0633c971c38d90139ae9fc8400fdeb19790d6e04"
+      "sha256": "2978faab0eb1dd6ca57873b8e423175f5912c697c55524e527d27a4a3dd6fb98"
     },
     {
       "path": "docs/005928cae4812063730b.json",
@@ -815,7 +815,7 @@
     },
     {
       "path": "docs/3dfb149490532d65261c.json",
-      "sha256": "434fc8de0cffca3a52bde3461f401f3b18a8f213ff7e6e05b1d48d8b0dbabd54"
+      "sha256": "9f3da06fd17ad4c3b5c282b38807ce32d8fff055a11477728df59ef23237da35"
     },
     {
       "path": "docs/3e18a917547754fe4792.json",
@@ -3219,7 +3219,7 @@
     },
     {
       "path": "downloads/wickle-webbook-study.zip",
-      "sha256": "dec3c16606f07c599281fabc817c4a4ffd2f295455b0573b46df11a3ea01a516"
+      "sha256": "15afb588552e25eb5810355dd2f7a9c4fe1ead10c60bee91a8ad8d6120745483"
     },
     {
       "path": "files/005928cae4812063730b-admission.rs",
@@ -4083,7 +4083,7 @@
     },
     {
       "path": "files/3dfb149490532d65261c-02b-architecture.md",
-      "sha256": "373cc57dcd44e45707598b01b65ab82a1013d271b4ce2c76b7cba83969e7b795"
+      "sha256": "5820547290e2f6a16245fc28c15c5bbbab0365be3f7de050e906a1738aba3284"
     },
     {
       "path": "files/3e18a917547754fe4792-routed_execution.rs",
@@ -4274,6 +4274,10 @@
       "sha256": "2fae8abc9ddd14d7e42260597fd504ba5cd740d81aa567f562c76b1a4a999a1a"
     },
     {
+      "path": "files/48ea59002d3cdaa2-execution-flow.mmd",
+      "sha256": "3aa408b34694cc984b44012b8296bc43e8a880d37e82adf31e1b22e4bb7e00da"
+    },
+    {
       "path": "files/492fbd3cdfec4745031b-19-adapters.md",
       "sha256": "170dc4dd006d62b94e17659ec0c27330ea2b20ffd2eb3d9c9cb7ce5835fa14e2"
     },
@@ -4316,6 +4320,10 @@
     {
       "path": "files/4b40901678cd446107ed-auth.rs",
       "sha256": "12a99946c3dc06c661f829b2ea23ee896b2afb30c80758a54892141cd729c671"
+    },
+    {
+      "path": "files/4b4d74900bbf0e79-run-state.mmd",
+      "sha256": "4299f5978b1e230f4d479b4a3f21ae583627d490ecdbc18e25a48323eebbbec8"
     },
     {
       "path": "files/4c89b85d5cbc9c1d-23-verification.patch",
@@ -4626,6 +4634,10 @@
       "sha256": "f592fa80beafd19a37116fccc232ae61092ea8717caf8265f01bf3b753721b1e"
     },
     {
+      "path": "files/67f6a1cca28b8117-prepared-execution.png",
+      "sha256": "075baebeb407875ce1cd0ef27af8f28ae7860a650ac6358181704a16874e5588"
+    },
+    {
       "path": "files/68a9911a74eef8ac0c5c-connection.rs",
       "sha256": "750d846da81da884cccf1317f18a1190df72d9938272d280632ced2065a9daaa"
     },
@@ -4698,6 +4710,10 @@
       "sha256": "46e4ac371ab09de012a48a26e74588177a81b5ce0bad54afd79b91e937f12be4"
     },
     {
+      "path": "files/6c3a2b20a1dc315e-execution-flow.svg",
+      "sha256": "ac705e5a6b21a6cd83239364aa3294de5c8e1888f704be1a4bf4cd4f7dcebc05"
+    },
+    {
       "path": "files/6c47ae73131dfe07b832-resolution.rs",
       "sha256": "dbb0258c9cd00aed2a44761ac202801a727f853416cc20deb4d08dfff9d9e4a0"
     },
@@ -4724,6 +4740,10 @@
     {
       "path": "files/6eafaea5570c29831180-38-canonical-json.md",
       "sha256": "e3248f7a46572f685fd8048880b35178a3936d0c9647d2780bfe242d685fefe0"
+    },
+    {
+      "path": "files/6ec7e04108f76098-inspection-flow.png",
+      "sha256": "374952f7a07bd8f10c33269fd71a6834bd13f79cddafbecbf4760380b797fd66"
     },
     {
       "path": "files/6ecbae00eb55041a1299-response.rs",
@@ -4778,6 +4798,10 @@
       "sha256": "e50f25bd263073523382f2213725df21c4a9bc1d5ef6eca842e20de9ddba7713"
     },
     {
+      "path": "files/71ba4bde973821fb-core-dependencies.excalidraw",
+      "sha256": "36464076070ecf43e69f2ec495ad54e608f55f7048b5c19099f630584dd34f43"
+    },
+    {
       "path": "files/7213d71e780e528a92c2-41-admission.md",
       "sha256": "1f55562ed5e728916f6e4b914133efdf19ea24ac7d7b01d25377a6285df4c6f1"
     },
@@ -4828,6 +4852,10 @@
     {
       "path": "files/745e2f3f077deedcb130-model_execution.rs",
       "sha256": "6006e01454c5dbf9563bfd0d4e53123110601f40808a79c88175ca69c95abc74"
+    },
+    {
+      "path": "files/74bfbd2e4e7e3e0c-execution-flow.png",
+      "sha256": "3a2cde3636a6651a7cb276e7e069d9aba95e90fd3a0b35da4198f97ca009be11"
     },
     {
       "path": "files/753f71c18bd4f39aca4b-operations.rs",
@@ -4884,6 +4912,10 @@
     {
       "path": "files/782cbd494a42c192f9ba-09-schema.md",
       "sha256": "210213057497ff331f7d695b7c8c6cfad36489e9e44e50dc458880c0e99263a6"
+    },
+    {
+      "path": "files/7879498a15946003-inspection-flow.svg",
+      "sha256": "00d66efba2e83bcaf70366fb17b318d3ded184d69246ffdeb37e17e07905034f"
     },
     {
       "path": "files/78b7984e4dc9310e6411-report_process_consumer.rs",
@@ -4952,6 +4984,10 @@
     {
       "path": "files/7cede18643a6108cf594-runtime_registry.rs",
       "sha256": "aaf1aa4aeace627940ba371ecbc62083ea41a6edb71f1770d453421659c2996d"
+    },
+    {
+      "path": "files/7cf41a09bc3416f0-run-state.svg",
+      "sha256": "5136eaf45139d23ab3b1ccc175884616d1e0162d15f8c94e19d4e611a09a0b6c"
     },
     {
       "path": "files/7d0b83c59e1be2c998ba-bedrock.rs",
@@ -5222,6 +5258,10 @@
       "sha256": "6532b49faf93c18183f3a3be927c499ee5dfd09e9e694f43076b493d189f2f79"
     },
     {
+      "path": "files/8e3bb3ff589af1f4-core-dependencies.mmd",
+      "sha256": "1f2c3333d61a2338e2740be7db2bd8ffc3b18137822650e3d2d8be290850d01e"
+    },
+    {
       "path": "files/8e56401dab9ff86ef3ba-runtime.rs",
       "sha256": "68bc92e540dc56b7fc74feef694f64bd77d2b6fed302b9d241c9ea3d512c99bc"
     },
@@ -5312,6 +5352,10 @@
     {
       "path": "files/9444d7e880ec1aefb4ed-bedrock_consumer.rs",
       "sha256": "4d5de32ea03ac2efb1d0717527142eb9f4b3f08ef5492349ec8e9c5f1ac0ccf1"
+    },
+    {
+      "path": "files/94878061f02f3dcc-prepared-execution.svg",
+      "sha256": "1b87517e93d7eda1908ba9b2182e095bafb574891c6ffabd1b0e1b8584a9fbd1"
     },
     {
       "path": "files/949f193a066b9b7b8610-36-release.md",
@@ -5750,6 +5794,10 @@
       "sha256": "371840aa5a5b9c8123b02fa4312aba7e670f514d0edabbbbb60fd3440bdb52c3"
     },
     {
+      "path": "files/b573fa80d3f46bf6-run-state.excalidraw",
+      "sha256": "f9e0f7aa2f51dd6f6572f2402d2be2bafb94915d02c724ed79eb273c23135b57"
+    },
+    {
       "path": "files/b58ba46d1cdedc5ca2e9-agent_runtime.rs",
       "sha256": "72fcf8b6f4b128e97c7a17a28e989278bc5ae9005a8bb2285cb5ca8b88e44e58"
     },
@@ -5842,6 +5890,10 @@
       "sha256": "30c0aa69c55c00825fe4186ea4f19ebb467774558c89620f5a53f0dd7d88b187"
     },
     {
+      "path": "files/bcff846a782fb820-prepared-execution.mmd",
+      "sha256": "50873e082bae4a450184f94084f047fa385aec1bf2a7482b3ad3e89eb56e488a"
+    },
+    {
       "path": "files/bd65bceb6bd614fb7949-prepared_step.rs",
       "sha256": "68953e5fbda9d4d08de16f8c0775de5189516d2848bbcfea215d5ea9ee675db3"
     },
@@ -5888,6 +5940,10 @@
     {
       "path": "files/c01e72209e507207-36-release.patch",
       "sha256": "5404b527a7573e9f1d25a0a1486edc7c2e03eda628cfdf4259946609790ffacd"
+    },
+    {
+      "path": "files/c026253331656039-inspection-flow.mmd",
+      "sha256": "7d0ce92a7f7f7114f1cbfd1f475dc2d10c0c8e2c5e9acbbff4dbce2447503d20"
     },
     {
       "path": "files/c03edd133947242f0d0a-LICENSE",
@@ -5954,6 +6010,10 @@
       "sha256": "bc952fac6fc1bcf6f469386121dc5390c785a562cc3360dfd96119fcd7ee0993"
     },
     {
+      "path": "files/c581c8e13ef10c42-core-dependencies.png",
+      "sha256": "a3c49304bbfbf99162390794508eba7ed1b79ddc9364fe6dcff79297f8b463bf"
+    },
+    {
       "path": "files/c60cd086c168f2e7fb09-hook_state.rs",
       "sha256": "7c5d935f6dec64d05c16637ef1ec3cc3e7902a00b10b86b84c605f7718807719"
     },
@@ -5970,6 +6030,10 @@
       "sha256": "821c801ff02eb6f7f46feb0d34c6442e347012039afd6f9227e2a6564354b561"
     },
     {
+      "path": "files/c6f7e5e719e2e435-inspection-flow.excalidraw",
+      "sha256": "957833da4f0ec6f693b3cb1160b11e13932bc5c289d789c09669a05bf2b80948"
+    },
+    {
       "path": "files/c723d0a5fb6eabdb2d3d-LICENSE",
       "sha256": "821c801ff02eb6f7f46feb0d34c6442e347012039afd6f9227e2a6564354b561"
     },
@@ -5980,6 +6044,10 @@
     {
       "path": "files/c7652f184504ec1eef29-anthropic.md",
       "sha256": "f541fcd643b703add06c874c60a31854f388768e9bf5d76e5c93990de4a1329a"
+    },
+    {
+      "path": "files/c792db9cf83d4adc-execution-flow.excalidraw",
+      "sha256": "c1115c4e916e25741d07bafb306acd9c8dec702a8a88fd048d9edbfa7311d019"
     },
     {
       "path": "files/c7da1f5626b23d283b99-Cargo.toml",
@@ -6086,6 +6154,10 @@
       "sha256": "b70a2fe23b76b9adf23ee4578500428b4ba0fbab733d0bc9f398dfc9327bfce6"
     },
     {
+      "path": "files/cf66ab75140309c4-run-state.png",
+      "sha256": "36c68a8e468ad120a783171e46e0bafa6423c3ade1d9f1058e7d32058eac2bea"
+    },
+    {
       "path": "files/cfa7d48d67b1e78244b9-state.rs",
       "sha256": "bca2e9addcb4000d3b322be02a28c4a04ea6611bbfd32bd2931a965a8ff87fcc"
     },
@@ -6172,6 +6244,10 @@
     {
       "path": "files/d53c7092caedb4c847b1-51-azure-schema.md",
       "sha256": "c6662600563f5fa15065bbba6ab6d8b00320f38af48fdf28d902e275648a55ee"
+    },
+    {
+      "path": "files/d572056d57035f26-core-dependencies.svg",
+      "sha256": "6a3ee3ede75af1f31e7e17b25083094703daf76fe9818457df06cdc3fde45746"
     },
     {
       "path": "files/d5b60fe1ddb476c26152-Cargo.toml",
@@ -6620,6 +6696,10 @@
     {
       "path": "files/f629e1c8bca6852d-57-mcp-repair.patch",
       "sha256": "aa920346382a8e12e8f789d933a0cd8af29c8222ea6a78941f388b33b34883b2"
+    },
+    {
+      "path": "files/f6959ef6502c5ee7-prepared-execution.excalidraw",
+      "sha256": "1e7c67fb85b766710c79817e40de7d77ea63b1c603abf672b6479fd225a04573"
     },
     {
       "path": "files/f6bec939185b0b27fb82-context_sources.rs",
