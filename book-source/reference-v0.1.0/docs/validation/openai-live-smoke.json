@@ -1,0 +1,26 @@
+{
+  "provider": "openai",
+  "model": "gpt-6-astra",
+  "api_contract": "responses/v1",
+  "reasoning_effort": "medium",
+  "max_output_tokens": 4096,
+  "validation_status": "live_verified",
+  "scope": "pre-release smoke checks for this configuration",
+  "production_support_claim": false,
+  "native_json_schema": {
+    "checked_at_ms": 1789309046133,
+    "passed": true,
+    "reported_model_id": "gpt-6-astra",
+    "reported_model_version": null
+  },
+  "agent_tool_loop": {
+    "passed": true,
+    "model_posts": 2,
+    "metadata_gets": 2,
+    "tool_executions": 1,
+    "duplicate_start_extra_calls": 0,
+    "sqlite_reopen_verified": true,
+    "stored_tool_result_verified": true,
+    "system_workspace_injection_verified": true
+  }
+}

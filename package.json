@@ -1,0 +1,31 @@
+{
+  "name": "wickle-webbook",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "scripts": {
+    "content": "node scripts/build-content.mjs",
+    "dev": "npm run content && vite --host 127.0.0.1",
+    "build": "npm run content && vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "node --test tests/*.test.mjs",
+    "test:browser": "playwright test",
+    "deploy:plan": "node scripts/deploy-storage.mjs",
+    "deploy:storage": "node scripts/deploy-storage.mjs --apply",
+    "package:pages": "npm run build && node scripts/package-pages.mjs",
+    "import:book": "node scripts/import-book.mjs"
+  },
+  "dependencies": {
+    "dompurify": "3.4.16",
+    "github-slugger": "2.0.0",
+    "highlight.js": "11.12.0",
+    "marked": "15.0.12",
+    "vite": "6.4.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0"
+  }
+}

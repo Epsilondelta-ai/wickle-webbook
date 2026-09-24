@@ -1,0 +1,1970 @@
+diff --git a/.env.example b/.env.example
+new file mode 100644
+index 0000000000000000000000000000000000000000..c6f9b4ad975881447d1954478ef5b7d02a357a71
+--- /dev/null
++++ b/.env.example
+@@ -0,0 +1,92 @@
++# Provider setup for Host applications and future live integration tests.
++# See docs/provider-setup.md. Wickle core does not load this file.
++# Provider adapters and the live-test runner are not implemented yet.
++# Fill only the providers you intend to test. Never commit the resulting .env.
++
++# Future live-test opt-in: comma-separated provider keys; empty selects none.
++# Keys: openai,azure_openai,anthropic,bedrock_anthropic,google_ai,vertex_gemini,xai
++WICKLE_LIVE_PROVIDERS=
++
++# MODEL_ID is the provider identifier; MODEL_VERSION is verified release metadata.
++# Do not invent a version or assume an alias/deployment is immutable.
++# Leave unknown versions blank for preparation; resolve them before pinned tests.
++
++# OpenAI GPT
++OPENAI_API_KEY=
++OPENAI_BASE_URL=https://api.openai.com/v1
++OPENAI_MODEL_ID=
++OPENAI_MODEL_VERSION=
++# Optional headers, only when needed for the selected key:
++# OPENAI_ORG_ID=
++# OPENAI_PROJECT_ID=
++
++# Azure Foundry OpenAI GPT
++# Resource origin only, e.g. https://<resource>.openai.azure.com
++# The v1 request base appends /openai/v1/ to this origin.
++AZURE_OPENAI_ENDPOINT=
++AZURE_OPENAI_DEPLOYMENT=
++AZURE_OPENAI_MODEL_ID=
++AZURE_OPENAI_MODEL_VERSION=
++AZURE_OPENAI_API_MODE=v1
++# Only dated API mode uses an api-version query parameter; leave empty for v1.
++AZURE_OPENAI_API_VERSION=
++# api_key or entra; choose exactly one authentication method.
++AZURE_OPENAI_AUTH_MODE=api_key
++AZURE_OPENAI_API_KEY=
++# Entra mode: use Azure CLI/managed identity, or configure a service principal.
++# AZURE_TENANT_ID=
++# AZURE_CLIENT_ID=
++# AZURE_CLIENT_SECRET=
++# AZURE_OPENAI_ENTRA_SCOPE=https://ai.azure.com/.default
++
++# Anthropic Claude (direct API)
++ANTHROPIC_API_KEY=
++ANTHROPIC_BASE_URL=https://api.anthropic.com
++ANTHROPIC_API_VERSION=2023-06-01
++ANTHROPIC_MODEL_ID=
++ANTHROPIC_MODEL_VERSION=
++# Required for an identity-linked key that is not scoped to one workspace:
++# ANTHROPIC_WORKSPACE_ID=
++
++# AWS Bedrock Claude, using the AWS SDK credential provider chain.
++# Set the invocation/source region explicitly for a selected Bedrock test.
++AWS_REGION=
++BEDROCK_MODEL_ID=
++BEDROCK_MODEL_VERSION=
++# Optional routing target: inference profile ID or ARN; underlying model above.
++# BEDROCK_INFERENCE_PROFILE_ID=
++# Optional endpoint override; otherwise the SDK resolves it from AWS_REGION.
++# BEDROCK_ENDPOINT=
++# Select a named profile, or leave unset for the default/cloud identity chain.
++# AWS_PROFILE=
++# Optional temporary credentials instead of a profile/cloud identity:
++# AWS_ACCESS_KEY_ID=
++# AWS_SECRET_ACCESS_KEY=
++# AWS_SESSION_TOKEN=
++
++# Google AI Studio / Gemini API (API-key authentication)
++GEMINI_API_KEY=
++GEMINI_BASE_URL=https://generativelanguage.googleapis.com
++GEMINI_API_VERSION=v1
++GEMINI_MODEL_ID=
++GEMINI_MODEL_VERSION=
++
++# Google Cloud Vertex AI Gemini (Application Default Credentials)
++GOOGLE_CLOUD_PROJECT=
++GOOGLE_CLOUD_LOCATION=
++VERTEX_API_VERSION=v1
++VERTEX_MODEL_ID=
++VERTEX_MODEL_VERSION=
++# Optional endpoint origin; normally derived from the chosen location.
++# VERTEX_ENDPOINT=
++# Only set for a specific credential/configuration file. Leave unset for local
++# gcloud ADC or an attached cloud identity. Keep the file outside this repository.
++# GOOGLE_APPLICATION_CREDENTIALS=
++# Optional quota project override for ADC:
++# GOOGLE_CLOUD_QUOTA_PROJECT=
++
++# xAI Grok
++XAI_API_KEY=
++XAI_BASE_URL=https://api.x.ai/v1
++XAI_MODEL_ID=
++XAI_MODEL_VERSION=
+diff --git a/.gitignore b/.gitignore
+index a44d20e9daec6abf52e1bc91a9a1c8b934bf4016..89e082cdc886102b2ef28c81f8ddadfd42f0b52d 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -1,2 +1,5 @@
+ .DS_Store
+ /target/
++.env
++.env.*
++!.env.example
+diff --git a/crates/wickle/src/error.rs b/crates/wickle/src/error.rs
+index ce825ed8b42b21e47768e4299fb377e51cf95def..b44f16a37b344b9e4a72e05497059ec4b1f5f4fc 100644
+--- a/crates/wickle/src/error.rs
++++ b/crates/wickle/src/error.rs
+@@ -5,6 +5,16 @@ use serde::{Deserialize, Serialize};
+ #[serde(rename_all = "snake_case")]
+ #[non_exhaustive]
+ pub enum ErrorCode {
++    /// Current policy or exact owner scope denies access.
++    AccessDenied,
++    /// The trusted policy failed or panicked; no permission was granted.
++    PolicyUnavailable,
++    /// The call's finite deadline elapsed.
++    DeadlineExceeded,
++    /// The current operation was cancelled.
++    Cancelled,
++    /// The Host has not supplied the required asynchronous runtime.
++    RuntimeUnavailable,
+     /// Input is not unambiguous, finite JSON.
+     InvalidJson,
+     /// Input does not match a data contract.
+diff --git a/crates/wickle/src/lib.rs b/crates/wickle/src/lib.rs
+index f9808c7cc698aa037a49204e7cbdad0e9ef78a4d..d4d7b10c637f63a07a3184f650a1374a5491e04d 100644
+--- a/crates/wickle/src/lib.rs
++++ b/crates/wickle/src/lib.rs
+@@ -15,10 +15,18 @@ mod context;
+ mod error;
+ mod message;
+ mod model;
++mod policy;
+ mod profile;
+ mod resolution;
+ mod run;
+ mod serialization;
++mod views;
++
++pub use policy::{
++    ApprovalChallenge, Guarded, PolicyAction, PolicyContext, PolicyDecision, PolicyGate,
++    PolicyPort, PolicyRequest, ToolPolicyInput,
++};
++pub use views::{ArtifactView, EventView, RunView};
+ 
+ pub use context::{
+     ExecutionContext, ExecutionContextData, PortFuture, PortStream, Scope, SystemInputs,
+diff --git a/crates/wickle/src/policy.rs b/crates/wickle/src/policy.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..9c4676cb31150529a60e5815914d14e6c5e102fd
+--- /dev/null
++++ b/crates/wickle/src/policy.rs
+@@ -0,0 +1,299 @@
++use std::{fmt, future::Future, panic::AssertUnwindSafe, sync::Arc, time::Duration};
++
++use futures_util::FutureExt;
++use serde::{Deserialize, Serialize};
++use tokio::time::Instant;
++use tokio_util::sync::CancellationToken;
++
++use crate::{
++    ContractError, ErrorCode, ExecutionContext, Id, JsonDigest, JsonObject, ModelPurpose,
++    PortFuture, Scope, VersionedRef, serialization::data_digest,
++};
++
++/// Final, bound tool inputs visible to the trusted policy implementation.
++/// Serialized values require protected storage and must not enter model/UI logs.
++#[derive(Clone, PartialEq, Serialize)]
++pub struct ToolPolicyInput {
++    /// Core call identity.
++    pub call_id: Id,
++    /// Exact tool identity and version.
++    pub tool: VersionedRef,
++    /// Pinned descriptor identity.
++    pub descriptor_digest: JsonDigest,
++    /// Binding identity computed by the trusted input binder.
++    pub binding_digest: JsonDigest,
++    execution_args: JsonObject,
++}
++
++impl ToolPolicyInput {
++    /// Own the binder's final arguments. The gate never invents missing IDs.
++    pub fn new(
++        call_id: Id,
++        tool: VersionedRef,
++        descriptor_digest: JsonDigest,
++        binding_digest: JsonDigest,
++        execution_args: JsonObject,
++    ) -> Self {
++        Self {
++            call_id,
++            tool,
++            descriptor_digest,
++            binding_digest,
++            execution_args,
++        }
++    }
++    /// Inspect the full arguments to check actual target existence and ownership.
++    pub fn execution_args(&self) -> &JsonObject {
++        &self.execution_args
++    }
++}
++
++impl fmt::Debug for ToolPolicyInput {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_struct("ToolPolicyInput")
++            .field("call_id", &self.call_id)
++            .field("tool", &self.tool)
++            .field("descriptor_digest", &self.descriptor_digest)
++            .field("binding_digest", &self.binding_digest)
++            .field("execution_args", &"<redacted>")
++            .finish()
++    }
++}
++
++/// Operation being authorized; data access and protected-detail access differ.
++#[derive(Debug, Clone, PartialEq, Serialize)]
++#[serde(tag = "action", rename_all = "snake_case")]
++pub enum PolicyAction {
++    /// Admit a new run.
++    StartRun {},
++    /// Read minimal run metadata.
++    ReadRun {},
++    /// Read the protected checkpoint, separately from the public view.
++    ReadRunDetails {},
++    /// Resume a recorded wait or interruption.
++    ResumeRun {
++        /// Idempotent command identity.
++        command_id: Id,
++    },
++    /// Request cancellation.
++    CancelRun {},
++    /// Read artifact data/metadata.
++    ReadArtifact {},
++    /// Write an artifact in the owning scope.
++    WriteArtifact {},
++    /// Read minimal event metadata.
++    ReadEvents {},
++    /// Read a protected record referenced by an event or checkpoint.
++    ReadRecord {},
++    /// Use scoped data in model context.
++    UseContext {},
++    /// Send input to a selected model route.
++    InvokeModel {
++        /// Immutable selected route identity.
++        route_digest: JsonDigest,
++        /// Purpose being authorized.
++        purpose: ModelPurpose,
++    },
++    /// Dispatch one tool using final validated inputs.
++    ExecuteTool {
++        /// Final inputs, including system-owned parameters.
++        input: ToolPolicyInput,
++    },
++}
++
++/// An operation on an authoritative resource identity.
++/// Obtain owner_scope from trusted stored metadata, not a caller's claimed scope.
++#[derive(Debug, Clone, PartialEq, Serialize)]
++pub struct PolicyRequest {
++    /// Stored owner scope; user_id=None is not a wildcard.
++    pub owner_scope: Scope,
++    /// Run, artifact, event stream, record, context, or tool resource identity.
++    pub resource_id: Id,
++    /// Exact proposed action.
++    pub action: PolicyAction,
++}
++
++impl PolicyRequest {
++    /// Identity of the full proposed action and owning scope, including tool inputs.
++    /// It excludes the approving principal so a new authorized reviewer can act.
++    pub fn digest(&self) -> JsonDigest {
++        data_digest(self)
++    }
++}
++
++/// Current authenticated policy context, without the run's whole system-input map.
++pub struct PolicyContext<'a> {
++    /// Current authenticated resource scope.
++    pub scope: &'a Scope,
++    /// Current principal, distinct from resource scope and original tool inputs.
++    pub principal_ref: &'a Id,
++    /// Current grant reference; the Host checks membership and revocation.
++    pub capability_grant_ref: &'a Id,
++    /// Cooperative cancellation signal.
++    pub cancellation: &'a CancellationToken,
++    /// Effective policy deadline on the monotonic clock.
++    pub deadline: Instant,
++}
++
++/// Host authorization decision. A reason is an informational code, not a grant.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(tag = "decision", rename_all = "snake_case", deny_unknown_fields)]
++pub enum PolicyDecision {
++    /// This exact action is currently allowed.
++    Allow {},
++    /// The action is denied.
++    Deny {
++        /// Safe reason code, without bound values or SDK error text.
++        reason: Id,
++    },
++    /// The action requires an approval flow before it can be performed.
++    RequireApproval {
++        /// Safe reason code.
++        reason: Id,
++    },
++}
++
++impl PolicyDecision {
++    /// Intersect a Host decision with a restriction; an allow never removes a denial
++    /// or an approval requirement. Existing Host reasons take precedence.
++    pub fn restrict(self, restriction: Self) -> Self {
++        match (self, restriction) {
++            (denied @ Self::Deny { .. }, _) | (_, denied @ Self::Deny { .. }) => denied,
++            (approval @ Self::RequireApproval { .. }, _)
++            | (_, approval @ Self::RequireApproval { .. }) => approval,
++            _ => Self::Allow {},
++        }
++    }
++}
++
++/// Trusted Host policy. Implement actual resource/membership/FK checks here.
++pub trait PolicyPort: Send + Sync {
++    /// Check the current grant against the exact bound action without performing it.
++    fn authorize<'a>(
++        &'a self,
++        request: &'a PolicyRequest,
++        context: PolicyContext<'a>,
++    ) -> PortFuture<'a, PolicyDecision>;
++}
++
++/// An approval request bound to an exact action, not a reusable permission token.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
++pub struct ApprovalChallenge {
++    /// Scope whose resource will be affected.
++    pub scope: Scope,
++    /// Resource identity.
++    pub resource_id: Id,
++    /// Digest includes final tool input, descriptor/version, and scope.
++    pub request_digest: JsonDigest,
++    /// Safe reason code for the Host's approval UI.
++    pub reason: Id,
++}
++
++/// Result of a guarded operation. Approval-required never invokes the operation.
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub enum Guarded<T> {
++    /// Operation completed after a current authorization check.
++    Completed(T),
++    /// No operation was invoked; the Host/runtime must handle this approval request.
++    ApprovalRequired(ApprovalChallenge),
++}
++
++/// Current authorization with exact scope matching, timeout, and cancellation.
++/// This does not authenticate caller-supplied JSON or provide a sandbox for Host code.
++pub struct PolicyGate {
++    policy: Arc<dyn PolicyPort>,
++    timeout: Duration,
++}
++
++impl PolicyGate {
++    /// Configure a finite, positive policy timeout without creating a runtime.
++    pub fn new(policy: Arc<dyn PolicyPort>, timeout: Duration) -> Result<Self, ContractError> {
++        if timeout.is_zero() || Instant::now().checked_add(timeout).is_none() {
++            return Err(ContractError::new(
++                ErrorCode::InvalidContract,
++                "policy.timeout",
++            ));
++        }
++        Ok(Self { policy, timeout })
++    }
++
++    /// Check the current Host decision. Every call rechecks policy; permits are not cached.
++    pub async fn check(
++        &self,
++        request: &PolicyRequest,
++        context: &ExecutionContext,
++        deadline: Option<Instant>,
++        restriction: Option<PolicyDecision>,
++    ) -> Result<PolicyDecision, ContractError> {
++        if request.owner_scope != context.data.scope {
++            return Err(ContractError::new(ErrorCode::AccessDenied, "scope"));
++        }
++        if context.cancellation.is_cancelled() {
++            return Err(ContractError::new(ErrorCode::Cancelled, "policy"));
++        }
++        if tokio::runtime::Handle::try_current().is_err() {
++            return Err(ContractError::new(ErrorCode::RuntimeUnavailable, "policy"));
++        }
++        let now = Instant::now();
++        let policy_deadline = now
++            .checked_add(self.timeout)
++            .ok_or_else(|| ContractError::new(ErrorCode::InvalidContract, "policy.timeout"))?;
++        let effective = deadline.map_or(policy_deadline, |d| d.min(policy_deadline));
++        if effective <= now {
++            return Err(ContractError::new(ErrorCode::DeadlineExceeded, "policy"));
++        }
++        let decision = AssertUnwindSafe(async {
++            tokio::select! {
++                biased;
++                _ = context.cancellation.cancelled() => Err(ContractError::new(ErrorCode::Cancelled, "policy")),
++                _ = tokio::time::sleep_until(effective) => Err(ContractError::new(ErrorCode::DeadlineExceeded, "policy")),
++                result = self.policy.authorize(request, PolicyContext {
++                    scope: &context.data.scope, principal_ref: &context.data.principal_ref,
++                    capability_grant_ref: &context.data.capability_grant_ref,
++                    cancellation: &context.cancellation, deadline: effective,
++                }) => result.map_err(|_| ContractError::new(ErrorCode::PolicyUnavailable, "policy")),
++            }
++        }).catch_unwind().await.map_err(|_| ContractError::new(ErrorCode::PolicyUnavailable, "policy"))??;
++        if context.cancellation.is_cancelled() {
++            return Err(ContractError::new(ErrorCode::Cancelled, "policy"));
++        }
++        if Instant::now() >= effective {
++            return Err(ContractError::new(ErrorCode::DeadlineExceeded, "policy"));
++        }
++        Ok(match restriction {
++            Some(other) => decision.restrict(other),
++            None => decision,
++        })
++    }
++
++    /// Invoke a closure only after current policy allows it. Future construction is
++    /// also delayed until authorization. The operation owns its I/O cancellation and
++    /// effect reconciliation; dropping a future is not treated as external rollback.
++    pub async fn guard<T, F, Fut>(
++        &self,
++        request: &PolicyRequest,
++        context: &ExecutionContext,
++        deadline: Option<Instant>,
++        restriction: Option<PolicyDecision>,
++        operation: F,
++    ) -> Result<Guarded<T>, ContractError>
++    where
++        F: FnOnce() -> Fut,
++        Fut: Future<Output = Result<T, ContractError>>,
++    {
++        match self.check(request, context, deadline, restriction).await? {
++            PolicyDecision::Allow {} => operation().await.map(Guarded::Completed),
++            PolicyDecision::Deny { .. } => {
++                Err(ContractError::new(ErrorCode::AccessDenied, "policy"))
++            }
++            PolicyDecision::RequireApproval { reason } => {
++                Ok(Guarded::ApprovalRequired(ApprovalChallenge {
++                    scope: request.owner_scope.clone(),
++                    resource_id: request.resource_id.clone(),
++                    request_digest: request.digest(),
++                    reason,
++                }))
++            }
++        }
++    }
++}
+diff --git a/crates/wickle/src/views.rs b/crates/wickle/src/views.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..27c92f27a98eb731cf9f9f309e23150dca8d3e7b
+--- /dev/null
++++ b/crates/wickle/src/views.rs
+@@ -0,0 +1,157 @@
++use crate::{
++    ArtifactRef, BudgetUsage, ContractError, ExecutionContext, Guarded, Id, PolicyAction,
++    PolicyGate, PolicyRequest, RunEvent, RunEventPayload, RunPhase, RunSnapshot, RunStatus,
++};
++use serde::Serialize;
++use std::num::NonZeroU64;
++use tokio::time::Instant;
++
++/// Minimal run metadata. Protected records and outcome internals are not included.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
++pub struct RunView {
++    /// Run identity.
++    pub run_id: Id,
++    /// Session identity.
++    pub session_id: Id,
++    /// Current status.
++    pub status: RunStatus,
++    /// Current phase.
++    pub phase: RunPhase,
++    /// Snapshot revision.
++    pub revision: u64,
++    /// Saved usage, not inferred provider consumption.
++    pub usage: BudgetUsage,
++}
++
++/// Authorized artifact metadata without an embedded storage location or payload.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
++pub struct ArtifactView {
++    /// Artifact identity.
++    pub artifact_id: Id,
++    /// Stored media type.
++    pub media_type: Id,
++    /// Original byte size.
++    pub size_bytes: u64,
++    /// Store-defined content hash.
++    pub content_hash: Id,
++}
++
++/// Event metadata without protected record references from its payload.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
++pub struct EventView {
++    /// Event identity.
++    pub event_id: Id,
++    /// Owning run.
++    pub run_id: Id,
++    /// Owning session.
++    pub session_id: Id,
++    /// Durable sequence.
++    pub seq: NonZeroU64,
++    /// UTC milliseconds since Unix epoch.
++    pub timestamp_ms: i64,
++    /// Durable event kind.
++    pub event_type: &'static str,
++}
++
++impl PolicyGate {
++    /// Authorize using the stored run scope and select public fields explicitly.
++    pub async fn run_view(
++        &self,
++        snapshot: &RunSnapshot,
++        context: &ExecutionContext,
++        deadline: Option<Instant>,
++    ) -> Result<Guarded<RunView>, ContractError> {
++        let request = PolicyRequest {
++            owner_scope: snapshot.scope.clone(),
++            resource_id: snapshot.run_id.clone(),
++            action: PolicyAction::ReadRun {},
++        };
++        self.guard(&request, context, deadline, None, || async {
++            Ok(RunView {
++                run_id: snapshot.run_id.clone(),
++                session_id: snapshot.request.session_id.clone(),
++                status: snapshot.status,
++                phase: snapshot.phase,
++                revision: snapshot.revision,
++                usage: snapshot.usage.clone(),
++            })
++        })
++        .await
++    }
++
++    /// Read a full protected checkpoint only through the distinct details action.
++    pub async fn run_details(
++        &self,
++        snapshot: &RunSnapshot,
++        context: &ExecutionContext,
++        deadline: Option<Instant>,
++    ) -> Result<Guarded<RunSnapshot>, ContractError> {
++        let request = PolicyRequest {
++            owner_scope: snapshot.scope.clone(),
++            resource_id: snapshot.run_id.clone(),
++            action: PolicyAction::ReadRunDetails {},
++        };
++        self.guard(&request, context, deadline, None, || async {
++            Ok(snapshot.clone())
++        })
++        .await
++    }
++
++    /// Authorize against authoritative artifact metadata before selecting its view.
++    pub async fn artifact_view(
++        &self,
++        artifact: &ArtifactRef,
++        context: &ExecutionContext,
++        deadline: Option<Instant>,
++    ) -> Result<Guarded<ArtifactView>, ContractError> {
++        let request = PolicyRequest {
++            owner_scope: artifact.scope.clone(),
++            resource_id: artifact.artifact_id.clone(),
++            action: PolicyAction::ReadArtifact {},
++        };
++        self.guard(&request, context, deadline, None, || async {
++            Ok(ArtifactView {
++                artifact_id: artifact.artifact_id.clone(),
++                media_type: artifact.media_type.clone(),
++                size_bytes: artifact.size_bytes,
++                content_hash: artifact.content_hash.clone(),
++            })
++        })
++        .await
++    }
++
++    /// Authorize a stored event without publishing its protected payload references.
++    pub async fn event_view(
++        &self,
++        event: &RunEvent,
++        context: &ExecutionContext,
++        deadline: Option<Instant>,
++    ) -> Result<Guarded<EventView>, ContractError> {
++        let request = PolicyRequest {
++            owner_scope: event.scope.clone(),
++            resource_id: event.run_id.clone(),
++            action: PolicyAction::ReadEvents {},
++        };
++        self.guard(&request, context, deadline, None, || async {
++            let event_type = match &event.payload {
++                RunEventPayload::RunStarted { .. } => "run.started",
++                RunEventPayload::ToolPlanned { .. } => "tool.planned",
++                RunEventPayload::ToolSettled { .. } => "tool.settled",
++                RunEventPayload::VerificationCompleted { .. } => "verification.completed",
++                RunEventPayload::RunWaiting { .. } => "run.waiting",
++                RunEventPayload::RunResumed { .. } => "run.resumed",
++                RunEventPayload::RunFinished { .. } => "run.finished",
++                RunEventPayload::ModelRouteSelected { .. } => "model.route_selected",
++            };
++            Ok(EventView {
++                event_id: event.event_id.clone(),
++                run_id: event.run_id.clone(),
++                session_id: event.session_id.clone(),
++                seq: event.seq,
++                timestamp_ms: event.timestamp_ms,
++                event_type,
++            })
++        })
++        .await
++    }
++}
+diff --git a/crates/wickle/tests/policy.rs b/crates/wickle/tests/policy.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..6932d44bbcb93b9e002ff3e6d801fb8c45a09df8
+--- /dev/null
++++ b/crates/wickle/tests/policy.rs
+@@ -0,0 +1,892 @@
++//! Authorization behavior with injected Host policies and protected stored records.
++
++use std::{
++    collections::{BTreeMap, BTreeSet},
++    future::pending,
++    num::NonZeroU64,
++    sync::{
++        Arc, Mutex,
++        atomic::{AtomicUsize, Ordering},
++    },
++    time::Duration,
++};
++
++use serde_json::{Value, json};
++use tokio::time::Instant;
++use tokio_util::sync::CancellationToken;
++use wickle::*;
++
++fn id(value: &str) -> Id {
++    Id::new(value).unwrap()
++}
++
++fn digest(value: &str) -> JsonDigest {
++    canonical_digest(&json!(value))
++}
++
++fn scope() -> Scope {
++    Scope {
++        tenant_id: id("tenant"),
++        workspace_id: id("workspace"),
++        user_id: None,
++    }
++}
++
++fn context(owner: Scope) -> ExecutionContext {
++    ExecutionContext::new(
++        ExecutionContextData {
++            scope: owner,
++            principal_ref: id("originator"),
++            capability_grant_ref: id("member-grant"),
++            trace_context: None,
++            system_inputs: Some(SystemInputs::new(BTreeMap::from([(
++                "private_host_value".into(),
++                json!("protected-host-value"),
++            )]))),
++        },
++        CancellationToken::new(),
++    )
++}
++
++fn request(action: PolicyAction) -> PolicyRequest {
++    PolicyRequest {
++        owner_scope: scope(),
++        resource_id: id("run"),
++        action,
++    }
++}
++
++#[derive(Clone)]
++enum Behavior {
++    Decision(PolicyDecision),
++    Error,
++    PanicBeforeFuture,
++    PanicInFuture,
++    Pending,
++    CancelThenAllow,
++}
++
++#[derive(Clone)]
++struct Observed {
++    request: PolicyRequest,
++    scope: Scope,
++    principal: Id,
++    grant: Id,
++}
++
++struct HostPolicy {
++    behavior: Mutex<Behavior>,
++    calls: AtomicUsize,
++    observed: Mutex<Vec<Observed>>,
++}
++
++impl HostPolicy {
++    fn new(behavior: Behavior) -> Arc<Self> {
++        Arc::new(Self {
++            behavior: Mutex::new(behavior),
++            calls: AtomicUsize::new(0),
++            observed: Mutex::new(Vec::new()),
++        })
++    }
++
++    fn gate(self: &Arc<Self>) -> PolicyGate {
++        PolicyGate::new(self.clone(), Duration::from_millis(50)).unwrap()
++    }
++}
++
++impl PolicyPort for HostPolicy {
++    fn authorize<'a>(
++        &'a self,
++        request: &'a PolicyRequest,
++        context: PolicyContext<'a>,
++    ) -> PortFuture<'a, PolicyDecision> {
++        self.calls.fetch_add(1, Ordering::SeqCst);
++        self.observed.lock().unwrap().push(Observed {
++            request: request.clone(),
++            scope: context.scope.clone(),
++            principal: context.principal_ref.clone(),
++            grant: context.capability_grant_ref.clone(),
++        });
++        let behavior = self.behavior.lock().unwrap().clone();
++        if matches!(behavior, Behavior::PanicBeforeFuture) {
++            panic!("policy callback panicked before returning a future");
++        }
++        Box::pin(async move {
++            match behavior {
++                Behavior::Decision(decision) => Ok(decision),
++                Behavior::Error => Err(ContractError::new(
++                    ErrorCode::InvalidContract,
++                    "private-policy-diagnostic",
++                )),
++                Behavior::PanicInFuture => panic!("policy future panicked"),
++                Behavior::Pending => pending().await,
++                Behavior::CancelThenAllow => {
++                    context.cancellation.cancel();
++                    Ok(PolicyDecision::Allow {})
++                }
++                Behavior::PanicBeforeFuture => unreachable!(),
++            }
++        })
++    }
++}
++
++#[derive(Default)]
++struct OperationCounts {
++    constructed: AtomicUsize,
++    executed: AtomicUsize,
++}
++
++impl OperationCounts {
++    async fn guarded(
++        &self,
++        gate: &PolicyGate,
++        request: &PolicyRequest,
++        context: &ExecutionContext,
++        deadline: Option<Instant>,
++        restriction: Option<PolicyDecision>,
++    ) -> Result<Guarded<u32>, ContractError> {
++        gate.guard(request, context, deadline, restriction, || {
++            self.constructed.fetch_add(1, Ordering::SeqCst);
++            async {
++                self.executed.fetch_add(1, Ordering::SeqCst);
++                Ok(42)
++            }
++        })
++        .await
++    }
++
++    fn assert_calls(&self, expected: usize) {
++        assert_eq!(self.constructed.load(Ordering::SeqCst), expected);
++        assert_eq!(self.executed.load(Ordering::SeqCst), expected);
++    }
++}
++
++#[tokio::test]
++async fn every_control_boundary_requires_exact_tenant_workspace_and_user_scope() {
++    let policy = HostPolicy::new(Behavior::Decision(PolicyDecision::Allow {}));
++    let gate = policy.gate();
++    let actions = [
++        PolicyAction::ReadRun {},
++        PolicyAction::ReadRunDetails {},
++        PolicyAction::ReadArtifact {},
++        PolicyAction::ReadEvents {},
++        PolicyAction::ResumeRun {
++            command_id: id("resume-command"),
++        },
++        PolicyAction::CancelRun {},
++    ];
++    let calls = OperationCounts::default();
++    for owner_user in [None, Some(id("owner"))] {
++        let mut owner = scope();
++        owner.user_id = owner_user;
++        let mut foreign_tenant = owner.clone();
++        foreign_tenant.tenant_id = id("other-tenant");
++        let mut foreign_workspace = owner.clone();
++        foreign_workspace.workspace_id = id("other-workspace");
++        let mut foreign_user = owner.clone();
++        foreign_user.user_id = Some(id("other-user"));
++        let mut different_presence = owner.clone();
++        different_presence.user_id = if owner.user_id.is_some() {
++            None
++        } else {
++            Some(id("owner"))
++        };
++        for action in &actions {
++            let mut request = request(action.clone());
++            request.owner_scope = owner.clone();
++            for wrong_scope in [
++                &foreign_tenant,
++                &foreign_workspace,
++                &foreign_user,
++                &different_presence,
++            ] {
++                let error = calls
++                    .guarded(&gate, &request, &context(wrong_scope.clone()), None, None)
++                    .await
++                    .unwrap_err();
++                assert_eq!(error.code, ErrorCode::AccessDenied);
++            }
++        }
++    }
++    calls.assert_calls(0);
++    assert_eq!(policy.calls.load(Ordering::SeqCst), 0);
++    assert_eq!(
++        calls
++            .guarded(
++                &gate,
++                &request(PolicyAction::ReadRun {}),
++                &context(scope()),
++                None,
++                None,
++            )
++            .await
++            .unwrap(),
++        Guarded::Completed(42)
++    );
++    calls.assert_calls(1);
++    assert_eq!(policy.calls.load(Ordering::SeqCst), 1);
++}
++
++#[tokio::test(start_paused = true)]
++async fn denial_errors_panics_timeout_and_cancellation_do_not_construct_operations() {
++    let cases = [
++        (
++            Behavior::Decision(PolicyDecision::Deny {
++                reason: id("membership_revoked"),
++            }),
++            ErrorCode::AccessDenied,
++        ),
++        (Behavior::Error, ErrorCode::PolicyUnavailable),
++        (Behavior::PanicBeforeFuture, ErrorCode::PolicyUnavailable),
++        (Behavior::PanicInFuture, ErrorCode::PolicyUnavailable),
++        (Behavior::Pending, ErrorCode::DeadlineExceeded),
++        (Behavior::CancelThenAllow, ErrorCode::Cancelled),
++    ];
++    for (behavior, expected) in cases {
++        let policy = HostPolicy::new(behavior);
++        let calls = OperationCounts::default();
++        let error = calls
++            .guarded(
++                &policy.gate(),
++                &request(PolicyAction::CancelRun {}),
++                &context(scope()),
++                None,
++                Some(PolicyDecision::Allow {}),
++            )
++            .await
++            .unwrap_err();
++        assert_eq!(error.code, expected);
++        assert_eq!(error.path, "policy");
++        calls.assert_calls(0);
++        assert_eq!(policy.calls.load(Ordering::SeqCst), 1);
++    }
++}
++
++#[tokio::test(start_paused = true)]
++async fn preexisting_cancellation_or_deadline_prevents_even_policy_entry() {
++    let policy = HostPolicy::new(Behavior::Decision(PolicyDecision::Allow {}));
++    let gate = policy.gate();
++    let request = request(PolicyAction::StartRun {});
++    let cancelled = context(scope());
++    cancelled.cancellation.cancel();
++    let calls = OperationCounts::default();
++    assert_eq!(
++        calls
++            .guarded(&gate, &request, &cancelled, None, None)
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::Cancelled
++    );
++    assert_eq!(
++        calls
++            .guarded(
++                &gate,
++                &request,
++                &context(scope()),
++                Some(Instant::now()),
++                None,
++            )
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::DeadlineExceeded
++    );
++    calls.assert_calls(0);
++    assert_eq!(policy.calls.load(Ordering::SeqCst), 0);
++}
++
++#[tokio::test(start_paused = true)]
++async fn caller_deadline_bounds_a_pending_policy_before_its_configured_timeout() {
++    let policy = HostPolicy::new(Behavior::Pending);
++    let gate = policy.gate();
++    let start = Instant::now();
++    let calls = OperationCounts::default();
++    let error = calls
++        .guarded(
++            &gate,
++            &request(PolicyAction::ReadEvents {}),
++            &context(scope()),
++            Some(start + Duration::from_millis(5)),
++            None,
++        )
++        .await
++        .unwrap_err();
++    assert_eq!(error.code, ErrorCode::DeadlineExceeded);
++    assert!(start.elapsed() < Duration::from_millis(50));
++    calls.assert_calls(0);
++}
++
++#[tokio::test]
++async fn cancellation_while_policy_is_pending_stops_before_dispatch() {
++    let policy = HostPolicy::new(Behavior::Pending);
++    let gate = policy.gate();
++    let context = context(scope());
++    let calls = OperationCounts::default();
++    let request = request(PolicyAction::ReadArtifact {});
++    let cancellation = async {
++        tokio::task::yield_now().await;
++        context.cancellation.cancel();
++    };
++    let (result, ()) = tokio::join!(
++        calls.guarded(&gate, &request, &context, None, None),
++        cancellation,
++    );
++    assert_eq!(result.unwrap_err().code, ErrorCode::Cancelled);
++    calls.assert_calls(0);
++    assert_eq!(policy.calls.load(Ordering::SeqCst), 1);
++}
++
++#[tokio::test]
++async fn every_access_rechecks_the_current_grant_after_revocation() {
++    let policy = HostPolicy::new(Behavior::Decision(PolicyDecision::Allow {}));
++    let gate = policy.gate();
++    let context = context(scope());
++    let request = request(PolicyAction::ReadRun {});
++    let calls = OperationCounts::default();
++    assert_eq!(
++        calls
++            .guarded(&gate, &request, &context, None, None)
++            .await
++            .unwrap(),
++        Guarded::Completed(42)
++    );
++    *policy.behavior.lock().unwrap() = Behavior::Decision(PolicyDecision::Deny {
++        reason: id("membership_revoked"),
++    });
++    assert_eq!(
++        calls
++            .guarded(&gate, &request, &context, None, None)
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::AccessDenied
++    );
++    calls.assert_calls(1);
++    assert_eq!(policy.calls.load(Ordering::SeqCst), 2);
++}
++
++#[tokio::test]
++async fn restrictions_preserve_host_denial_and_approval_and_can_only_reduce_access() {
++    let allow = PolicyDecision::Allow {};
++    let deny = PolicyDecision::Deny {
++        reason: id("host_denied"),
++    };
++    let approval = PolicyDecision::RequireApproval {
++        reason: id("host_review"),
++    };
++    let other_deny = PolicyDecision::Deny {
++        reason: id("hook_denied"),
++    };
++    let other_approval = PolicyDecision::RequireApproval {
++        reason: id("hook_review"),
++    };
++    let cases = [
++        (deny.clone(), allow.clone(), deny.clone()),
++        (deny.clone(), other_deny, deny.clone()),
++        (deny.clone(), approval.clone(), deny.clone()),
++        (approval.clone(), allow.clone(), approval.clone()),
++        (approval.clone(), other_approval, approval.clone()),
++        (approval.clone(), deny.clone(), deny.clone()),
++        (allow.clone(), deny.clone(), deny),
++        (allow, approval.clone(), approval),
++    ];
++    for (host, restriction, expected) in cases {
++        let gate = HostPolicy::new(Behavior::Decision(host)).gate();
++        let request = request(PolicyAction::ReadRun {});
++        let context = context(scope());
++        assert_eq!(
++            gate.check(&request, &context, None, Some(restriction.clone()))
++                .await
++                .unwrap(),
++            expected
++        );
++        let calls = OperationCounts::default();
++        let actual = calls
++            .guarded(&gate, &request, &context, None, Some(restriction))
++            .await;
++        match expected {
++            PolicyDecision::Deny { .. } => {
++                assert_eq!(actual.unwrap_err().code, ErrorCode::AccessDenied);
++            }
++            PolicyDecision::RequireApproval { reason } => match actual.unwrap() {
++                Guarded::ApprovalRequired(challenge) => assert_eq!(challenge.reason, reason),
++                Guarded::Completed(_) => panic!("approval requirement was bypassed"),
++            },
++            PolicyDecision::Allow {} => unreachable!(),
++        }
++        calls.assert_calls(0);
++    }
++}
++
++fn tool_request(document_id: &str) -> PolicyRequest {
++    request(PolicyAction::ExecuteTool {
++        input: ToolPolicyInput::new(
++            id("call"),
++            VersionedRef {
++                id: id("documents.read"),
++                version: id("1.0.0"),
++            },
++            digest("descriptor"),
++            digest("binding"),
++            BTreeMap::from([
++                ("document_id".into(), json!(document_id)),
++                ("query".into(), json!("revenue")),
++            ]),
++        ),
++    })
++}
++
++struct ResourcePolicy(BTreeMap<String, Scope>);
++
++impl PolicyPort for ResourcePolicy {
++    fn authorize<'a>(
++        &'a self,
++        request: &'a PolicyRequest,
++        context: PolicyContext<'a>,
++    ) -> PortFuture<'a, PolicyDecision> {
++        Box::pin(async move {
++            let PolicyAction::ExecuteTool { input } = &request.action else {
++                return Ok(PolicyDecision::Deny {
++                    reason: id("unsupported_action"),
++                });
++            };
++            let owner = input
++                .execution_args()
++                .get("document_id")
++                .and_then(Value::as_str)
++                .and_then(|key| self.0.get(key));
++            Ok(if owner == Some(context.scope) {
++                PolicyDecision::Allow {}
++            } else {
++                PolicyDecision::Deny {
++                    reason: id("target_unavailable"),
++                }
++            })
++        })
++    }
++}
++
++#[tokio::test]
++async fn actual_bound_target_must_exist_and_belong_to_scope_before_business_operation() {
++    let owned = "bc005010-d3e8-4cb8-b1fd-f6ff02c90ca6";
++    let foreign = "c11cf1bb-47a2-455c-a6f8-6d7e217cd195";
++    let missing = "d3a805bd-a7ea-4224-a39c-511097c43af8";
++    let mut foreign_scope = scope();
++    foreign_scope.tenant_id = id("other-tenant");
++    let gate = PolicyGate::new(
++        Arc::new(ResourcePolicy(BTreeMap::from([
++            (owned.into(), scope()),
++            (foreign.into(), foreign_scope),
++        ]))),
++        Duration::from_secs(1),
++    )
++    .unwrap();
++    let calls = OperationCounts::default();
++    let mut context = context(scope());
++    context.data.system_inputs = Some(SystemInputs::new(BTreeMap::from([(
++        "document_id".into(),
++        json!(owned),
++    )])));
++    for target in [foreign, missing] {
++        assert_eq!(
++            calls
++                .guarded(&gate, &tool_request(target), &context, None, None)
++                .await
++                .unwrap_err()
++                .code,
++            ErrorCode::AccessDenied
++        );
++    }
++    calls.assert_calls(0);
++    assert_eq!(
++        calls
++            .guarded(&gate, &tool_request(owned), &context, None, None)
++            .await
++            .unwrap(),
++        Guarded::Completed(42)
++    );
++    calls.assert_calls(1);
++}
++
++#[tokio::test]
++async fn approval_keeps_the_bound_action_while_authenticating_a_different_reviewer() {
++    let policy = HostPolicy::new(Behavior::Decision(PolicyDecision::RequireApproval {
++        reason: id("review_required"),
++    }));
++    let gate = policy.gate();
++    let request = tool_request("protected-original-target");
++    let original = context(scope());
++    let mut reviewer = context(scope());
++    reviewer.data.principal_ref = id("reviewer");
++    reviewer.data.capability_grant_ref = id("review-grant");
++    reviewer.data.system_inputs = Some(SystemInputs::new(BTreeMap::from([(
++        "document_id".into(),
++        json!("replacement-target"),
++    )])));
++    let calls = OperationCounts::default();
++    let mut challenges = Vec::new();
++    for context in [&original, &reviewer] {
++        match calls
++            .guarded(
++                &gate,
++                &request,
++                context,
++                None,
++                Some(PolicyDecision::Allow {}),
++            )
++            .await
++            .unwrap()
++        {
++            Guarded::ApprovalRequired(challenge) => challenges.push(challenge),
++            Guarded::Completed(_) => panic!("approval unexpectedly executed the operation"),
++        }
++    }
++    calls.assert_calls(0);
++    assert_eq!(challenges[0], challenges[1]);
++    assert_eq!(challenges[0].scope, request.owner_scope);
++    assert_eq!(challenges[0].request_digest, request.digest());
++    let observed = policy.observed.lock().unwrap();
++    assert_eq!(observed[0].request, request);
++    assert_eq!(observed[1].request, request);
++    assert_eq!(observed[0].scope, request.owner_scope);
++    assert_eq!(observed[1].scope, request.owner_scope);
++    assert_eq!(observed[0].principal, original.data.principal_ref);
++    assert_eq!(observed[1].principal, reviewer.data.principal_ref);
++    assert_eq!(observed[1].grant, reviewer.data.capability_grant_ref);
++    assert!(!format!("{request:?}").contains("protected-original-target"));
++    assert!(matches!(
++        request.action,
++        PolicyAction::ExecuteTool { ref input }
++            if input.execution_args()["document_id"] == json!("protected-original-target")
++    ));
++}
++
++#[tokio::test]
++async fn approval_identity_changes_for_arguments_versions_descriptors_bindings_and_scope() {
++    let gate = HostPolicy::new(Behavior::Decision(PolicyDecision::RequireApproval {
++        reason: id("review_required"),
++    }))
++    .gate();
++    let original = tool_request("original-target");
++    let mut variants = vec![tool_request("changed-target")];
++    let mut changed_version = original.clone();
++    if let PolicyAction::ExecuteTool { input } = &mut changed_version.action {
++        input.tool.version = id("2.0.0");
++    }
++    variants.push(changed_version);
++    let mut changed_descriptor = original.clone();
++    if let PolicyAction::ExecuteTool { input } = &mut changed_descriptor.action {
++        input.descriptor_digest = digest("new descriptor");
++    }
++    variants.push(changed_descriptor);
++    let mut changed_binding = original.clone();
++    if let PolicyAction::ExecuteTool { input } = &mut changed_binding.action {
++        input.binding_digest = digest("new binding");
++    }
++    variants.push(changed_binding);
++    let mut changed_scope = original.clone();
++    changed_scope.owner_scope.workspace_id = id("another-workspace");
++    variants.push(changed_scope);
++    let calls = OperationCounts::default();
++    for request in variants {
++        let challenge = calls
++            .guarded(
++                &gate,
++                &request,
++                &context(request.owner_scope.clone()),
++                None,
++                None,
++            )
++            .await
++            .unwrap();
++        let Guarded::ApprovalRequired(challenge) = challenge else {
++            panic!("changed action was executed without approval");
++        };
++        assert_ne!(challenge.request_digest, original.digest());
++        assert_eq!(challenge.request_digest, request.digest());
++        assert_eq!(challenge.scope, request.owner_scope);
++    }
++    calls.assert_calls(0);
++}
++
++struct ModelCatalog;
++
++impl ProfileResolver for ModelCatalog {
++    fn resolve<'a>(
++        &'a self,
++        reference: &'a ComponentRef,
++        _: &'a Scope,
++    ) -> PortFuture<'a, ComponentMetadata> {
++        Box::pin(async move {
++            if reference.kind != ComponentKind::ModelBinding || reference.id != id("primary") {
++                return Err(ContractError::new(
++                    ErrorCode::ComponentUnavailable,
++                    "reference",
++                ));
++            }
++            Ok(ComponentMetadata {
++                reference: ComponentRef {
++                    version: Some(id("1.0.0")),
++                    ..reference.clone()
++                },
++                contract_version: 1,
++                manifest_digest: digest("model manifest"),
++                config_schema: json!({"type":"object","additionalProperties":false}),
++                dependencies: vec![],
++                capabilities: BTreeSet::new(),
++                required_capabilities: BTreeSet::new(),
++                required_connections: BTreeSet::new(),
++                model_name: None,
++                hook_position: None,
++                exports: vec![],
++            })
++        })
++    }
++}
++
++fn record(name: &str) -> RecordRef {
++    RecordRef {
++        record_id: id(name),
++        revision: 1,
++        digest: digest(name),
++    }
++}
++
++async fn snapshot() -> RunSnapshot {
++    let profile = AgentProfile::from_json(
++        &json!({
++            "schema_version":"wickle.agent-profile.v1", "agent_id":"research", "version":"1.0.0",
++            "name":"Research", "description":"Summarize documents", "instructions":{"text":"private-profile-instructions"},
++            "model_binding":"primary", "tools":[], "skills":[], "connectors":[],
++            "context_policy":{"strategy":"bounded"}, "output_contract":{"type":"text"},
++            "limits":{"max_model_calls":4,"max_tool_attempts":0,"max_repair_attempts":0,"max_recovery_attempts":0,"max_elapsed_ms":10000}
++        })
++        .to_string(),
++    )
++    .unwrap();
++    let profile = ProfileValidator::new(&ModelCatalog)
++        .validate(&profile, &scope())
++        .await
++        .unwrap();
++    let request = RunRequest {
++        request_id: id("request"),
++        session_id: id("session"),
++        input: vec![InputContent::Text {
++            text: "private-user-input".into(),
++        }],
++        trigger: RunTrigger::User {},
++        output_contract: None,
++    };
++    let system_inputs = Some(SystemInputSnapshotRef {
++        snapshot_ref: record("protected-system-inputs"),
++        values_digest: digest("private-system-map"),
++        definition_versions: BTreeMap::from([(id("workspace_id"), id("1"))]),
++    });
++    let usage = BudgetUsage {
++        model_calls: 1,
++        ..BudgetUsage::default()
++    };
++    RunSnapshot {
++        schema_version: RunSnapshotSchemaVersion::V1,
++        run_id: id("run"),
++        request_digest: admission_digest(&request, &profile, system_inputs.as_ref()),
++        request,
++        scope: scope(),
++        limits: profile.profile().limits.clone(),
++        profile,
++        status: RunStatus::Failed,
++        phase: RunPhase::Finish,
++        model_step_id: None,
++        usage: usage.clone(),
++        model_ledger: vec![],
++        tool_ledger: vec![],
++        system_inputs,
++        wait: None,
++        outcome: Some(RunOutcome {
++            result: OutcomeResult::Failed {
++                failure: Failure {
++                    code: id("provider_unavailable"),
++                    diagnostic_ref: Some(record("protected-diagnostic")),
++                },
++            },
++            output: vec![InputContent::Text {
++                text: "private-partial-output".into(),
++            }],
++            artifacts: vec![],
++            usage,
++            checkpoint_revision: 3,
++            verification: None,
++            unresolved_effects: vec![],
++        }),
++        assembly_ref: Some(record("protected-assembly")),
++        context_batches: vec![record("protected-context-batch")],
++        source_states: vec![],
++        revision: 3,
++        last_event_seq: 2,
++    }
++}
++
++fn artifact() -> ArtifactRef {
++    ArtifactRef {
++        artifact_id: id("artifact"),
++        scope: scope(),
++        media_type: id("text/plain"),
++        size_bytes: 7,
++        content_hash: id("sha256-abcdef"),
++    }
++}
++
++fn event() -> RunEvent {
++    RunEvent {
++        schema_version: RunEventSchemaVersion::V1,
++        event_id: id("event"),
++        scope: scope(),
++        run_id: id("run"),
++        session_id: id("session"),
++        seq: NonZeroU64::new(2).unwrap(),
++        timestamp_ms: 1000,
++        payload: RunEventPayload::RunFinished {
++            outcome_ref: record("protected-outcome"),
++        },
++    }
++}
++
++#[tokio::test]
++async fn authorized_minimal_views_serialize_only_public_metadata_and_use_distinct_actions() {
++    let policy = HostPolicy::new(Behavior::Decision(PolicyDecision::Allow {}));
++    let gate = policy.gate();
++    let context = context(scope());
++    let snapshot = snapshot().await;
++    snapshot.validate().unwrap();
++    let Guarded::Completed(run) = gate.run_view(&snapshot, &context, None).await.unwrap() else {
++        panic!("expected authorized public run view");
++    };
++    assert_eq!(
++        serde_json::to_value(run).unwrap(),
++        json!({"run_id":"run","session_id":"session","status":"failed","phase":"finish","revision":3,
++            "usage":{"model_calls":1,"tool_attempts":0,"repair_attempts":0,"recovery_attempts":0,"elapsed_ms":0}})
++    );
++    let Guarded::Completed(artifact) = gate
++        .artifact_view(&artifact(), &context, None)
++        .await
++        .unwrap()
++    else {
++        panic!("expected authorized artifact metadata");
++    };
++    assert_eq!(
++        serde_json::to_value(artifact).unwrap(),
++        json!({"artifact_id":"artifact","media_type":"text/plain","size_bytes":7,"content_hash":"sha256-abcdef"})
++    );
++    let Guarded::Completed(event) = gate.event_view(&event(), &context, None).await.unwrap() else {
++        panic!("expected authorized event metadata");
++    };
++    assert_eq!(
++        serde_json::to_value(event).unwrap(),
++        json!({"event_id":"event","run_id":"run","session_id":"session","seq":2,"timestamp_ms":1000,"event_type":"run.finished"})
++    );
++    let observed = policy.observed.lock().unwrap();
++    assert_eq!(observed[0].request.action, PolicyAction::ReadRun {});
++    assert_eq!(observed[1].request.action, PolicyAction::ReadArtifact {});
++    assert_eq!(observed[1].request.resource_id, id("artifact"));
++    assert_eq!(observed[2].request.action, PolicyAction::ReadEvents {});
++    assert_eq!(observed[2].request.resource_id, id("run"));
++}
++
++#[tokio::test]
++async fn public_and_protected_views_reject_claimed_scopes_different_from_stored_owners() {
++    let policy = HostPolicy::new(Behavior::Decision(PolicyDecision::Allow {}));
++    let gate = policy.gate();
++    let snapshot = snapshot().await;
++    let mut wrong_scopes = vec![scope(); 3];
++    wrong_scopes[0].tenant_id = id("other-tenant");
++    wrong_scopes[1].workspace_id = id("other-workspace");
++    wrong_scopes[2].user_id = Some(id("other-user"));
++    for wrong_scope in wrong_scopes {
++        let context = context(wrong_scope);
++        assert_eq!(
++            gate.run_view(&snapshot, &context, None)
++                .await
++                .unwrap_err()
++                .code,
++            ErrorCode::AccessDenied
++        );
++        assert_eq!(
++            gate.run_details(&snapshot, &context, None)
++                .await
++                .unwrap_err()
++                .code,
++            ErrorCode::AccessDenied
++        );
++        assert_eq!(
++            gate.artifact_view(&artifact(), &context, None)
++                .await
++                .unwrap_err()
++                .code,
++            ErrorCode::AccessDenied
++        );
++        assert_eq!(
++            gate.event_view(&event(), &context, None)
++                .await
++                .unwrap_err()
++                .code,
++            ErrorCode::AccessDenied
++        );
++    }
++    assert_eq!(policy.calls.load(Ordering::SeqCst), 0);
++}
++
++struct PublicOnlyPolicy;
++
++impl PolicyPort for PublicOnlyPolicy {
++    fn authorize<'a>(
++        &'a self,
++        request: &'a PolicyRequest,
++        _: PolicyContext<'a>,
++    ) -> PortFuture<'a, PolicyDecision> {
++        Box::pin(async move {
++            Ok(match request.action {
++                PolicyAction::ReadRun {} | PolicyAction::ReadEvents {} => PolicyDecision::Allow {},
++                _ => PolicyDecision::Deny {
++                    reason: id("detail_access_not_granted"),
++                },
++            })
++        })
++    }
++}
++
++#[tokio::test]
++async fn public_read_permission_does_not_grant_access_to_protected_run_details() {
++    let gate = PolicyGate::new(Arc::new(PublicOnlyPolicy), Duration::from_secs(1)).unwrap();
++    let context = context(scope());
++    let snapshot = snapshot().await;
++    assert!(matches!(
++        gate.run_view(&snapshot, &context, None).await.unwrap(),
++        Guarded::Completed(_)
++    ));
++    assert!(matches!(
++        gate.event_view(&event(), &context, None).await.unwrap(),
++        Guarded::Completed(_)
++    ));
++    assert_eq!(
++        gate.run_details(&snapshot, &context, None)
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::AccessDenied
++    );
++    let policy = HostPolicy::new(Behavior::Decision(PolicyDecision::Allow {}));
++    let Guarded::Completed(details) = policy
++        .gate()
++        .run_details(&snapshot, &context, None)
++        .await
++        .unwrap()
++    else {
++        panic!("explicit detail permission did not grant the protected view");
++    };
++    assert_eq!(details, snapshot);
++    assert_eq!(
++        policy.observed.lock().unwrap()[0].request.action,
++        PolicyAction::ReadRunDetails {}
++    );
++}
+diff --git a/docs/policy.md b/docs/policy.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..a94b17ece0d1547ff3706000cc681ca65de9d9e9
+--- /dev/null
++++ b/docs/policy.md
+@@ -0,0 +1,75 @@
++# Scoped authorization
++
++`PolicyGate` performs a current Host policy check before constructing or running
++an operation. It compares the full stored resource scope with the authenticated
++execution scope first. Tenant, workspace, and optional user scope must match
++exactly; `None` is not a wildcard. The principal and current grant are separate
++from the resource namespace.
++
++Implement `PolicyPort::authorize` in Host code. The port receives the exact
++`PolicyRequest` and a `PolicyContext` containing the current principal, grant,
++cancellation signal, and monotonic deadline. The context does not expose the
++entire run-level system-input map.
++
++For `ExecuteTool`, `ToolPolicyInput` contains the binder's final arguments,
++descriptor and binding digests, and exact tool identity. The policy can query
++the application's resource catalog to check existence, owner, and revision of
++the actual FK values. Wickle does not embed a membership database or infer
++ownership from UUID syntax. The request's owner scope must come from trusted
++stored metadata; a caller-supplied scope or record reference is not authorization.
++
++## Decisions and execution
++
++`PolicyDecision` is `Allow`, `Deny`, or `RequireApproval`. Its reason is a safe
++informational code. `restrict` combines a Host decision with an additional
++restriction: an allow cannot remove an existing denial or approval requirement.
++Policy errors, panics, timeout, and cancellation return errors instead of allow.
++
++Use `PolicyGate::guard` with an operation closure. The closure is invoked only
++after a fresh allow decision. A denial returns `AccessDenied`; an approval
++requirement returns `Guarded::ApprovalRequired` without constructing the operation.
++The challenge's digest binds the owning scope and exact action, including final
++tool inputs. It is not a cached permission token. Every later operation must
++recheck current policy, including after a grant is revoked or an approver changes.
++
++The gate requires a Host Tokio runtime and a positive policy timeout. An optional
++run deadline shortens that timeout. The gate bounds policy evaluation; the actual
++operation owns its I/O timeout/cancellation and external-effect reconciliation.
++Dropping a future does not prove that a remote write was undone.
++
++`PolicyRequest` serialization contains protected action data and belongs only in
++appropriately protected Host storage. `ToolPolicyInput` redacts argument values
++from Debug output. The gate does not alter global panic handlers or sandbox the
++Host's policy implementation.
++
++## Read views
++
++The convenience methods derive owner scope from the stored object and select
++public fields explicitly:
++
++| Method | Current policy action | Result |
++| --- | --- | --- |
++| `run_view` | `ReadRun` | Run/session identity, status, phase, revision, and saved usage |
++| `artifact_view` | `ReadArtifact` | Artifact identity, media type, size, and content hash |
++| `event_view` | `ReadEvents` | Event/run/session identity, kind, sequence, and timestamp |
++| `run_details` | `ReadRunDetails` | Full protected checkpoint, subject to distinct permission |
++
++Minimal views omit system-input references, bound-input records, assembly/context
++references, provider state, diagnostics, and outcome internals. Reading protected
++event references requires a separate `ReadRecord` authorization. The store and
++runtime must use these boundaries; the raw DTOs do not enforce access on their own.
++
++## Consumer example
++
++[`tests/support/policy_consumer.rs`](../tests/support/policy_consumer.rs) is a Host
++program using an injected policy and a small resource catalog. Its modes exercise
++allow, deny, approval, a foreign scope, and a missing target. It reports both the
++authorization result and the number of actual record reads. The package check
++builds and runs it against the extracted `.crate`:
++
++```sh
++python3 scripts/check-package.py --allow-dirty
++```
++
++Credential preparation for future provider adapters is documented in
++[provider setup](provider-setup.md).
+diff --git a/docs/provider-setup.md b/docs/provider-setup.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..413dfe0baca1b62a9486f147f2e07e3f760d8ff0
+--- /dev/null
++++ b/docs/provider-setup.md
+@@ -0,0 +1,198 @@
++# Preparing provider credentials
++
++Use [`.env.example`](../.env.example) to prepare accounts, credentials, and model
++targets for a Host application or live integration tests. Provider adapters and
++the live-test runner are not implemented yet. These are configuration conventions
++for their integration, not variables that Wickle core reads or a claim that a
++provider/model combination has passed verification.
++
++The Host loads configuration and creates provider clients. It passes configured
++adapters and credential references into the library. Raw keys, cloud credentials,
++and access tokens belong in Host connection bindings, outside agent profiles,
++model-visible tool inputs, transcripts, and saved run data.
++
++## Create your local file
++
++From the repository directory, create the file only if it does not already exist:
++
++```sh
++if [ ! -e .env ]; then
++  (umask 077; cp .env.example .env)
++fi
++```
++
++Edit `.env` locally and fill only the providers you intend to use. Keep unused
++sections blank. Leave optional cloud credential variables commented out unless
++you need them; setting them to an empty string can interfere with an existing
++credential provider chain. Use a dotenv parser in the Host or test runner when
++loading this file; copying it does not export variables or make network calls.
++Treat blank configuration values as absent and never log their contents.
++
++`WICKLE_LIVE_PROVIDERS` declares the providers to run when a live runner is
++available. Its empty default selects none. For example,
++`WICKLE_LIVE_PROVIDERS=openai,anthropic` selects just those two paths. Credentials
++alone must never opt a provider into a live call. A selected provider with missing
++configuration must fail preflight before calling a service, rather than silently
++falling back to another account or provider. Live calls can incur provider charges.
++
++`.env` and `.env.*` are ignored by Git; `.env.example` is the public template.
++Credential JSON files must be stored outside this repository. Share only the
++configuration file path and nonsecret model/deployment details when asking for
++help.
++
++## Select a model and its version
++
++The template deliberately leaves model selections empty. Obtain the identifiers
++from the provider's console or model catalog for your account and region.
++
++| Setting | Meaning |
++| --- | --- |
++| `*_MODEL_ID` | Provider model identifier, including a snapshot suffix if the provider uses one |
++| `*_MODEL_VERSION` | Verified release identifier for that model; preserve the provider's exact value |
++| Deployment or inference profile | Invocation target that can route to an underlying model |
++| Endpoint, region, project | Where requests are sent and which cloud resource serves them |
++| `*_API_VERSION` | HTTP protocol/schema version, independent of model release |
++
++Do not extract a version from an arbitrary name. When a provider identifies an
++immutable release only by its full model ID, that verified ID can also identify
++the release. If the release is unknown, leave its version blank during preparation
++and resolve it before a test requiring a pinned model. A deployment name, alias,
++or written version string alone does not establish immutability. Check the
++underlying model and deployment upgrade settings. Adapter implementation versions
++come from the build and its dependency lockfile, not from these credentials.
++
++## OpenAI GPT — `openai`
++
++Create a project API key in the OpenAI dashboard and put it in `OPENAI_API_KEY`.
++Use a standard application key. Fill `OPENAI_MODEL_ID` and
++`OPENAI_MODEL_VERSION` for an accessible release; the default base URL already
++includes `/v1`. `OPENAI_ORG_ID` and `OPENAI_PROJECT_ID` are optional selections
++for keys that require explicit organization/project headers. See
++[OpenAI authentication](https://developers.openai.com/api/reference/overview#authentication)
++and [API key setup](https://developers.openai.com/api/docs/guides/production-best-practices#api-keys).
++
++## Azure Foundry OpenAI GPT — `azure_openai`
++
++Create or select an OpenAI model deployment in Foundry. Record its resource
++origin in `AZURE_OPENAI_ENDPOINT`, deployment name in `AZURE_OPENAI_DEPLOYMENT`,
++and underlying model name/release in `AZURE_OPENAI_MODEL_ID` and
++`AZURE_OPENAI_MODEL_VERSION`. The API's `model` parameter uses the deployment
++name. Verify the deployment's model version and upgrade policy separately. See
++[Azure model deployments](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/working-with-models).
++
++With `AZURE_OPENAI_API_MODE=v1`, the request base is the resource origin plus
++`/openai/v1/`; leave `AZURE_OPENAI_API_VERSION` empty. Azure's v1 API does not
++require a dated `api-version` parameter. If a separately implemented adapter uses
++the dated API, select `dated` and fill the exact API version required by that
++path. A value in the template does not enable an unimplemented protocol. See
++[Azure API versions](https://learn.microsoft.com/en-us/azure/foundry/openai/api-version-lifecycle?view=foundry-classic).
++
++Choose `AZURE_OPENAI_AUTH_MODE=api_key` and fill the resource key, or choose
++`entra` and leave the API key empty. For Entra, use an identity with inference
++permission on the resource, such as the local Azure CLI identity after `az login`
++or a managed identity in Azure. A service principal instead supplies tenant,
++client ID, and client secret to the Host's credential provider. The Host must
++obtain and refresh tokens for the selected endpoint's scope; the current Foundry
++v1 examples use `https://ai.azure.com/.default`. See
++[Microsoft Entra setup](https://learn.microsoft.com/en-us/azure/foundry/foundry-models/how-to/configure-entra-id).
++
++## Anthropic Claude — `anthropic`
++
++Create an API key in the Claude Console and set `ANTHROPIC_API_KEY`. If your key
++is identity-linked and not limited to one workspace, also supply
++`ANTHROPIC_WORKSPACE_ID`. Select the direct API model ID and release in
++`ANTHROPIC_MODEL_ID` and `ANTHROPIC_MODEL_VERSION`. See
++[Claude authentication](https://platform.claude.com/docs/en/manage-claude/authentication).
++
++`ANTHROPIC_API_VERSION=2023-06-01` selects the Messages API header version. It
++does not identify a Claude model release. The origin is
++`https://api.anthropic.com`; the adapter adds the Messages path. See
++[Anthropic API versioning](https://platform.claude.com/docs/en/api/versioning).
++
++## AWS Bedrock Claude — `bedrock_anthropic`
++
++Select a Claude model available to your AWS account and source region, and meet
++its model access requirements. Fill `AWS_REGION`, `BEDROCK_MODEL_ID`, and
++`BEDROCK_MODEL_VERSION`. Confirm the identity has the relevant invocation and
++streaming permissions. See
++[Bedrock model access](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html).
++
++Use the AWS SDK credential chain. For an IAM Identity Center profile, configure
++and authenticate it locally, then set `AWS_PROFILE` to its name:
++
++```sh
++aws configure sso
++aws sso login --profile your-profile-name
++```
++
++Existing shared credentials or an attached cloud role can also supply credentials.
++If using temporary access keys, supply the access key, secret key, and session
++token together; leave them unset when using a profile or cloud role. See the
++[Rust SDK credential chain](https://docs.aws.amazon.com/sdk-for-rust/latest/dg/credproviders.html)
++and [IAM Identity Center setup](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html).
++
++If invocation requires an inference profile, fill `BEDROCK_INFERENCE_PROFILE_ID`
++with its ID or ARN and retain the underlying foundation model in
++`BEDROCK_MODEL_ID`. The adapter sends the profile target in Bedrock's `modelId`
++field. `AWS_REGION` remains the source region. See
++[invocation with inference profiles](https://docs.aws.amazon.com/bedrock/latest/userguide/inference-profiles-use.html).
++Leave `BEDROCK_ENDPOINT` unset for normal SDK endpoint resolution. The SDK/API
++operation determines the Bedrock protocol contract; the direct Anthropic API
++version above is not a Bedrock setting.
++
++## Google AI Studio Gemini — `google_ai`
++
++Create a Gemini API key in Google AI Studio and set `GEMINI_API_KEY`, then fill
++`GEMINI_MODEL_ID` and `GEMINI_MODEL_VERSION`. Use the key type and restrictions
++currently required by the Gemini API. Google SDKs may also read `GOOGLE_API_KEY`,
++which takes precedence when both are set; the Host should pass the selected
++Gemini key explicitly to avoid using an unrelated key. See
++[Gemini API keys](https://ai.google.dev/gemini-api/docs/api-key).
++
++`GEMINI_BASE_URL` is the origin; `GEMINI_API_VERSION=v1` selects the stable API
++path. Select `v1beta` only when the chosen adapter and feature require that
++protocol. The API version is independent of the Gemini release. See
++[Gemini API versions](https://ai.google.dev/gemini-api/docs/api-versions).
++
++## Google Cloud Vertex AI Gemini — `vertex_gemini`
++
++Select a Google Cloud project with billing, enable `aiplatform.googleapis.com`,
++and grant the caller inference access. Fill `GOOGLE_CLOUD_PROJECT`,
++`GOOGLE_CLOUD_LOCATION`, `VERTEX_MODEL_ID`, and `VERTEX_MODEL_VERSION`. Choose a
++region or `global` that supports the selected model and your routing requirements.
++`VERTEX_API_VERSION=v1` selects the API contract. The normal endpoint follows the
++chosen location; `VERTEX_ENDPOINT` is an optional origin override. See the
++[Google Cloud Gemini quickstart](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/start/quickstart).
++
++This path uses Application Default Credentials (ADC). For local development,
++configure ADC with:
++
++```sh
++gcloud auth application-default login
++```
++
++Leave `GOOGLE_APPLICATION_CREDENTIALS` unset to use local ADC or an attached cloud
++identity. Set it only when deliberately choosing an external credential or
++federation configuration file. The Host can map `GOOGLE_CLOUD_QUOTA_PROJECT` to
++an explicit quota project when needed; environment support depends on its chosen
++authentication library. See [quota project configuration](https://docs.cloud.google.com/docs/quotas/set-quota-project).
++An AI Studio API key does not configure this ADC path. See
++[ADC setup](https://docs.cloud.google.com/docs/authentication/provide-credentials-adc)
++and [credential lookup order](https://docs.cloud.google.com/docs/authentication/application-default-credentials).
++
++## xAI Grok — `xai`
++
++Create an API key in the xAI console, ensure the account can make API calls, and
++set `XAI_API_KEY`. Fill `XAI_MODEL_ID` and `XAI_MODEL_VERSION` from the model
++catalog available to that account. `XAI_BASE_URL=https://api.x.ai/v1` includes
++the API path version. See the [xAI quickstart](https://docs.x.ai/developers/quickstart).
++
++## What live verification must establish
++
++Credential preparation is separate from a successful integration test. Once a
++provider runner exists, record the selected endpoint/region, resolved model
++release, deployment target, API contract, and adapter version alongside actual
++results. Exercise a response and a tool-call/result round trip, including streaming
++where supported. Record unavailable capabilities or unverified version metadata
++as such. Never report skipped or unconfigured providers as passing, and never
++include credentials in captured evidence.
+diff --git a/scripts/check-package.py b/scripts/check-package.py
+index 12d705e3499a6b70c9f83f06b82bf0d7570e5237..f5277e795f3f2434c0654cefd42ff07b5196b03d 100644
+--- a/scripts/check-package.py
++++ b/scripts/check-package.py
+@@ -68,6 +68,11 @@ def main():
+             encoding="utf-8",
+         )
+         shutil.copyfile(ROOT / "tests/support/consumer.rs", consumer / "src/main.rs")
++        examples = sorted((ROOT / "tests/support").glob("*_consumer.rs"))
++        if examples:
++            (consumer / "src/bin").mkdir()
++            for example in examples:
++                shutil.copyfile(example, consumer / "src/bin" / example.name)
+         # Keep consumer builds independent of the checkout and its build cache.
+         env["CARGO_TARGET_DIR"] = str(base / "target")
+         subprocess.run(["cargo", "generate-lockfile", "--offline"],
+@@ -78,8 +83,11 @@ def main():
+                 manifest = Path(package["manifest_path"]).resolve()
+                 if not manifest.is_relative_to(base):
+                     raise RuntimeError(f"Consumer depends on an external path: {manifest}")
+-        subprocess.run(["cargo", "run", "--locked", "--offline"],
++        subprocess.run(["cargo", "run", "--locked", "--offline", "--bin", "wickle-package-consumer"],
+                        cwd=consumer, env=env, check=True)
++        for example in examples:
++            subprocess.run(["cargo", "run", "--locked", "--offline", "--bin", example.stem],
++                           cwd=consumer, env=env, check=True)
+     print("Independent package consumer: passed (profile validation and restore)", flush=True)
+ 
+ 
+diff --git a/tests/support/policy_consumer.rs b/tests/support/policy_consumer.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..d36e3704b5f47cba5c3224629c16b888095b6c7b
+--- /dev/null
++++ b/tests/support/policy_consumer.rs
+@@ -0,0 +1,132 @@
++use serde_json::json;
++use std::{
++    collections::BTreeMap,
++    sync::{
++        Arc,
++        atomic::{AtomicUsize, Ordering},
++    },
++    time::Duration,
++};
++use wickle::{
++    ExecutionContext, ExecutionContextData, Guarded, Id, PolicyAction, PolicyContext,
++    PolicyDecision, PolicyGate, PolicyPort, PolicyRequest, PortFuture, Scope, ToolPolicyInput,
++    VersionedRef, canonical_digest,
++};
++
++fn id(value: &str) -> Id {
++    Id::new(value).expect("example identifiers")
++}
++fn scope(tenant: &str) -> Scope {
++    Scope {
++        tenant_id: id(tenant),
++        workspace_id: id("workspace"),
++        user_id: None,
++    }
++}
++
++struct HostPolicy {
++    owners: BTreeMap<String, Scope>,
++}
++
++impl PolicyPort for HostPolicy {
++    fn authorize<'a>(
++        &'a self,
++        request: &'a PolicyRequest,
++        context: PolicyContext<'a>,
++    ) -> PortFuture<'a, PolicyDecision> {
++        Box::pin(async move {
++            if context.capability_grant_ref.as_str() == "revoked" {
++                return Ok(PolicyDecision::Deny {
++                    reason: id("revoked"),
++                });
++            }
++            if let PolicyAction::ExecuteTool { input } = &request.action {
++                let record = input
++                    .execution_args()
++                    .get("record_id")
++                    .and_then(|v| v.as_str());
++                if record.and_then(|key| self.owners.get(key)) != Some(context.scope) {
++                    return Ok(PolicyDecision::Deny {
++                        reason: id("target_unavailable"),
++                    });
++                }
++            }
++            Ok(if context.capability_grant_ref.as_str() == "review" {
++                PolicyDecision::RequireApproval {
++                    reason: id("review_needed"),
++                }
++            } else {
++                PolicyDecision::Allow {}
++            })
++        })
++    }
++}
++
++#[tokio::main(flavor = "current_thread")]
++async fn main() -> Result<(), Box<dyn std::error::Error>> {
++    let mode = std::env::args().nth(1).unwrap_or_else(|| "allow".into());
++    let owner = scope("tenant");
++    let context = ExecutionContext::new(
++        ExecutionContextData {
++            scope: if mode == "foreign-scope" {
++                scope("other")
++            } else {
++                owner.clone()
++            },
++            principal_ref: id("reviewer"),
++            capability_grant_ref: id(match mode.as_str() {
++                "deny" => "revoked",
++                "approval" => "review",
++                _ => "current",
++            }),
++            trace_context: None,
++            system_inputs: None,
++        },
++        Default::default(),
++    );
++    let valid_id = "123e4567-e89b-12d3-a456-426614174000";
++    let record_id = if mode == "missing-target" {
++        "00000000-0000-4000-8000-000000000001"
++    } else {
++        valid_id
++    };
++    let arguments = BTreeMap::from([("record_id".into(), json!(record_id))]);
++    let request = PolicyRequest {
++        owner_scope: owner.clone(),
++        resource_id: id("records.read"),
++        action: PolicyAction::ExecuteTool {
++            input: ToolPolicyInput::new(
++                id("call"),
++                VersionedRef {
++                    id: id("records.read"),
++                    version: id("1.0.0"),
++                },
++                canonical_digest(&json!("descriptor")),
++                canonical_digest(&json!(arguments)),
++                arguments,
++            ),
++        },
++    };
++    let gate = PolicyGate::new(
++        Arc::new(HostPolicy {
++            owners: BTreeMap::from([(valid_id.to_owned(), owner)]),
++        }),
++        Duration::from_secs(1),
++    )?;
++    let reads = AtomicUsize::new(0);
++    let outcome = gate
++        .guard(&request, &context, None, None, || async {
++            reads.fetch_add(1, Ordering::SeqCst);
++            Ok("authorized record contents")
++        })
++        .await;
++    match outcome {
++        Ok(Guarded::Completed(value)) => println!("allowed: {value}"),
++        Ok(Guarded::ApprovalRequired(challenge)) => {
++            println!("approval required for {}", challenge.request_digest)
++        }
++        Err(error) => println!("rejected: {:?}", error.code),
++    }
++    println!("record reads: {}", reads.load(Ordering::SeqCst));
++    Ok(())
++}

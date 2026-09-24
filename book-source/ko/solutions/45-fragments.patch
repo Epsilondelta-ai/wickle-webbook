@@ -1,0 +1,2845 @@
+diff --git a/crates/wickle-adapter-runtime/src/lifecycle.rs b/crates/wickle-adapter-runtime/src/lifecycle.rs
+index bd362f57e2eb8229ba99b009dcb34e8c60c41945..360826811fb66b5dcafe31c2df461088827f1db8 100644
+--- a/crates/wickle-adapter-runtime/src/lifecycle.rs
++++ b/crates/wickle-adapter-runtime/src/lifecycle.rs
+@@ -164,7 +164,32 @@ impl ContextSource for ScopedSource {
+         context: &'a ContextCallContext,
+     ) -> PortFuture<'a, ()> {
+         Box::pin(async move {
+-            self.check(&request.request, context)?;
++            if request.derived {
++                self.lifetime
++                    .check(&context.scope, context.binding_set_id.as_ref())?;
++                if context.run_id != self.lifetime.run_id
++                    || request.consumer_run_id != context.run_id
++                    || request.request.scope != context.scope
++                    || request.request.session_id != context.session_id
++                    || context.source != self.selection
++                    || request.request.binding.source != self.selection
++                    || request.request.definition != self.definition
++                    || request.request.context_request_id != context.context_request_id
++                {
++                    return Err(ContractError::new(
++                        ErrorCode::AccessDenied,
++                        "adapter.source_lineage",
++                    ));
++                }
++            } else {
++                if request.consumer_run_id != request.request.run_id {
++                    return Err(ContractError::new(
++                        ErrorCode::AccessDenied,
++                        "adapter.source_consumer",
++                    ));
++                }
++                self.check(&request.request, context)?;
++            }
+             let mut controlled = context.clone();
+             controlled.cancellation = CancellationToken::new();
+             let _cancel = controlled.cancellation.clone().drop_guard();
+diff --git a/crates/wickle-adapter-runtime/tests/support/context_sources.rs b/crates/wickle-adapter-runtime/tests/support/context_sources.rs
+index 2c318646efa196cab3e2aac325bfae5844b02e59..bd811b8e96ce7d443fea5ee2da2cdeaa5f28b695 100644
+--- a/crates/wickle-adapter-runtime/tests/support/context_sources.rs
++++ b/crates/wickle-adapter-runtime/tests/support/context_sources.rs
+@@ -71,6 +71,7 @@ impl ContextSource for Source {
+                 },
+             };
+             Ok(ContextResult::Ready {
++                item_revisions: Default::default(),
+                 items: vec![ContextItem::new(
+                     id("local-item"),
+                     request.definition.origin,
+diff --git a/crates/wickle-mcp/tests/support/binding.rs b/crates/wickle-mcp/tests/support/binding.rs
+index 426d1255356a9dbbe6f25761ffd4f7c8a3d8405f..f11de9727a6b726c146d1e2ff6471770357247ba 100644
+--- a/crates/wickle-mcp/tests/support/binding.rs
++++ b/crates/wickle-mcp/tests/support/binding.rs
+@@ -194,6 +194,7 @@ pub async fn bound_arguments(
+                 snapshot,
+                 prompt_snapshot: prompt.reference().clone(),
+                 messages: vec![Message {
++                    source_model_request_id: None,
+                     message_id: id("user-message"),
+                     run_id: run.clone(),
+                     sequence: 1.try_into()?,
+diff --git a/crates/wickle-state-sqlite/tests/support/mod.rs b/crates/wickle-state-sqlite/tests/support/mod.rs
+index a4e7cdaeb82f5d5d88405e1bba725163df4f4f5c..9786338c2efe7dfbacb291b8be682c86bc7183bf 100644
+--- a/crates/wickle-state-sqlite/tests/support/mod.rs
++++ b/crates/wickle-state-sqlite/tests/support/mod.rs
+@@ -278,6 +278,7 @@ pub async fn populate_protected_run(store: Arc<dyn StateStore>) -> Value {
+         },
+     ));
+     update.messages.push(Message {
++        source_model_request_id: None,
+         message_id: id("call-message"),
+         run_id: id("run"),
+         sequence: 2.try_into().unwrap(),
+@@ -340,6 +341,7 @@ pub async fn populate_protected_run(store: Arc<dyn StateStore>) -> Value {
+         },
+     ));
+     settled.messages.push(Message {
++        source_model_request_id: None,
+         message_id: id("result-message"),
+         run_id: id("run"),
+         sequence: 3.try_into().unwrap(),
+diff --git a/crates/wickle/src/agent/admission.rs b/crates/wickle/src/agent/admission.rs
+index ab7be5cf1f8e818520c954a99d82b5bb31bbde77..e8409402127a97eafab6c5d785175de9107cefac 100644
+--- a/crates/wickle/src/agent/admission.rs
++++ b/crates/wickle/src/agent/admission.rs
+@@ -554,6 +554,7 @@ impl Agent {
+             last_event_seq: 1,
+         };
+         let message = Message {
++            source_model_request_id: None,
+             message_id: bindings.ids.next_id()?,
+             run_id: run_id.clone(),
+             sequence: sequence
+diff --git a/crates/wickle/src/agent/driver.rs b/crates/wickle/src/agent/driver.rs
+index 24dab8faa15417654521c9d9685aebf8ec57e4f5..8ce97308241ae649b7790b9c36a66791ecde009f 100644
+--- a/crates/wickle/src/agent/driver.rs
++++ b/crates/wickle/src/agent/driver.rs
+@@ -683,6 +683,7 @@ impl Agent {
+             skills: bindings.skills.clone(),
+             artifacts: bindings.artifacts.clone(),
+             projected_artifacts: Mutex::new(vec![]),
++            projected_lineage: Mutex::new(vec![]),
+             source_batch_refs,
+         };
+         bindings
+@@ -949,6 +950,15 @@ impl Agent {
+             vec![]
+         } else {
+             vec![Message {
++                source_model_request_id: snapshot
++                    .model_ledger
++                    .iter()
++                    .rev()
++                    .find(|entry| {
++                        entry.purpose == ModelPurpose::Agent
++                            && matches!(entry.state, ModelAttemptState::Completed {})
++                    })
++                    .map(|entry| entry.attempt_id.clone()),
+                 message_id: bindings.ids.next_id()?,
+                 run_id: run_id.clone(),
+                 sequence: saved
+@@ -1053,6 +1063,7 @@ struct Projector<'a> {
+     skills: Option<Arc<SkillRuntime>>,
+     artifacts: Option<Arc<ArtifactRuntime>>,
+     projected_artifacts: Mutex<Vec<ArtifactRef>>,
++    projected_lineage: Mutex<Vec<ContextLineage>>,
+ }
+ impl ModelRequestProjector for Projector<'_> {
+     fn authorize_use<'a>(
+@@ -1084,6 +1095,27 @@ impl ModelRequestProjector for Projector<'_> {
+                     )
+                     .await?;
+             }
++            let lineage = self
++                .projected_lineage
++                .lock()
++                .map_err(|_| fail(ErrorCode::InvalidContract, "agent.lineage"))?
++                .clone();
++            if !lineage.is_empty() {
++                let sources = self
++                    .sources
++                    .as_ref()
++                    .ok_or_else(|| fail(ErrorCode::ComponentUnavailable, "agent.lineage_source"))?;
++                crate::future::boxed(|| {
++                    sources.authorize_lineage(
++                        &self.saved.snapshot.run_id,
++                        &lineage,
++                        Some(&selection.route),
++                        &current,
++                        deadline,
++                    )
++                })
++                .await?;
++            }
+             if self.saved.snapshot.skill_plan_ref.is_some() {
+                 let skills = self
+                     .skills
+@@ -1176,6 +1208,7 @@ impl ModelRequestProjector for Projector<'_> {
+                     &self.prompt,
+                     seed,
+                     crate::context_strategy::ContextServices {
++                        sources: self.sources.as_deref(),
+                         bindings: self.bindings,
+                         budget: self.budget,
+                         context: &current,
+@@ -1183,6 +1216,11 @@ impl ModelRequestProjector for Projector<'_> {
+                 )
+             })
+             .await?;
++            *self
++                .projected_lineage
++                .lock()
++                .map_err(|_| fail(ErrorCode::InvalidContract, "agent.lineage"))? =
++                prepared.lineage.clone();
+             let mut references = artifacts::selected(
+                 &prepared.projection.request,
+                 &self.saved,
+diff --git a/crates/wickle/src/agent/recovery.rs b/crates/wickle/src/agent/recovery.rs
+index 9ae8bd66f10e1ef87a1d003684b542ade13d15f6..3b78d56697b85e04b189b55d9956d1d159280611 100644
+--- a/crates/wickle/src/agent/recovery.rs
++++ b/crates/wickle/src/agent/recovery.rs
+@@ -253,6 +253,7 @@ impl Agent {
+                 },
+             });
+             messages.push(Message {
++                source_model_request_id: None,
+                 message_id: bindings.ids.next_id()?,
+                 run_id: command.run_id.clone(),
+                 sequence: saved
+diff --git a/crates/wickle/src/agent/tools.rs b/crates/wickle/src/agent/tools.rs
+index 79e79c0a9e5d66a60a82b6d9acc72c8fcf3a6b9c..b8eee52fb9b92497eaa2e4e7a97e84fcce649821 100644
+--- a/crates/wickle/src/agent/tools.rs
++++ b/crates/wickle/src/agent/tools.rs
+@@ -197,6 +197,7 @@ impl Agent {
+             records.push(record);
+         }
+         let message = Message {
++            source_model_request_id: Some(response.request_id.clone()),
+             message_id: bindings.ids.next_id()?,
+             run_id: budget.run_id().clone(),
+             sequence: saved
+diff --git a/crates/wickle/src/agent/verification.rs b/crates/wickle/src/agent/verification.rs
+index 15a9b5a14af191c09fb818303860525a869a64a9..e6ec5a0eb744a21e0f010184fcdf45b18b11a73f 100644
+--- a/crates/wickle/src/agent/verification.rs
++++ b/crates/wickle/src/agent/verification.rs
+@@ -126,6 +126,29 @@ impl Agent {
+             ModelExchangeOutcome::Completed { response } => response.continuation,
+             _ => return Err(fail(ErrorCode::InvalidSnapshot, "verification.response")),
+         };
++        if let Some(sources) = segment.sources.as_deref() {
++            let messages = candidate_lineage_messages(&saved, &candidate)?;
++            let deadline = budget.call_deadline()?;
++            let lineage = crate::future::boxed(|| {
++                sources.lineage_for_messages(
++                    &saved.snapshot.request.session_id,
++                    &messages,
++                    &segment.context,
++                    deadline,
++                )
++            })
++            .await?;
++            crate::future::boxed(|| {
++                sources.authorize_lineage(
++                    budget.run_id(),
++                    &lineage,
++                    None,
++                    &segment.context,
++                    deadline,
++                )
++            })
++            .await?;
++        }
+         // Completed records are replayed rather than re-invoking a quality callback.
+         let mut prior = None;
+         for reference in saved.snapshot.verification_records.iter().rev() {
+@@ -227,6 +250,7 @@ impl Agent {
+                     tokio::time::Instant::now() + Duration::from_millis(plan.limits.timeout_ms),
+                 );
+                 let models = ReviewModels {
++                    sources: segment.sources.as_deref(),
+                     bindings,
+                     budget,
+                     context: &segment.context,
+@@ -459,7 +483,7 @@ impl Agent {
+         snapshot.phase = RunPhase::Prepare;
+         let mut messages = vec![];
+         for (index,(role,origin,content)) in [(MessageRole::Assistant,MessageOrigin::Model,candidate.output.clone()),(MessageRole::User,MessageOrigin::Verification,vec![InputContent::Json{value:serde_json::json!({"kind":"verification_feedback","candidate_digest":candidate_ref.digest,"feedback":feedback})}])].into_iter().enumerate(){
+-            messages.push(Message{message_id:bindings.ids.next_id()?,run_id:budget.run_id().clone(),sequence:(saved.session.transcript_revision+index as u64+1).try_into().map_err(|_|fail(ErrorCode::InvalidSnapshot,"verification.sequence"))?,role,origin,visibility:Visibility::Model,content:content.into_iter().map(|content|ContentBlock::Content{content}).collect()});
++            messages.push(Message {source_model_request_id: if origin == MessageOrigin::Model { snapshot.model_ledger.iter().find(|entry| entry.response_ref.as_ref() == Some(&candidate.response_ref)).map(|entry| entry.attempt_id.clone()) } else { None },message_id:bindings.ids.next_id()?,run_id:budget.run_id().clone(),sequence:(saved.session.transcript_revision+index as u64+1).try_into().map_err(|_|fail(ErrorCode::InvalidSnapshot,"verification.sequence"))?,role,origin,visibility:Visibility::Model,content:content.into_iter().map(|content|ContentBlock::Content{content}).collect()});
+         }
+         let mut records = vec![record];
+         let stored: StoredModelResponse = self.read_verification(&candidate.response_ref).await?;
+@@ -575,6 +599,7 @@ impl Agent {
+ }
+ 
+ struct ReviewModels<'a> {
++    sources: Option<&'a ContextSourceRuntime>,
+     bindings: &'a AgentBindings,
+     budget: &'a RunBudget,
+     context: &'a ExecutionContext,
+@@ -633,6 +658,7 @@ impl VerificationModel for ReviewModels<'_> {
+                 },
+             };
+             let projector = ReviewProjector {
++                sources: self.sources,
+                 run_id: self.budget.run_id(),
+                 candidate_ref: self.candidate_ref,
+                 bindings: self.bindings,
+@@ -663,6 +689,7 @@ impl VerificationModel for ReviewModels<'_> {
+     }
+ }
+ struct ReviewProjector<'a> {
++    sources: Option<&'a ContextSourceRuntime>,
+     run_id: &'a Id,
+     candidate_ref: &'a RecordRef,
+     bindings: &'a AgentBindings,
+@@ -671,7 +698,7 @@ struct ReviewProjector<'a> {
+ impl ModelRequestProjector for ReviewProjector<'_> {
+     fn authorize_use<'a>(
+         &'a self,
+-        _: &'a RouteSelection,
++        selection: &'a RouteSelection,
+         _: &'a RoutedModelInput,
+         context: &'a ModelProjectionContext,
+     ) -> PortFuture<'a, ()> {
+@@ -725,6 +752,28 @@ impl ModelRequestProjector for ReviewProjector<'_> {
+                 PolicyDecision::Allow {} => {}
+                 _ => return Err(fail(ErrorCode::AccessDenied, "verification.policy")),
+             }
++            if let Some(sources) = self.sources {
++                let messages = candidate_lineage_messages(&saved, &candidate)?;
++                let lineage = crate::future::boxed(|| {
++                    sources.lineage_for_messages(
++                        &saved.snapshot.request.session_id,
++                        &messages,
++                        &current,
++                        context.deadline,
++                    )
++                })
++                .await?;
++                crate::future::boxed(|| {
++                    sources.authorize_lineage(
++                        self.run_id,
++                        &lineage,
++                        Some(&selection.route),
++                        &current,
++                        context.deadline,
++                    )
++                })
++                .await?;
++            }
+             if let Some(artifacts) = &self.bindings.artifacts {
+                 let evidence: Vec<_> = saved
+                     .messages
+@@ -773,3 +822,28 @@ impl ModelRequestProjector for ReviewProjector<'_> {
+         })
+     }
+ }
++
++fn candidate_lineage_messages(
++    saved: &StoredRun,
++    candidate: &VerificationCandidate,
++) -> Result<Vec<Message>, ContractError> {
++    let attempt = saved
++        .snapshot
++        .model_ledger
++        .iter()
++        .find(|invocation| invocation.response_ref.as_ref() == Some(&candidate.response_ref))
++        .ok_or_else(|| fail(ErrorCode::InvalidSnapshot, "verification.candidate_attempt"))?;
++    let mut messages = saved.messages.clone();
++    // Dependency-only view: the pending candidate has no transcript message yet.
++    messages.push(Message {
++        source_model_request_id: Some(attempt.attempt_id.clone()),
++        message_id: candidate.response_ref.record_id.clone(),
++        run_id: candidate.run_id.clone(),
++        sequence: std::num::NonZeroU64::MIN,
++        role: MessageRole::Assistant,
++        origin: MessageOrigin::Model,
++        visibility: Visibility::Model,
++        content: vec![],
++    });
++    Ok(messages)
++}
+diff --git a/crates/wickle/src/context_fragment.rs b/crates/wickle/src/context_fragment.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..4d8b5861a2a686e97f3ac671cc1e545364d6c379
+--- /dev/null
++++ b/crates/wickle/src/context_fragment.rs
+@@ -0,0 +1,212 @@
++//! Core-issued context observations, independent of opaque external revisions.
++use crate::*;
++use serde::{Deserialize, Serialize};
++use std::{collections::BTreeMap, fmt, num::NonZeroU64};
++
++/// Pinned assembly algorithm for newly recorded context fragments.
++pub const CONTEXT_FRAGMENT_ASSEMBLER: &str = "wickle.context-fragments.v1";
++/// Namespace owner. Step fragments retain their Run owner and a separate step lifetime.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
++pub enum FragmentOwner {
++    /// One immutable-profile conversation.
++    Session {
++        /// Session identity.
++        session_id: Id,
++    },
++    /// One execution, including its logical model steps.
++    Run {
++        /// Run identity.
++        run_id: Id,
++    },
++}
++/// Stable identity; observation time, batch and external revision are not identity keys.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct FragmentIdentity {
++    /// Exact authenticated namespace.
++    pub scope: Scope,
++    /// Session or Run ownership.
++    pub owner: FragmentOwner,
++    /// Core-qualified producer selection, including trigger where applicable.
++    pub producer_id: Id,
++    /// Producer-local fragment identity.
++    pub fragment_id: Id,
++}
++impl FragmentIdentity {
++    /// Stable lookup key, independent of the external revision's spelling or ordering.
++    pub fn key(&self) -> JsonDigest {
++        crate::serialization::data_digest(self)
++    }
++}
++/// Protected fragment content or an explicit selection withdrawal.
++#[derive(Clone, PartialEq, Serialize, Deserialize)]
++#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
++pub enum FragmentValue {
++    /// Model-visible data; validation and current source authorization remain required.
++    Item {
++        /// Frozen namespaced item.
++        item: ContextItem,
++    },
++    /// Removal/empty/unavailable selection, never a fallback to older content.
++    Tombstone {
++        /// Safe core-issued classification.
++        reason: Id,
++    },
++    /// Complete source-slot selection, including successful empty observations.
++    Selection {
++        /// Ready, empty or unavailable.
++        status: Id,
++        /// Native source item identities in the committed provider order.
++        item_ids: Vec<Id>,
++    },
++}
++/// One committed observation. The store validates increasing revisions under its CAS.
++#[derive(Clone, PartialEq, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct ContextFragment {
++    /// Stable producer/owner/item identity.
++    pub identity: FragmentIdentity,
++    /// First observation is 1; every new activation or withdrawal advances it.
++    pub core_revision: NonZeroU64,
++    /// Content/selection, provenance and assembler identity, excluding observation metadata.
++    pub content_digest: JsonDigest,
++    /// Opaque external version at this fragment's scope; None means unknown.
++    pub source_revision: Option<Id>,
++    /// Exact assembly algorithm, not an implicit latest version.
++    pub assembler_version: Id,
++    /// Core source batch responsible for this observation.
++    pub batch_id: Id,
++    /// Data classification; external providers cannot promote it to instructions.
++    pub origin: ContextOrigin,
++    /// Frozen data or withdrawal.
++    pub value: FragmentValue,
++}
++impl fmt::Debug for ContextFragment {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_struct("ContextFragment")
++            .field("identity", &self.identity)
++            .field("core_revision", &self.core_revision)
++            .field("content_digest", &self.content_digest)
++            .finish_non_exhaustive()
++    }
++}
++impl ContextFragment {
++    pub(crate) fn issue(
++        identity: FragmentIdentity,
++        previous: Option<&Self>,
++        batch_id: Id,
++        origin: ContextOrigin,
++        source_revision: Option<Id>,
++        value: FragmentValue,
++    ) -> Result<Self, ContractError> {
++        if previous.is_some_and(|prior| prior.identity != identity) {
++            return Err(invalid("context.fragment_identity"));
++        }
++        let core_revision = previous
++            .map_or(Some(1), |prior| prior.core_revision.get().checked_add(1))
++            .and_then(NonZeroU64::new)
++            .ok_or_else(|| invalid("context.fragment_revision"))?;
++        let mut fragment = Self {
++            identity,
++            core_revision,
++            content_digest: crate::canonical_digest(&serde_json::Value::Null),
++            source_revision,
++            assembler_version: Id::new(CONTEXT_FRAGMENT_ASSEMBLER)?,
++            batch_id,
++            origin,
++            value,
++        };
++        fragment.content_digest = fragment.calculate_digest();
++        fragment.validate()?;
++        Ok(fragment)
++    }
++    fn calculate_digest(&self) -> JsonDigest {
++        let content = match &self.value {
++            // The transient namespaced item ID and current model step are observation
++            // metadata. The stable identity supplies scope and lifetime owner.
++            FragmentValue::Item { item } => {
++                serde_json::json!({"type":"item","source_ref":item.source_ref,"content":item.content,"priority":item.priority_class,"lifetime_kind": match item.lifetime { ContextLifetime::Session {..} => "session", ContextLifetime::Run {..} => "run", ContextLifetime::Step {..} => "step" }})
++            }
++            value => serde_json::to_value(value).expect("fragment metadata serialization"),
++        };
++        crate::serialization::data_digest(&(
++            &self.identity,
++            self.origin,
++            &self.source_revision,
++            &self.assembler_version,
++            content,
++        ))
++    }
++    /// Check intrinsic identity and integrity. This does not establish access permission.
++    pub fn validate(&self) -> Result<(), ContractError> {
++        if self.assembler_version.as_str() != CONTEXT_FRAGMENT_ASSEMBLER
++            || self.content_digest != self.calculate_digest()
++        {
++            return Err(invalid("context.fragment_digest"));
++        }
++        if let FragmentValue::Item { item } = &self.value {
++            let owner = match &item.lifetime {
++                ContextLifetime::Session { session_id } => FragmentOwner::Session {
++                    session_id: session_id.clone(),
++                },
++                ContextLifetime::Run { run_id } | ContextLifetime::Step { run_id, .. } => {
++                    FragmentOwner::Run {
++                        run_id: run_id.clone(),
++                    }
++                }
++            };
++            if item.scope != self.identity.scope
++                || owner != self.identity.owner
++                || item.origin != self.origin
++                || !item.valid_digest()
++            {
++                return Err(invalid("context.fragment_item"));
++            }
++        }
++        Ok(())
++    }
++}
++/// Select newest core observations while retaining their committed input order.
++/// Tombstones remove content, and conflicting copies of one revision are errors.
++/// Callers must authorize the corresponding source records before projection.
++pub fn select_context_fragments(
++    fragments: &[ContextFragment],
++    scope: &Scope,
++) -> Result<Vec<ContextItem>, ContractError> {
++    let mut selected: BTreeMap<String, (usize, &ContextFragment)> = BTreeMap::new();
++    for (index, fragment) in fragments.iter().enumerate() {
++        fragment.validate()?;
++        if &fragment.identity.scope != scope {
++            return Err(ContractError::new(
++                ErrorCode::AccessDenied,
++                "context.fragment_scope",
++            ));
++        }
++        let key = fragment.identity.key().to_string();
++        if let Some((_, prior)) = selected.get(&key) {
++            if fragment.core_revision == prior.core_revision && fragment != *prior {
++                return Err(invalid("context.fragment_conflict"));
++            }
++            if fragment.core_revision <= prior.core_revision {
++                continue;
++            }
++        }
++        selected.insert(key, (index, fragment));
++    }
++    let mut ordered: Vec<_> = selected.into_values().collect();
++    ordered.sort_by_key(|(index, _)| *index);
++    Ok(ordered
++        .into_iter()
++        .filter_map(|(_, fragment)| {
++            if let FragmentValue::Item { item } = &fragment.value {
++                Some(item.clone())
++            } else {
++                None
++            }
++        })
++        .collect())
++}
++fn invalid(path: &str) -> ContractError {
++    ContractError::new(ErrorCode::InvalidContext, path)
++}
+diff --git a/crates/wickle/src/context_lineage.rs b/crates/wickle/src/context_lineage.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..c23496843fedacc756ec9d9a61110522e555de27
+--- /dev/null
++++ b/crates/wickle/src/context_lineage.rs
+@@ -0,0 +1,104 @@
++//! Source-batch relationships for derived conversation data.
++use crate::*;
++use serde::{Deserialize, Serialize};
++use std::collections::BTreeSet;
++
++/// Immutable source observation used by a covered model/Tool conversation round.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct ContextLineage {
++    /// Original Run that committed the source observation.
++    pub run_id: Id,
++    /// Whole immutable batch; its fragment records preserve exact item versions.
++    pub batch_ref: RecordRef,
++}
++/// Derive dependencies from model-step and Tool-call evidence, in transcript and
++/// committed batch order. A legacy unanchored model message conservatively uses
++/// its Run's observed sources rather than inventing a precise association.
++pub(crate) fn derive_lineage(
++    messages: &[Message],
++    snapshots: &[&RunSnapshot],
++    batches: &[ContextBatch],
++) -> Result<Vec<ContextLineage>, ContractError> {
++    let mut lineage = Vec::new();
++    for message in messages.iter().filter(|message| {
++        matches!(
++            message.visibility,
++            Visibility::Model | Visibility::UserAndModel
++        ) && matches!(message.origin, MessageOrigin::Model | MessageOrigin::Tool)
++    }) {
++        let snapshot = snapshots
++            .iter()
++            .find(|snapshot| snapshot.run_id == message.run_id)
++            .ok_or_else(|| ContractError::new(ErrorCode::InvalidSnapshot, "context.lineage_run"))?;
++        let mut attempts = BTreeSet::new();
++        for block in &message.content {
++            match block {
++                ContentBlock::ToolCall { call } => {
++                    attempts.insert(call.model_request_id.clone());
++                }
++                ContentBlock::ToolResult { result }
++                | ContentBlock::ToolResultCorrection { result, .. } => {
++                    let call = snapshot
++                        .tool_ledger
++                        .iter()
++                        .find(|entry| entry.call.call_id == result.call_id)
++                        .ok_or_else(|| {
++                            ContractError::new(ErrorCode::InvalidSnapshot, "context.lineage_call")
++                        })?;
++                    attempts.insert(call.call.model_request_id.clone());
++                }
++                _ => {}
++            }
++        }
++        if let Some(attempt) = &message.source_model_request_id {
++            if !snapshot.model_ledger.iter().any(|invocation| {
++                &invocation.attempt_id == attempt
++                    && invocation.purpose == ModelPurpose::Agent
++                    && matches!(invocation.state, ModelAttemptState::Completed {})
++            }) {
++                return Err(ContractError::new(
++                    ErrorCode::InvalidSnapshot,
++                    "context.lineage_attempt",
++                ));
++            }
++            attempts.insert(attempt.clone());
++        }
++        if attempts.is_empty()
++            && !snapshot.status.is_terminal()
++            && !snapshot.context_batches.is_empty()
++        {
++            return Err(ContractError::new(
++                ErrorCode::ContextMismatch,
++                "context.unanchored_active_history",
++            ));
++        }
++        let steps: BTreeSet<_> = snapshot
++            .model_ledger
++            .iter()
++            .filter(|invocation| attempts.contains(&invocation.attempt_id))
++            .map(|invocation| &invocation.model_step_id)
++            .collect();
++        for batch in batches
++            .iter()
++            .filter(|batch| batch.request().run_id == snapshot.run_id)
++        {
++            if batch
++                .request()
++                .model_step_id
++                .as_ref()
++                .is_some_and(|step| !steps.is_empty() && !steps.contains(step))
++            {
++                continue;
++            }
++            let dependency = ContextLineage {
++                run_id: snapshot.run_id.clone(),
++                batch_ref: batch.reference(),
++            };
++            if !lineage.contains(&dependency) {
++                lineage.push(dependency);
++            }
++        }
++    }
++    Ok(lineage)
++}
+diff --git a/crates/wickle/src/context_projection.rs b/crates/wickle/src/context_projection.rs
+index 019bff2ed47fe3839a87d1c5394e42f6d90f78c4..b1833892aa9067fd6ef726107bd295289bc10d20 100644
+--- a/crates/wickle/src/context_projection.rs
++++ b/crates/wickle/src/context_projection.rs
+@@ -478,7 +478,7 @@ impl ContextItem {
+             priority_class,
+         }
+     }
+-    fn valid_digest(&self) -> bool {
++    pub(crate) fn valid_digest(&self) -> bool {
+         self.digest
+             == data_digest(&(
+                 &self.item_id,
+diff --git a/crates/wickle/src/context_source.rs b/crates/wickle/src/context_source.rs
+index c91a76bd41921300ba192f6201ae91e52547d802..dce2b3c8d9e1c0b523be83197b148042f61eaebf 100644
+--- a/crates/wickle/src/context_source.rs
++++ b/crates/wickle/src/context_source.rs
+@@ -78,6 +78,10 @@ pub struct ContextSourceUsage {
+ pub enum ContextResult {
+     /// One or more original, locally identified items.
+     Ready {
++        /// Explicit per-item external versions, keyed by native item ID. Missing is unknown;
++        /// the batch/index revision is never substituted for a document revision.
++        #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
++        item_revisions: std::collections::BTreeMap<Id, Id>,
+         /// Items whose original claims must validate before namespacing.
+         items: Vec<ContextItem>,
+         /// Optional source data revision.
+@@ -92,6 +96,16 @@ pub enum ContextResult {
+         /// Optional reported external-service usage.
+         reported_usage: Option<ContextSourceUsage>,
+     },
++    /// The source explicitly reports deleted native material IDs. This is not
++    /// inferred from an empty search result; the current selection is empty.
++    Deleted {
++        /// Deleted source-local IDs, distinct and bounded by the source item limit.
++        item_ids: Vec<Id>,
++        /// Optional version of the deletion observation/index, not guessed item versions.
++        source_revision: Option<Id>,
++        /// Reported external service usage.
++        reported_usage: Option<ContextSourceUsage>,
++    },
+     /// Explicit operational unavailability; this is not a permission override.
+     Unavailable {
+         /// Safe classified service failure code.
+@@ -127,6 +141,9 @@ impl ContextResult {
+             }
+             | Self::Unavailable {
+                 source_revision, ..
++            }
++            | Self::Deleted {
++                source_revision, ..
+             } => source_revision.as_ref(),
+         }
+     }
+@@ -192,6 +209,12 @@ pub struct ContextCallContext {
+ /// Original source-local identities and content for current source ACL checks.
+ #[derive(Clone)]
+ pub struct ContextUseRequest {
++    /// Current consuming Run; original request ownership remains unchanged.
++    pub consumer_run_id: Id,
++    /// True for historical data used through a derived summary or conversation.
++    pub derived: bool,
++    /// Per-item external revisions; never inferred from the batch/index revision.
++    pub item_revisions: std::collections::BTreeMap<Id, Id>,
+     /// Exact immutable batch used in this projection.
+     pub batch_ref: RecordRef,
+     /// Original query identity and pinned source contract.
+@@ -266,6 +289,8 @@ pub struct ContextBatch {
+     request: ContextRequest,
+     result: ContextResult,
+     items: Vec<ContextItem>,
++    #[serde(default, skip_serializing_if = "Vec::is_empty")]
++    fragments: Vec<ContextFragment>,
+     collected_at_ms: i64,
+     estimated_tokens: u64,
+     estimator_version: VersionedRef,
+diff --git a/crates/wickle/src/context_source/records.rs b/crates/wickle/src/context_source/records.rs
+index e8ea186b2085eee88c115e8c7e8aabc42850f5ab..3e9ea935880b1991989b40010a3abc210e3b2c2c 100644
+--- a/crates/wickle/src/context_source/records.rs
++++ b/crates/wickle/src/context_source/records.rs
+@@ -1,7 +1,7 @@
+ use super::*;
+ use serde_json::json;
+ 
+-const BATCH_VERSION: &str = "wickle.context-batch.v1";
++const BATCH_VERSION: &str = "wickle.context-batch.v2";
+ 
+ impl ContextSourceRegistry {
+     /// Register exact native or adapter-export providers without invoking them.
+@@ -303,6 +303,26 @@ impl ContextBatch {
+     pub fn items(&self) -> &[ContextItem] {
+         &self.items
+     }
++    /// Core-issued observations and withdrawals in committed source order.
++    /// Legacy batches have no fabricated revision evidence.
++    pub fn fragments(&self) -> &[ContextFragment] {
++        &self.fragments
++    }
++    /// Validate issuance against all earlier committed batches in this Run.
++    pub(crate) fn validate_fragment_history(
++        &self,
++        history: &[ContextBatch],
++    ) -> Result<(), ContractError> {
++        if self.schema_version == BATCH_VERSION
++            && self.fragments != self.issue_fragments(history)?
++        {
++            return Err(source_error(
++                ErrorCode::InvalidSnapshot,
++                "context_source.fragment_history",
++            ));
++        }
++        Ok(())
++    }
+     /// Host-estimated tokens of the actual derived items.
+     pub fn estimated_tokens(&self) -> u64 {
+         self.estimated_tokens
+@@ -353,6 +373,7 @@ impl ContextBatch {
+         collected_at_ms: i64,
+         estimator_version: VersionedRef,
+         estimator: &dyn ContextTokenEstimator,
++        history: &[ContextBatch],
+     ) -> Result<Self, ContractError> {
+         validate_result(&request, &result)?;
+         let items = namespaced(&batch_id, &request, result.items())?;
+@@ -364,21 +385,24 @@ impl ContextBatch {
+                 .map_err(|_| source_error(ErrorCode::InvalidContract, "context_source.estimator"))?
+                 .map_err(|error| source_error(error.code, "context_source.estimator"))?
+         };
+-        let batch = Self {
++        let mut batch = Self {
+             schema_version: BATCH_VERSION.into(),
+             batch_id,
+             request,
+             result,
+             items,
++            fragments: vec![],
+             collected_at_ms,
+             estimated_tokens,
+             estimator_version,
+         };
++        batch.fragments = batch.issue_fragments(history)?;
+         batch.validate()?;
+         Ok(batch)
+     }
+     fn validate(&self) -> Result<(), ContractError> {
+-        if self.schema_version != BATCH_VERSION {
++        if self.schema_version != BATCH_VERSION && self.schema_version != "wickle.context-batch.v1"
++        {
+             return Err(source_error(
+                 ErrorCode::UnsupportedSchemaVersion,
+                 "context_source.batch_version",
+@@ -386,6 +410,37 @@ impl ContextBatch {
+         }
+         self.request.validate()?;
+         validate_result(&self.request, &self.result)?;
++        if self.schema_version == "wickle.context-batch.v1" && !self.fragments.is_empty() {
++            return Err(source_error(
++                ErrorCode::InvalidSnapshot,
++                "context_source.legacy_fragments",
++            ));
++        }
++        if self.schema_version == BATCH_VERSION {
++            if self.fragments.is_empty() {
++                return Err(source_error(
++                    ErrorCode::InvalidSnapshot,
++                    "context_source.fragments_missing",
++                ));
++            }
++            for fragment in &self.fragments {
++                fragment.validate()?;
++                if fragment.batch_id != self.batch_id
++                    || fragment.identity.scope != self.request.scope
++                    || fragment.identity.owner
++                        != (FragmentOwner::Run {
++                            run_id: self.request.run_id.clone(),
++                        })
++                    || fragment.origin != self.request.definition.origin
++                {
++                    return Err(source_error(
++                        ErrorCode::InvalidSnapshot,
++                        "context_source.fragment_identity",
++                    ));
++                }
++            }
++        }
++
+         if self.items != namespaced(&self.batch_id, &self.request, self.result.items())? {
+             return Err(source_error(
+                 ErrorCode::InvalidSnapshot,
+@@ -408,6 +463,31 @@ fn validate_result(request: &ContextRequest, result: &ContextResult) -> Result<(
+     request.definition.validate()?;
+     check_bytes(result, request.binding.max_bytes.get())?;
+     let items = result.items();
++    if let ContextResult::Deleted { item_ids, .. } = result {
++        let unique: std::collections::BTreeSet<_> = item_ids.iter().collect();
++        if item_ids.is_empty()
++            || unique.len() != item_ids.len()
++            || item_ids.len() as u64 > request.binding.max_items.get()
++        {
++            return Err(source_error(
++                ErrorCode::InvalidContract,
++                "context_source.deleted_ids",
++            ));
++        }
++    }
++
++    if let ContextResult::Ready { item_revisions, .. } = result {
++        if item_revisions
++            .keys()
++            .any(|id| !items.iter().any(|item| &item.item_id == id))
++        {
++            return Err(source_error(
++                ErrorCode::InvalidContract,
++                "context_source.item_revisions",
++            ));
++        }
++    }
++
+     if matches!(result, ContextResult::Ready { .. }) && items.is_empty() {
+         return Err(source_error(
+             ErrorCode::InvalidContract,
+@@ -506,3 +586,142 @@ pub(super) fn check_bytes(value: &impl Serialize, limit: u64) -> Result<(), Cont
+     }
+     Ok(())
+ }
++
++impl ContextBatch {
++    fn issue_fragments(
++        &self,
++        history: &[ContextBatch],
++    ) -> Result<Vec<ContextFragment>, ContractError> {
++        let producer = Id::new(format!(
++            "source-{}",
++            canonical_digest(&json!([
++                self.request.binding.source,
++                self.request.binding.trigger
++            ]))
++        ))?;
++        let selector = Id::new(format!(
++            "selection-{}",
++            canonical_digest(&json!([
++                self.request.binding.source,
++                self.request.binding.trigger
++            ]))
++        ))?;
++        let identity = |producer_id: Id, fragment_id: Id| FragmentIdentity {
++            scope: self.request.scope.clone(),
++            owner: FragmentOwner::Run {
++                run_id: self.request.run_id.clone(),
++            },
++            producer_id,
++            fragment_id,
++        };
++        let mut heads = std::collections::BTreeMap::new();
++        for batch in history {
++            for fragment in &batch.fragments {
++                heads.insert(fragment.identity.key().to_string(), fragment);
++            }
++        }
++        let status = match self.result {
++            ContextResult::Ready { .. } => "ready",
++            ContextResult::Empty { .. } => "empty",
++            ContextResult::Unavailable { .. } => "unavailable",
++            ContextResult::Deleted { .. } => "deleted",
++        };
++        let slot = identity(selector, Id::new("selection")?);
++        let mut fragments = vec![ContextFragment::issue(
++            slot.clone(),
++            heads.get(&slot.key().to_string()).copied(),
++            self.batch_id.clone(),
++            self.request.definition.origin,
++            self.result.source_revision().cloned(),
++            FragmentValue::Selection {
++                status: Id::new(status)?,
++                item_ids: self
++                    .result
++                    .items()
++                    .iter()
++                    .map(|item| item.item_id.clone())
++                    .collect(),
++            },
++        )?];
++        let revisions = if let ContextResult::Ready { item_revisions, .. } = &self.result {
++            Some(item_revisions)
++        } else {
++            None
++        };
++        let mut present = std::collections::BTreeSet::new();
++        for (original, item) in self.result.items().iter().zip(&self.items) {
++            let identity = identity(producer.clone(), original.item_id.clone());
++            let key = identity.key().to_string();
++            present.insert(key.clone());
++            fragments.push(ContextFragment::issue(
++                identity,
++                heads.get(&key).copied(),
++                self.batch_id.clone(),
++                self.request.definition.origin,
++                revisions
++                    .and_then(|revisions| revisions.get(&original.item_id))
++                    .cloned(),
++                FragmentValue::Item { item: item.clone() },
++            )?);
++        }
++        // Withdraw previously active items in their previous committed order.
++        for batch in history.iter().rev() {
++            if batch.request.binding.source != self.request.binding.source
++                || batch.request.binding.trigger != self.request.binding.trigger
++            {
++                continue;
++            }
++            for prior in &batch.fragments {
++                let key = prior.identity.key().to_string();
++                if prior.identity.producer_id == producer
++                    && !present.contains(&key)
++                    && heads.get(&key).is_some_and(|head| *head == prior)
++                    && matches!(prior.value, FragmentValue::Item { .. })
++                {
++                    fragments.push(ContextFragment::issue(
++                        prior.identity.clone(),
++                        Some(prior),
++                        self.batch_id.clone(),
++                        self.request.definition.origin,
++                        None,
++                        FragmentValue::Tombstone {
++                            reason: Id::new(
++                                if let ContextResult::Deleted { item_ids, .. } = &self.result {
++                                    if item_ids.contains(&prior.identity.fragment_id) {
++                                        "deleted"
++                                    } else {
++                                        "empty"
++                                    }
++                                } else if status == "ready" {
++                                    "replaced"
++                                } else {
++                                    status
++                                },
++                            )?,
++                        },
++                    )?);
++                    present.insert(key);
++                }
++            }
++        }
++        if let ContextResult::Deleted { item_ids, .. } = &self.result {
++            for item_id in item_ids {
++                let identity = identity(producer.clone(), item_id.clone());
++                let key = identity.key().to_string();
++                if present.insert(key.clone()) {
++                    fragments.push(ContextFragment::issue(
++                        identity,
++                        heads.get(&key).copied(),
++                        self.batch_id.clone(),
++                        self.request.definition.origin,
++                        None,
++                        FragmentValue::Tombstone {
++                            reason: Id::new("deleted")?,
++                        },
++                    )?);
++                }
++            }
++        }
++        Ok(fragments)
++    }
++}
+diff --git a/crates/wickle/src/context_source/runtime.rs b/crates/wickle/src/context_source/runtime.rs
+index 801491259300122d4b5bad792cd500704f52b6c3..d16d10936d58e9d979f244082224bd716aad9784 100644
+--- a/crates/wickle/src/context_source/runtime.rs
++++ b/crates/wickle/src/context_source/runtime.rs
+@@ -156,6 +156,7 @@ impl ContextSourceRuntime {
+                 continue;
+             }
+             // A committed query cannot be queried again merely by dropping its slot.
++            let mut history = Vec::new();
+             for reference in &current.snapshot.context_batches {
+                 let record = bounded(
+                     context,
+@@ -171,6 +172,7 @@ impl ContextSourceRuntime {
+                         "context_source.missing_slot",
+                     ));
+                 }
++                history.push(prior);
+             }
+             let result = self.provide(&request, context, budget).await?;
+             budget.check_boundary().await?;
+@@ -181,6 +183,7 @@ impl ContextSourceRuntime {
+                 self.clock.now()?.utc_ms,
+                 self.estimator_version.clone(),
+                 self.estimator.as_ref(),
++                &history,
+             )?;
+             budget.check_boundary().await?;
+             let mut snapshot = bounded(
+@@ -313,6 +316,10 @@ impl ContextSourceRuntime {
+                 ));
+             }
+             required_available(&batch)?;
++            crate::future::boxed(|| {
++                self.check_deletions(&batch, &saved.snapshot, &plan, context, deadline)
++            })
++            .await?;
+             let remaining = saved
+                 .snapshot
+                 .timing
+@@ -348,6 +355,15 @@ impl ContextSourceRuntime {
+                 let call =
+                     self.call_context(&batch.request, context, cancellation.clone(), use_deadline);
+                 let request = ContextUseRequest {
++                    consumer_run_id: run_id.clone(),
++                    derived: false,
++                    item_revisions: if let ContextResult::Ready { item_revisions, .. } =
++                        &batch.result
++                    {
++                        item_revisions.clone()
++                    } else {
++                        Default::default()
++                    },
+                     batch_ref: reference.clone(),
+                     request: batch.request.clone(),
+                     items: batch.result.items().to_vec(),
+@@ -389,10 +405,61 @@ impl ContextSourceRuntime {
+                     "context_source.use",
+                 ));
+             }
+-            items.extend(batch.items);
++            if batch.fragments.is_empty() {
++                items.extend(batch.items);
++            } else {
++                items.extend(select_context_fragments(&batch.fragments, self.scope())?);
++            }
+         }
+         Ok(items)
+     }
++    // Deletion is source-native provenance, not a trigger-specific fragment
++    // identity. Committed order also works for legacy batches without revisions.
++    async fn check_deletions(
++        &self,
++        batch: &ContextBatch,
++        observed: &RunSnapshot,
++        plan: &ContextSourcePlan,
++        context: &ExecutionContext,
++        deadline: tokio::time::Instant,
++    ) -> Result<(), ContractError> {
++        if batch.result.items().is_empty() {
++            return Ok(());
++        }
++        let start = if observed.run_id == batch.request.run_id {
++            observed
++                .context_batches
++                .iter()
++                .position(|reference| reference == &batch.reference())
++                .ok_or_else(|| {
++                    source_error(ErrorCode::InvalidSnapshot, "context_source.deletion_order")
++                })?
++                + 1
++        } else {
++            0
++        };
++        for reference in &observed.context_batches[start..] {
++            let record = bounded(
++                context,
++                None,
++                deadline,
++                self.store.read_record(self.scope(), reference),
++            )
++            .await?;
++            let later = ContextBatch::restore(&record, plan, self.scope(), &observed.run_id)?;
++            if later.request.binding.source == batch.request.binding.source
++                && later.request.definition == batch.request.definition
++                && matches!(&later.result, ContextResult::Deleted { item_ids, .. }
++                    if batch.result.items().iter().any(|item| item_ids.contains(&item.item_id)))
++            {
++                return Err(source_error(
++                    ErrorCode::InvalidContext,
++                    "context_source.withdrawn_lineage",
++                ));
++            }
++        }
++        Ok(())
++    }
+     fn check_scope(&self, context: &ExecutionContext) -> Result<(), ContractError> {
+         if &context.data.scope != self.scope() {
+             return Err(source_error(
+@@ -535,3 +602,239 @@ async fn bounded<T>(
+         result=operation=>result,
+     }
+ }
++
++impl ContextSourceRuntime {
++    /// Resolve exact source dependencies of historical conversation, without fetching data.
++    pub async fn lineage_for_messages(
++        &self,
++        session_id: &Id,
++        messages: &[Message],
++        context: &ExecutionContext,
++        deadline: tokio::time::Instant,
++    ) -> Result<Vec<ContextLineage>, ContractError> {
++        self.check_scope(context)?;
++        let mut runs = std::collections::BTreeMap::new();
++        let mut batches = Vec::new();
++        for message in messages.iter().filter(|message| {
++            matches!(
++                message.visibility,
++                Visibility::Model | Visibility::UserAndModel
++            ) && matches!(message.origin, MessageOrigin::Model | MessageOrigin::Tool)
++        }) {
++            if runs.contains_key(&message.run_id) {
++                continue;
++            }
++            let saved = bounded(
++                context,
++                None,
++                deadline,
++                self.store.load(self.scope(), &message.run_id),
++            )
++            .await?;
++            if &saved.snapshot.request.session_id != session_id {
++                return Err(source_error(
++                    ErrorCode::AccessDenied,
++                    "context_source.lineage_session",
++                ));
++            }
++            if saved.snapshot.source_plan_ref.is_some() {
++                let plan = bounded(
++                    context,
++                    None,
++                    deadline,
++                    self.pinned_plan(&saved.snapshot, self.store.as_ref()),
++                )
++                .await?;
++                for reference in &saved.snapshot.context_batches {
++                    let record = bounded(
++                        context,
++                        None,
++                        deadline,
++                        self.store.read_record(self.scope(), reference),
++                    )
++                    .await?;
++                    batches.push(ContextBatch::restore(
++                        &record,
++                        &plan,
++                        self.scope(),
++                        &message.run_id,
++                    )?);
++                }
++            }
++            runs.insert(message.run_id.clone(), saved.snapshot);
++        }
++        crate::context_lineage::derive_lineage(
++            messages,
++            &runs.values().collect::<Vec<_>>(),
++            &batches,
++        )
++    }
++    /// Reauthorize original batch contents for a current consumer. Historical
++    /// ownership and external versions are retained; no query or revision is invented.
++    pub async fn authorize_lineage(
++        &self,
++        consumer_run_id: &Id,
++        lineage: &[ContextLineage],
++        route: Option<&ResolvedModelRoute>,
++        context: &ExecutionContext,
++        deadline: tokio::time::Instant,
++    ) -> Result<(), ContractError> {
++        self.check_scope(context)?;
++        let consumer = bounded(
++            context,
++            None,
++            deadline,
++            self.store.load(self.scope(), consumer_run_id),
++        )
++        .await?;
++        for dependency in lineage {
++            let original = bounded(
++                context,
++                None,
++                deadline,
++                self.store.load(self.scope(), &dependency.run_id),
++            )
++            .await?;
++            if original.snapshot.request.session_id != consumer.snapshot.request.session_id
++                || !original
++                    .snapshot
++                    .context_batches
++                    .contains(&dependency.batch_ref)
++            {
++                return Err(source_error(
++                    ErrorCode::AccessDenied,
++                    "context_source.lineage_owner",
++                ));
++            }
++            let plan = bounded(
++                context,
++                None,
++                deadline,
++                self.pinned_plan(&original.snapshot, self.store.as_ref()),
++            )
++            .await?;
++            let record = bounded(
++                context,
++                None,
++                deadline,
++                self.store.read_record(self.scope(), &dependency.batch_ref),
++            )
++            .await?;
++            let batch = ContextBatch::restore(&record, &plan, self.scope(), &dependency.run_id)?;
++            // User admission messages retain even failed Runs. Scan all later
++            // observations in this session, including Runs with no model reply.
++            let mut later_runs = Vec::new();
++            let mut reached_origin = false;
++            for message in &consumer.messages {
++                reached_origin |= message.run_id == dependency.run_id;
++                if reached_origin && !later_runs.contains(&message.run_id) {
++                    later_runs.push(message.run_id.clone());
++                }
++            }
++            if !later_runs.contains(&dependency.run_id) {
++                later_runs.insert(0, dependency.run_id.clone());
++            }
++            if !later_runs.contains(consumer_run_id) {
++                later_runs.push(consumer_run_id.clone());
++            }
++            for run_id in later_runs {
++                let observed = bounded(
++                    context,
++                    None,
++                    deadline,
++                    self.store.load(self.scope(), &run_id),
++                )
++                .await?;
++                if observed.snapshot.request.session_id != consumer.snapshot.request.session_id {
++                    return Err(source_error(
++                        ErrorCode::AccessDenied,
++                        "context_source.lineage_session",
++                    ));
++                }
++                if observed.snapshot.source_plan_ref.is_none() {
++                    continue;
++                }
++                let observed_plan = bounded(
++                    context,
++                    None,
++                    deadline,
++                    self.pinned_plan(&observed.snapshot, self.store.as_ref()),
++                )
++                .await?;
++                crate::future::boxed(|| {
++                    self.check_deletions(
++                        &batch,
++                        &observed.snapshot,
++                        &observed_plan,
++                        context,
++                        deadline,
++                    )
++                })
++                .await?;
++            }
++            let use_deadline = deadline.min(
++                tokio::time::Instant::now()
++                    + Duration::from_millis(batch.request.binding.timeout_ms.get()),
++            );
++            self.authorize(
++                &PolicyRequest {
++                    owner_scope: self.scope().clone(),
++                    resource_id: consumer_run_id.clone(),
++                    action: PolicyAction::UseSourceContext {
++                        source: batch.request.binding.source.clone(),
++                        definition_digest: batch.request.definition.digest(),
++                        batch_ref: dependency.batch_ref.clone(),
++                        route: route.cloned().map(Box::new),
++                    },
++                },
++                context,
++                None,
++                use_deadline,
++            )
++            .await?;
++            if batch.items.is_empty() {
++                continue;
++            }
++            let entry = self
++                .registry
++                .get(&batch.request.binding.source)
++                .filter(|entry| entry.definition == batch.request.definition)
++                .ok_or_else(|| {
++                    source_error(
++                        ErrorCode::ComponentUnavailable,
++                        "context_source.lineage_provider",
++                    )
++                })?;
++            let cancellation = context.cancellation.child_token();
++            let _cancel = cancellation.clone().drop_guard();
++            let mut call =
++                self.call_context(&batch.request, context, cancellation.clone(), use_deadline);
++            call.run_id = consumer_run_id.clone();
++            let request = ContextUseRequest {
++                consumer_run_id: consumer_run_id.clone(),
++                derived: true,
++                item_revisions: if let ContextResult::Ready { item_revisions, .. } = &batch.result {
++                    item_revisions.clone()
++                } else {
++                    Default::default()
++                },
++                batch_ref: dependency.batch_ref.clone(),
++                request: batch.request.clone(),
++                items: batch.result.items().to_vec(),
++                source_revision: batch.result.source_revision().cloned(),
++                route: route.cloned(),
++            };
++            bounded(context, None, use_deadline, async {
++                AssertUnwindSafe(async { entry.source.authorize_use(&request, &call).await })
++                    .catch_unwind()
++                    .await
++                    .map_err(|_| {
++                        source_error(ErrorCode::InvalidContract, "context_source.lineage_use")
++                    })?
++                    .map_err(|error| source_error(error.code, "context_source.lineage_use"))
++            })
++            .await?;
++        }
++        Ok(())
++    }
++}
+diff --git a/crates/wickle/src/context_strategy.rs b/crates/wickle/src/context_strategy.rs
+index 73cd551100c423d59004fc420480ef6c41347727..380960d354d2d753af7b322a795a6c69621e85a2 100644
+--- a/crates/wickle/src/context_strategy.rs
++++ b/crates/wickle/src/context_strategy.rs
+@@ -252,6 +252,8 @@ pub struct ContextRevision {
+     pub(crate) through_sequence: u64,
+     pub(crate) covered_message_ids: Vec<Id>,
+     pub(crate) covered_digest: JsonDigest,
++    #[serde(default, skip_serializing_if = "Vec::is_empty")]
++    pub(crate) source_lineage: Vec<ContextLineage>,
+     pub(crate) summary: Option<String>,
+     pub(crate) anchors: Vec<InputContent>,
+     pub(crate) previews: Vec<ContextPreview>,
+diff --git a/crates/wickle/src/context_strategy/compression.rs b/crates/wickle/src/context_strategy/compression.rs
+index 534279a9af72b4ef2c35279ae45dd9e0208c5001..1257beff5f40edca7fdea6352ecb864486109571 100644
+--- a/crates/wickle/src/context_strategy/compression.rs
++++ b/crates/wickle/src/context_strategy/compression.rs
+@@ -7,6 +7,7 @@ pub(super) struct Compression<'a, 'b> {
+     pub saved: &'a StoredRun,
+     pub plan: &'a ContextPlan,
+     pub candidate: ContextRevision,
++    pub lineage: Vec<ContextLineage>,
+     pub view: &'a [Message],
+     pub controls: &'a ContextStrategyContext,
+ }
+@@ -22,6 +23,7 @@ impl ContextRuntime {
+             saved,
+             plan,
+             mut candidate,
++            lineage,
+             view,
+             controls,
+         } = work;
+@@ -123,6 +125,18 @@ impl ContextRuntime {
+             revision_ref: None,
+             failure: None,
+         };
++        if let Some(sources) = services.sources {
++            crate::future::boxed(|| {
++                sources.authorize_lineage(
++                    &saved.snapshot.run_id,
++                    &lineage,
++                    None,
++                    services.context,
++                    controls.deadline,
++                )
++            })
++            .await?;
++        }
+         let result = match compactor {
+             ContextCompactor::Host { compressor, .. } => {
+                 bounded(controls, services, async {
+@@ -168,6 +182,24 @@ impl ContextRuntime {
+         candidate.covered_digest =
+             records::covered_digest(&saved.messages, &candidate.covered_message_ids);
+         candidate.summary = Some(summary);
++        if let Some(sources) = services.sources {
++            let covered: Vec<_> = saved
++                .messages
++                .iter()
++                .filter(|message| candidate.covered_message_ids.contains(&message.message_id))
++                .cloned()
++                .collect();
++            let deadline = services.budget.call_deadline()?;
++            candidate.source_lineage = crate::future::boxed(|| {
++                sources.lineage_for_messages(
++                    &saved.snapshot.request.session_id,
++                    &covered,
++                    services.context,
++                    deadline,
++                )
++            })
++            .await?;
++        }
+         candidate.anchors = records::anchors(
+             &saved.messages,
+             &candidate.covered_message_ids,
+@@ -206,6 +238,7 @@ impl ContextRuntime {
+         self.commit(saved, &candidate, Some(decision), services)
+             .await?;
+         Ok(PreparedContext {
++            lineage,
+             artifacts: Self::artifact_refs(&projection, Some(&candidate), plan)?,
+             projection,
+             input_tokens: tokens,
+diff --git a/crates/wickle/src/context_strategy/engine.rs b/crates/wickle/src/context_strategy/engine.rs
+index d8c5d4c12cfd29374230f70c8f856757c127e286..3e9133bc0c7bf3bd0ec8163912c2f2225424a951 100644
+--- a/crates/wickle/src/context_strategy/engine.rs
++++ b/crates/wickle/src/context_strategy/engine.rs
+@@ -3,11 +3,13 @@ use futures_util::FutureExt;
+ use std::{panic::AssertUnwindSafe, time::Duration};
+ 
+ pub(crate) struct ContextServices<'a> {
++    pub sources: Option<&'a ContextSourceRuntime>,
+     pub bindings: &'a AgentBindings,
+     pub budget: &'a RunBudget,
+     pub context: &'a ExecutionContext,
+ }
+ pub(crate) struct PreparedContext {
++    pub lineage: Vec<ContextLineage>,
+     pub projection: ContextProjection,
+     pub input_tokens: u64,
+     pub artifacts: Vec<ArtifactRef>,
+@@ -224,6 +226,40 @@ impl ContextRuntime {
+             .load(&self.scope, services.budget.run_id())
+             .await?;
+         let (plan, previous) = self.active(&saved, &services).await?;
++        let lineage_deadline = services.budget.call_deadline()?;
++        let lineage = if let Some(sources) = services.sources {
++            let lineage = crate::future::boxed(|| {
++                sources.lineage_for_messages(
++                    &saved.snapshot.request.session_id,
++                    &saved.messages,
++                    services.context,
++                    lineage_deadline,
++                )
++            })
++            .await?;
++            crate::future::boxed(|| {
++                sources.authorize_lineage(
++                    &saved.snapshot.run_id,
++                    &lineage,
++                    Some(&seed.route),
++                    services.context,
++                    lineage_deadline,
++                )
++            })
++            .await?;
++            lineage
++        } else {
++            if previous
++                .as_ref()
++                .is_some_and(|revision| !revision.source_lineage.is_empty())
++            {
++                return Err(context_error(
++                    ErrorCode::ComponentUnavailable,
++                    "context.lineage_source",
++                ));
++            }
++            vec![]
++        };
+         let mut view = records::apply(&saved.messages, previous.as_ref())?;
+         let mut items = Self::items(seed.context_items, previous.as_ref(), &plan)?;
+         match self
+@@ -235,6 +271,7 @@ impl ContextRuntime {
+                 if self.token_fit(&projection.request, input_tokens, &services)? =>
+             {
+                 return Ok(PreparedContext {
++                    lineage: lineage.clone(),
+                     artifacts: Self::artifact_refs(&projection, previous.as_ref(), &plan)?,
+                     projection,
+                     input_tokens,
+@@ -268,7 +305,7 @@ impl ContextRuntime {
+         self.authorize(&saved, &seed.route, &controls, &services)
+             .await?;
+         let mut candidate = previous.clone().unwrap_or(ContextRevision {
+-            schema_version: "wickle.context-revision.v1".into(),
++            schema_version: "wickle.context-revision.v2".into(),
+             scope: self.scope.clone(),
+             session_id: saved.snapshot.request.session_id.clone(),
+             run_id: saved.snapshot.run_id.clone(),
+@@ -281,6 +318,7 @@ impl ContextRuntime {
+                 .expect("validated plan"),
+             through_sequence: saved.session.transcript_revision,
+             covered_message_ids: vec![],
++            source_lineage: vec![],
+             covered_digest: records::covered_digest(&saved.messages, &[]),
+             summary: None,
+             anchors: vec![],
+@@ -292,6 +330,24 @@ impl ContextRuntime {
+         });
+         candidate.run_id = saved.snapshot.run_id.clone();
+         candidate.model_step_id = seed.model_step_id.clone();
++        candidate.schema_version = "wickle.context-revision.v2".into();
++        if let Some(sources) = services.sources {
++            let covered: Vec<_> = saved
++                .messages
++                .iter()
++                .filter(|message| candidate.covered_message_ids.contains(&message.message_id))
++                .cloned()
++                .collect();
++            candidate.source_lineage = crate::future::boxed(|| {
++                sources.lineage_for_messages(
++                    &saved.snapshot.request.session_id,
++                    &covered,
++                    services.context,
++                    lineage_deadline,
++                )
++            })
++            .await?;
++        }
+         candidate.parent = saved.snapshot.context_revision_ref.clone();
+         candidate.plan_ref = saved
+             .snapshot
+@@ -321,6 +377,7 @@ impl ContextRuntime {
+                     .await?;
+                 self.commit(&saved, &candidate, None, &services).await?;
+                 return Ok(PreparedContext {
++                    lineage: lineage.clone(),
+                     artifacts: Self::artifact_refs(&projection, Some(&candidate), &plan)?,
+                     projection,
+                     input_tokens: tokens,
+@@ -337,6 +394,7 @@ impl ContextRuntime {
+                 saved: &saved,
+                 plan: &plan,
+                 candidate,
++                lineage,
+                 view: &view,
+                 controls: &controls,
+             },
+diff --git a/crates/wickle/src/context_strategy/model_compactor.rs b/crates/wickle/src/context_strategy/model_compactor.rs
+index 3fcb720b11974e31f5272863731332a6c84840e2..a6829ea6d10e3535f3705be99d6bd234dfbacaf8 100644
+--- a/crates/wickle/src/context_strategy/model_compactor.rs
++++ b/crates/wickle/src/context_strategy/model_compactor.rs
+@@ -3,11 +3,45 @@ use super::*;
+ use std::collections::BTreeSet;
+ 
+ struct SummaryProjector<'a> {
++    sources: Option<&'a ContextSourceRuntime>,
++    lineage: Vec<ContextLineage>,
+     request: &'a CompactionRequest,
+     estimator: &'a dyn ModelTokenEstimator,
+     limits: ModelResponseLimits,
+ }
+ impl ModelRequestProjector for SummaryProjector<'_> {
++    fn authorize_use<'a>(
++        &'a self,
++        selection: &'a RouteSelection,
++        _: &'a RoutedModelInput,
++        context: &'a ModelProjectionContext,
++    ) -> PortFuture<'a, ()> {
++        Box::pin(async move {
++            if let Some(sources) = self.sources {
++                let current = ExecutionContext::new(
++                    ExecutionContextData {
++                        scope: context.scope.clone(),
++                        principal_ref: context.principal_ref.clone(),
++                        capability_grant_ref: context.capability_grant_ref.clone(),
++                        trace_context: None,
++                        system_inputs: None,
++                    },
++                    context.cancellation.clone(),
++                );
++                sources
++                    .authorize_lineage(
++                        &self.request.run_id,
++                        &self.lineage,
++                        Some(&selection.route),
++                        &current,
++                        context.deadline,
++                    )
++                    .await?;
++            }
++            Ok(())
++        })
++    }
++
+     fn project<'a>(
+         &'a self,
+         selection: &'a RouteSelection,
+@@ -95,7 +129,23 @@ impl ContextRuntime {
+         limits.max_input_bytes = limits
+             .max_input_bytes
+             .max(self.limits.max_compactor_input_bytes);
++        let lineage = if let Some(sources) = services.sources {
++            let deadline = services.budget.call_deadline()?;
++            crate::future::boxed(|| {
++                sources.lineage_for_messages(
++                    &saved.snapshot.request.session_id,
++                    &saved.messages,
++                    services.context,
++                    deadline,
++                )
++            })
++            .await?
++        } else {
++            vec![]
++        };
+         let projector = SummaryProjector {
++            sources: services.sources,
++            lineage,
+             request,
+             estimator: services.bindings.token_estimator.as_ref(),
+             limits,
+diff --git a/crates/wickle/src/context_strategy/records.rs b/crates/wickle/src/context_strategy/records.rs
+index bf446b036f4ae1521a4d89a89e200959a378fce0..972b346260e90bbf7be19de6a779644d32ad87d3 100644
+--- a/crates/wickle/src/context_strategy/records.rs
++++ b/crates/wickle/src/context_strategy/records.rs
+@@ -311,6 +311,10 @@ impl ContextRevision {
+     pub fn covered_message_ids(&self) -> &[Id] {
+         &self.covered_message_ids
+     }
++    /// Exact source batches represented by the covered conversation.
++    pub fn source_lineage(&self) -> &[ContextLineage] {
++        &self.source_lineage
++    }
+     /// Stored complete summary, never substituted for System instructions.
+     pub fn summary(&self) -> Option<&str> {
+         self.summary.as_deref()
+@@ -358,7 +362,10 @@ impl ContextRevision {
+         let revision: Self = serde_json::from_value(record.value().clone())
+             .map_err(|_| context_error(ErrorCode::InvalidSnapshot, "context.revision"))?;
+         if record.reference().digest != crate::serialization::data_digest(&revision)
+-            || revision.schema_version != "wickle.context-revision.v1"
++            || !matches!(
++                revision.schema_version.as_str(),
++                "wickle.context-revision.v1" | "wickle.context-revision.v2"
++            )
+             || &revision.scope != scope
+             || &revision.session_id != session_id
+             || revision.plan_ref.digest != plan.digest()
+diff --git a/crates/wickle/src/lib.rs b/crates/wickle/src/lib.rs
+index 96d24d81e27affeb1dbe000d6e257c429190d9e8..769bdf6ebd1732a26f945d1fac170e52becc5254 100644
+--- a/crates/wickle/src/lib.rs
++++ b/crates/wickle/src/lib.rs
+@@ -212,3 +212,12 @@ pub use provider_tool_schema::{
+     ProviderToolSchemaLimits, ProviderToolTarget, ToolConstraintEnforcement,
+     ToolConstraintFragment,
+ };
++
++mod context_fragment;
++pub use context_fragment::{
++    CONTEXT_FRAGMENT_ASSEMBLER, ContextFragment, FragmentIdentity, FragmentOwner, FragmentValue,
++    select_context_fragments,
++};
++
++mod context_lineage;
++pub use context_lineage::ContextLineage;
+diff --git a/crates/wickle/src/message.rs b/crates/wickle/src/message.rs
+index 7a910e71d6b0dabfd21bc25086282035172c853c..aaa3c3b9cd219722511e6f878ced2f3d7c05c8d1 100644
+--- a/crates/wickle/src/message.rs
++++ b/crates/wickle/src/message.rs
+@@ -373,6 +373,10 @@ pub enum Visibility {
+ #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+ #[serde(deny_unknown_fields)]
+ pub struct Message {
++    /// Immutable physical model attempt that produced this message, when known.
++    /// Legacy messages omit this field; it is provenance, not model-visible content.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub source_model_request_id: Option<Id>,
+     /// Unique message identity.
+     pub message_id: Id,
+     /// Owning run.
+diff --git a/crates/wickle/src/state.rs b/crates/wickle/src/state.rs
+index b460e66aa2ec775ba4c9c7d17aacbeac5f2bc6af..9ae4f61a99859d2790a2eb19ec3879766fa53cfe 100644
+--- a/crates/wickle/src/state.rs
++++ b/crates/wickle/src/state.rs
+@@ -1227,6 +1227,40 @@ fn validate_messages(
+         {
+             return Err(error(ErrorCode::InvalidMessage, "messages"));
+         }
++        if let Some(attempt) = &message.source_model_request_id {
++            let valid = message.origin == crate::MessageOrigin::Model
++                && state.runs.get(run_id).is_some_and(|run| run.snapshot.model_ledger.iter().any(|invocation|
++                    &invocation.attempt_id == attempt && invocation.purpose == crate::ModelPurpose::Agent
++                    && matches!(invocation.state, crate::ModelAttemptState::Completed {})))
++                && message.content.iter().all(|block| !matches!(block, ContentBlock::ToolCall { call } if &call.model_request_id != attempt));
++            if !valid {
++                return Err(error(
++                    ErrorCode::InvalidMessage,
++                    "messages.model_provenance",
++                ));
++            }
++            if message.visibility == crate::Visibility::UserAndModel
++                && !message
++                    .content
++                    .iter()
++                    .any(|block| matches!(block, ContentBlock::ToolCall { .. }))
++                && state
++                    .runs
++                    .get(run_id)
++                    .and_then(|run| {
++                        run.snapshot.model_ledger.iter().rev().find(|entry| {
++                            entry.purpose == crate::ModelPurpose::Agent
++                                && matches!(entry.state, crate::ModelAttemptState::Completed {})
++                        })
++                    })
++                    .is_none_or(|entry| &entry.attempt_id != attempt)
++            {
++                return Err(error(
++                    ErrorCode::InvalidMessage,
++                    "messages.final_model_provenance",
++                ));
++            }
++        }
+         for content in &message.content {
+             if matches!(content, ContentBlock::ToolResultCorrection { .. }) {
+                 let mut history: Vec<_> = state
+diff --git a/crates/wickle/src/state/context_state.rs b/crates/wickle/src/state/context_state.rs
+index 35be33492870ed9d9ddf85cc026d1963d4ef0bd9..a1f799b2d6e550779cc612bb9326d13c961c7c0c 100644
+--- a/crates/wickle/src/state/context_state.rs
++++ b/crates/wickle/src/state/context_state.rs
+@@ -31,13 +31,28 @@ pub(super) fn revision(
+         .sessions
+         .get(&snapshot.request.session_id)
+         .ok_or_else(not_found)?;
+-    ContextRevision::restore(
++    let restored = ContextRevision::restore(
+         &record,
+         &plan,
+         &snapshot.scope,
+         &snapshot.request.session_id,
+         &session.messages,
+-    )
++    )?;
++    if restored.schema_version == "wickle.context-revision.v2" {
++        let messages: Vec<_> = session
++            .messages
++            .iter()
++            .filter(|message| restored.covered_message_ids.contains(&message.message_id))
++            .cloned()
++            .collect();
++        let expected = source_lineage(state, additions, snapshot, &messages)?;
++        if restored.source_lineage != expected {
++            return Err(error(ErrorCode::InvalidSnapshot, "context.summary_lineage"));
++        }
++    } else if !restored.source_lineage.is_empty() {
++        return Err(error(ErrorCode::InvalidSnapshot, "context.legacy_lineage"));
++    }
++    Ok(restored)
+ }
+ pub(super) fn validate_snapshot(
+     state: &ScopeState,
+@@ -355,3 +370,61 @@ pub(super) fn validate_session(
+     }
+     Ok(())
+ }
++
++fn source_lineage(
++    state: &ScopeState,
++    additions: &BTreeMap<RecordKey, ProtectedRecord>,
++    current: &RunSnapshot,
++    messages: &[Message],
++) -> Result<Vec<crate::ContextLineage>, ContractError> {
++    let mut runs = BTreeMap::new();
++    let mut batches = Vec::new();
++    for message in messages.iter().filter(|message| {
++        matches!(
++            message.visibility,
++            crate::Visibility::Model | crate::Visibility::UserAndModel
++        ) && matches!(
++            message.origin,
++            crate::MessageOrigin::Model | crate::MessageOrigin::Tool
++        )
++    }) {
++        if runs.contains_key(&message.run_id) {
++            continue;
++        }
++        let snapshot = if message.run_id == current.run_id {
++            current
++        } else {
++            &state
++                .runs
++                .get(&message.run_id)
++                .ok_or_else(not_found)?
++                .snapshot
++        };
++        if snapshot.request.session_id != current.request.session_id {
++            return Err(error(ErrorCode::InvalidSnapshot, "context.lineage_session"));
++        }
++        if let Some(reference) = &snapshot.source_plan_ref {
++            let value = record_value(state, additions, reference)?;
++            let plan = crate::ContextSourcePlan::restore(
++                &serde_json::to_string(value)
++                    .map_err(|_| error(ErrorCode::InvalidJson, "context.lineage_plan"))?,
++                &snapshot.scope,
++                &reference.digest,
++            )?;
++            for reference in &snapshot.context_batches {
++                batches.push(crate::ContextBatch::restore(
++                    &record(state, additions, reference)?,
++                    &plan,
++                    &snapshot.scope,
++                    &snapshot.run_id,
++                )?);
++            }
++        }
++        runs.insert(message.run_id.clone(), snapshot);
++    }
++    crate::context_lineage::derive_lineage(
++        messages,
++        &runs.values().copied().collect::<Vec<_>>(),
++        &batches,
++    )
++}
+diff --git a/crates/wickle/src/state/source_state.rs b/crates/wickle/src/state/source_state.rs
+index 7186d39c24b76e6cf63d4c71eafca0c5f27957be..3548733fb44db587ace44d5b794cb4054ede10a9 100644
+--- a/crates/wickle/src/state/source_state.rs
++++ b/crates/wickle/src/state/source_state.rs
+@@ -78,6 +78,7 @@ pub(super) fn validate_source_snapshot(
+             value.clone(),
+         );
+         let batch = ContextBatch::restore(&record, &plan, &snapshot.scope, &snapshot.run_id)?;
++        batch.validate_fragment_history(&batches)?;
+         if batch.request().session_id != snapshot.request.session_id
+             || batch.request().user_input != snapshot.request.input
+             || !requests.insert(batch.request().context_request_id.clone())
+diff --git a/crates/wickle/src/state/verification_state.rs b/crates/wickle/src/state/verification_state.rs
+index 3ad5a4410bd1dbc92886dfe26f5a69a2712738b8..7b943080fa9d8e3475547bc987c96cbdf05b5e2c 100644
+--- a/crates/wickle/src/state/verification_state.rs
++++ b/crates/wickle/src/state/verification_state.rs
+@@ -381,6 +381,15 @@ pub(super) fn transition(
+             || answer.origin != crate::MessageOrigin::Model
+             || answer.visibility != crate::Visibility::Model
+             || answer_content != candidate.output
++            || answer
++                .source_model_request_id
++                .as_ref()
++                .is_some_and(|attempt| {
++                    !next.model_ledger.iter().any(|entry| {
++                        &entry.attempt_id == attempt
++                            && entry.response_ref.as_ref() == Some(&candidate.response_ref)
++                    })
++                })
+             || revision.role != MessageRole::User
+             || revision.origin != crate::MessageOrigin::Verification
+             || revision.visibility != crate::Visibility::Model
+@@ -466,6 +475,15 @@ pub(super) fn history(
+         if answer.run_id != snapshot.run_id
+             || answer.origin != crate::MessageOrigin::Model
+             || output != candidate.output
++            || answer
++                .source_model_request_id
++                .as_ref()
++                .is_some_and(|attempt| {
++                    !snapshot.model_ledger.iter().any(|entry| {
++                        &entry.attempt_id == attempt
++                            && entry.response_ref.as_ref() == Some(&candidate.response_ref)
++                    })
++                })
+             || revision.run_id != snapshot.run_id
+             || revision.origin != crate::MessageOrigin::Verification
+             || revision.visibility != crate::Visibility::Model
+diff --git a/crates/wickle/src/tool_execution/resume.rs b/crates/wickle/src/tool_execution/resume.rs
+index 7b694b0d0003bef13a1f6e482a0b092df3da7f5f..f310b542da70a62b278c51e308c6a67b576ce283 100644
+--- a/crates/wickle/src/tool_execution/resume.rs
++++ b/crates/wickle/src/tool_execution/resume.rs
+@@ -301,6 +301,7 @@ impl SerialToolRound {
+             }
+         };
+         let message = Message {
++            source_model_request_id: None,
+             message_id: self.ids.next_id()?,
+             run_id: saved.snapshot.run_id.clone(),
+             sequence: saved
+diff --git a/crates/wickle/src/tool_execution/round.rs b/crates/wickle/src/tool_execution/round.rs
+index a364acfaf5a1b9acde24e2f3ae2a6ba1720152f7..6bb3151fa16e5fece362a6584e14d3918d07a0d6 100644
+--- a/crates/wickle/src/tool_execution/round.rs
++++ b/crates/wickle/src/tool_execution/round.rs
+@@ -853,6 +853,7 @@ impl SerialToolRound {
+             },
+         };
+         let message = Message {
++            source_model_request_id: None,
+             message_id: self.ids.next_id()?,
+             run_id: budget.run_id().clone(),
+             sequence: saved
+diff --git a/crates/wickle/tests/agent_tool_loop.rs b/crates/wickle/tests/agent_tool_loop.rs
+index a41cd7c8e0e300d2bbc40ca1450e3687315889ec..cc56aa84cbc6bbe767afefb45e9d36bd3ae6c6fa 100644
+--- a/crates/wickle/tests/agent_tool_loop.rs
++++ b/crates/wickle/tests/agent_tool_loop.rs
+@@ -3,6 +3,15 @@
+ #[path = "support/agent.rs"]
+ #[allow(dead_code)]
+ mod agent_support;
++#[path = "support/agent_hooks.rs"]
++#[allow(dead_code)]
++mod hooks_support;
++#[path = "support/agent_resume.rs"]
++#[allow(dead_code)]
++mod resume_support;
++#[path = "support/context_sources.rs"]
++#[allow(dead_code, unused_imports)]
++mod source_support;
+ use agent_support::{completed, context, id, profile, reference, request, scope};
+ use futures_util::stream;
+ use serde_json::{Value, json};
+@@ -2092,3 +2101,106 @@ async fn verifier_repair_does_not_repeat_an_applied_business_write() {
+     assert_eq!(fixture.outcome(&replay).await, outcome);
+     assert_eq!(fixture.tools[1].applied.load(Ordering::SeqCst), 1);
+ }
++
++#[tokio::test]
++async fn compacted_source_history_keeps_immutable_lineage_and_rechecks_current_acl() {
++    let mut f = Fixture::new(
++        vec![("read", object(json!({"query":"chunk"})))],
++        Behavior::Success,
++    );
++    f.model.rounds.store(3, Ordering::SeqCst);
++    let (mut bindings, _) = long_bindings(&f, 3500);
++    let mut source_fixture = source_support::Fixture::new();
++    let source = source_fixture.add(
++        "records",
++        ContextTrigger::RunStart,
++        true,
++        vec![source_support::Reply::Ready, source_support::Reply::Empty],
++    );
++    f.profile.context_sources = Some(source_fixture.bindings.clone());
++    let registry = Arc::new(
++        ContextSourceRegistry::new(
++            scope(),
++            vec![ContextSourceRegistration {
++                selection: source.selection.clone(),
++                definition: source.definition.clone(),
++                source: source.clone(),
++            }],
++        )
++        .unwrap(),
++    );
++    bindings.context_sources = Some(Arc::new(
++        ContextSourceRuntime::new(
++            bindings.state.clone(),
++            bindings.policy.clone(),
++            bindings.clock.clone(),
++            bindings.ids.clone(),
++            registry,
++            source_fixture.estimator.clone(),
++        )
++        .unwrap(),
++    ));
++    bindings.context_token_estimator = Some(source_fixture.estimator.clone());
++    let summary = Arc::new(Summary {
++        calls: AtomicUsize::new(0),
++        requests: Mutex::new(vec![]),
++        bad: false,
++    });
++    bindings.context_runtime = Some(Arc::new(
++        ContextRuntime::new(
++            scope(),
++            Arc::new(BoundedContextStrategy),
++            Some(ContextCompactor::Host {
++                definition: reference("summary"),
++                compressor: summary.clone(),
++            }),
++            ContextRewriteLimits::default(),
++        )
++        .unwrap(),
++    ));
++    let agent = create_agent(f.profile.clone(), bindings).unwrap();
++    let handle = f.start(&agent).await;
++    assert_eq!(
++        f.outcome(&handle).await.result.status(),
++        RunStatus::Succeeded
++    );
++    assert!(summary.calls.load(Ordering::SeqCst) > 0);
++    let saved = f.base.store.load(&scope(), handle.run_id()).await.unwrap();
++    let record = f
++        .base
++        .store
++        .read_record(
++            &scope(),
++            saved.snapshot.context_revision_ref.as_ref().unwrap(),
++        )
++        .await
++        .unwrap();
++    assert_eq!(
++        record.value()["source_lineage"],
++        json!([{
++            "run_id":handle.run_id(), "batch_ref":saved.snapshot.context_batches[0]
++        }])
++    );
++    // The second Run has an empty fresh selection, so only the summary's old
++    // source can cause this denial; no second provider inference is allowed.
++    source.revoked.store(true, Ordering::SeqCst);
++    let before = f.model.calls.load(Ordering::SeqCst);
++    let second = completed(
++        agent
++            .start(request("next-source-run"), context())
++            .await
++            .unwrap(),
++    );
++    assert_eq!(f.outcome(&second).await.result.status(), RunStatus::Failed);
++    assert_eq!(f.model.calls.load(Ordering::SeqCst), before);
++    assert!(
++        source
++            .use_requests
++            .lock()
++            .unwrap()
++            .iter()
++            .any(|request| request.derived
++                && request.consumer_run_id == *second.run_id()
++                && request.request.run_id == *handle.run_id())
++    );
++}
+diff --git a/crates/wickle/tests/context_projection.rs b/crates/wickle/tests/context_projection.rs
+index 2f76f7549b9ee4f9ddbe394b3f5562f52fa364b3..a1b9b897f12bedc1f53ad4a684f4c35dd7bdcf25 100644
+--- a/crates/wickle/tests/context_projection.rs
++++ b/crates/wickle/tests/context_projection.rs
+@@ -182,6 +182,7 @@ impl Fixture {
+     }
+     fn current_message(&self, sequence: u64) -> Message {
+         Message {
++            source_model_request_id: None,
+             message_id: self.request_message_id.clone(),
+             run_id: self.run_id.clone(),
+             sequence: sequence.try_into().unwrap(),
+@@ -258,6 +259,7 @@ fn message(
+     content: Vec<ContentBlock>,
+ ) -> Message {
+     Message {
++        source_model_request_id: None,
+         message_id: id(&format!("message-{sequence}")),
+         run_id: id(run),
+         sequence: sequence.try_into().unwrap(),
+diff --git a/crates/wickle/tests/context_sources.rs b/crates/wickle/tests/context_sources.rs
+index a2c9ed9e0bda8323db44d1fe306f30a3658f986b..30de1dda3d8d146bcb4e8d42b150f12a668b3030 100644
+--- a/crates/wickle/tests/context_sources.rs
++++ b/crates/wickle/tests/context_sources.rs
+@@ -607,3 +607,277 @@ async fn source_access_errors_never_become_model_unavailable_or_version_drift_fa
+         }
+     }
+ }
++
++async fn saved_batches(fixture: &Fixture, handle: &RunHandle) -> Vec<ContextBatch> {
++    let saved = fixture.saved(handle).await;
++    let plan_ref = saved.snapshot.source_plan_ref.as_ref().unwrap();
++    let record = fixture.store.read_record(&scope(), plan_ref).await.unwrap();
++    let plan = ContextSourcePlan::restore(&record.value().to_string(), &scope(), &plan_ref.digest)
++        .unwrap();
++    let mut batches = vec![];
++    for reference in &saved.snapshot.context_batches {
++        let record = fixture
++            .store
++            .read_record(&scope(), reference)
++            .await
++            .unwrap();
++        batches.push(ContextBatch::restore(&record, &plan, &scope(), handle.run_id()).unwrap());
++    }
++    batches
++}
++
++fn data_fragment(batch: &ContextBatch) -> &ContextFragment {
++    batch
++        .fragments()
++        .iter()
++        .find(|fragment| matches!(fragment.value, FragmentValue::Item { .. }))
++        .unwrap()
++}
++
++#[tokio::test]
++async fn new_observation_advances_core_revision_without_inventing_external_versions() {
++    let mut fixture = Fixture::new();
++    let source = fixture.add(
++        "records",
++        ContextTrigger::BeforeModel,
++        true,
++        vec![Reply::ReadySame, Reply::ReadySame],
++    );
++    fixture.model.fail_first.store(true, Ordering::SeqCst);
++    let agent = fixture.agent();
++    let handle = fixture.start(&agent).await;
++    assert_eq!(
++        fixture.outcome(&handle).await.result.status(),
++        RunStatus::Succeeded
++    );
++    let batches = saved_batches(&fixture, &handle).await;
++    assert_eq!(batches.len(), 2);
++    assert_eq!(source.calls.load(Ordering::SeqCst), 2);
++    assert_eq!(fixture.model.physical_calls.load(Ordering::SeqCst), 3);
++    let first = data_fragment(&batches[0]);
++    let second = data_fragment(&batches[1]);
++    assert_eq!(first.identity, second.identity);
++    assert_eq!(first.core_revision.get(), 1);
++    assert_eq!(second.core_revision.get(), 2);
++    assert_eq!(first.content_digest, second.content_digest);
++    assert_eq!(first.source_revision, None);
++    assert_eq!(second.source_revision, None);
++    assert_ne!(first.batch_id, second.batch_id);
++    assert!(batches[1].fragments().iter().any(|fragment| matches!(
++        fragment.value,
++        FragmentValue::Selection { .. }
++    ) && fragment.source_revision
++        == Some(id("revision-1"))));
++}
++
++#[tokio::test]
++async fn document_revision_is_distinct_from_index_revision_and_reaches_authorization() {
++    let mut fixture = Fixture::new();
++    let source = fixture.add(
++        "records",
++        ContextTrigger::RunStart,
++        true,
++        vec![Reply::ReadyVersion],
++    );
++    let agent = fixture.agent();
++    let handle = fixture.start(&agent).await;
++    assert_eq!(
++        fixture.outcome(&handle).await.result.status(),
++        RunStatus::Succeeded
++    );
++    let batches = saved_batches(&fixture, &handle).await;
++    assert_eq!(
++        data_fragment(&batches[0]).source_revision,
++        Some(id("document-r1"))
++    );
++    let checks = source.use_requests.lock().unwrap();
++    assert!(checks.iter().any(|request| request.derived));
++    assert!(
++        checks
++            .iter()
++            .all(|request| request.item_revisions.get(&id("shared")) == Some(&id("document-r1")))
++    );
++}
++
++#[tokio::test]
++async fn empty_selection_tombstones_prevent_falling_back_to_older_content() {
++    let mut fixture = Fixture::new();
++    fixture.add(
++        "records",
++        ContextTrigger::BeforeModel,
++        true,
++        vec![Reply::Ready, Reply::Empty],
++    );
++    let agent = fixture.agent();
++    let handle = fixture.start(&agent).await;
++    assert_eq!(
++        fixture.outcome(&handle).await.result.status(),
++        RunStatus::Succeeded
++    );
++    let batches = saved_batches(&fixture, &handle).await;
++    let fragments: Vec<_> = batches
++        .iter()
++        .flat_map(|batch| batch.fragments().iter().cloned())
++        .collect();
++    assert!(
++        select_context_fragments(&fragments, &scope())
++            .unwrap()
++            .is_empty()
++    );
++    let tombstone = batches[1]
++        .fragments()
++        .iter()
++        .find(|fragment| fragment.identity == data_fragment(&batches[0]).identity)
++        .unwrap();
++    assert_eq!(tombstone.core_revision.get(), 2);
++    assert!(
++        matches!(&tombstone.value, FragmentValue::Tombstone { reason } if reason == &id("empty"))
++    );
++    let mut other_scope = scope();
++    other_scope.tenant_id = id("other-tenant");
++    assert_eq!(
++        select_context_fragments(&fragments, &other_scope)
++            .unwrap_err()
++            .code,
++        ErrorCode::AccessDenied
++    );
++}
++
++#[tokio::test]
++async fn explicit_deletion_blocks_derived_history_before_another_model_call() {
++    let mut fixture = Fixture::new();
++    let source = fixture.add(
++        "records",
++        ContextTrigger::BeforeModel,
++        true,
++        vec![Reply::Ready, Reply::Deleted],
++    );
++    let agent = fixture.agent();
++    let handle = fixture.start(&agent).await;
++    assert_eq!(
++        fixture.outcome(&handle).await.result.status(),
++        RunStatus::Failed
++    );
++    assert_eq!(source.calls.load(Ordering::SeqCst), 2);
++    assert_eq!(fixture.model.physical_calls.load(Ordering::SeqCst), 1);
++    let batches = saved_batches(&fixture, &handle).await;
++    assert!(batches[1].fragments().iter().any(|fragment| matches!(&fragment.value, FragmentValue::Tombstone { reason } if reason == &id("deleted"))));
++}
++
++#[tokio::test]
++async fn deletion_in_a_new_run_blocks_previous_run_derived_history() {
++    let mut fixture = Fixture::new();
++    let source = fixture.add(
++        "records",
++        ContextTrigger::RunStart,
++        true,
++        vec![Reply::Ready, Reply::Deleted, Reply::Empty],
++    );
++    let agent = fixture.agent();
++    let first = fixture.start(&agent).await;
++    assert_eq!(
++        fixture.outcome(&first).await.result.status(),
++        RunStatus::Succeeded
++    );
++    let calls = fixture.model.physical_calls.load(Ordering::SeqCst);
++    let mut caller = context();
++    caller.data.system_inputs = Some(SystemInputs::new(object(
++        json!({"workspace_id":resume_support::WORKSPACE}),
++    )));
++    let second = completed(
++        agent
++            .start(request("second-request"), caller)
++            .await
++            .unwrap(),
++    );
++    assert_eq!(
++        fixture.outcome(&second).await.result.status(),
++        RunStatus::Failed
++    );
++    assert_eq!(source.calls.load(Ordering::SeqCst), 2);
++    assert_eq!(fixture.model.physical_calls.load(Ordering::SeqCst), calls);
++    let third = completed(
++        agent
++            .start(request("third-request"), context())
++            .await
++            .unwrap(),
++    );
++    assert_eq!(
++        fixture.outcome(&third).await.result.status(),
++        RunStatus::Failed
++    );
++    assert_eq!(fixture.model.physical_calls.load(Ordering::SeqCst), calls);
++    assert_eq!(source.calls.load(Ordering::SeqCst), 3);
++}
++
++#[tokio::test]
++async fn deletion_from_another_trigger_blocks_still_active_run_start_data() {
++    let mut fixture = Fixture::new();
++    fixture.add(
++        "records",
++        ContextTrigger::RunStart,
++        true,
++        vec![Reply::Ready, Reply::Deleted],
++    );
++    let mut step_binding = fixture.bindings[0].clone();
++    step_binding.trigger = ContextTrigger::BeforeModel;
++    fixture.bindings.push(step_binding);
++    let agent = fixture.agent();
++    let handle = fixture.start(&agent).await;
++    assert_eq!(
++        fixture.outcome(&handle).await.result.status(),
++        RunStatus::Failed
++    );
++    assert_eq!(fixture.model.physical_calls.load(Ordering::SeqCst), 0);
++    assert_eq!(saved_batches(&fixture, &handle).await.len(), 2);
++}
++
++#[tokio::test]
++async fn reconciled_tool_observation_retains_the_original_model_step_sources() {
++    let mut fixture = Fixture::new();
++    fixture.add(
++        "records",
++        ContextTrigger::BeforeModel,
++        true,
++        vec![Reply::Ready, Reply::Ready],
++    );
++    let bindings = fixture.agent_bindings();
++    let runtime = bindings.context_sources.clone().unwrap();
++    let agent = create_agent(fixture.profile(), bindings).unwrap();
++    let handle = fixture.start(&agent).await;
++    assert_eq!(
++        fixture.outcome(&handle).await.result.status(),
++        RunStatus::Succeeded
++    );
++    let saved = fixture.saved(&handle).await;
++    let mut correction = saved
++        .messages
++        .iter()
++        .find(|message| message.origin == MessageOrigin::Tool)
++        .unwrap()
++        .clone();
++    let ContentBlock::ToolResult { result } = correction.content[0].clone() else {
++        panic!("tool observation")
++    };
++    correction.content = vec![ContentBlock::ToolResultCorrection {
++        previous_message_id: correction.message_id.clone(),
++        previous_result_digest: canonical_digest(&serde_json::to_value(&result).unwrap()),
++        result,
++    }];
++    let lineage = runtime
++        .lineage_for_messages(
++            &saved.snapshot.request.session_id,
++            &[correction],
++            &context(),
++            tokio::time::Instant::now() + Duration::from_secs(5),
++        )
++        .await
++        .unwrap();
++    assert_eq!(
++        lineage,
++        vec![ContextLineage {
++            run_id: handle.run_id().clone(),
++            batch_ref: saved.snapshot.context_batches[0].clone()
++        }]
++    );
++}
+diff --git a/crates/wickle/tests/input_binding.rs b/crates/wickle/tests/input_binding.rs
+index 01b7bd74127bff2f4d6600f0470afca8a97fe375..fa36609f2183004c17058b7b50f548682005ccf2 100644
+--- a/crates/wickle/tests/input_binding.rs
++++ b/crates/wickle/tests/input_binding.rs
+@@ -394,6 +394,7 @@ impl Fixture {
+             },
+         )];
+         update.messages = vec![Message {
++            source_model_request_id: None,
+             message_id: id(&format!("call-message-{call_id}")),
+             run_id: id("run"),
+             sequence: (saved.session.transcript_revision + 1).try_into().unwrap(),
+diff --git a/crates/wickle/tests/state_sources.rs b/crates/wickle/tests/state_sources.rs
+index 8541a866cab8cbcf0bd916c70d51f4d0daac1aa3..67bf149fceb2fe158f053603acb02c47a96ff577 100644
+--- a/crates/wickle/tests/state_sources.rs
++++ b/crates/wickle/tests/state_sources.rs
+@@ -278,3 +278,63 @@ async fn a_delayed_query_result_cannot_be_committed_after_another_generation_is_
+         before_late
+     );
+ }
++
++fn replace_reference(value: &mut Value, old: &Value, new: &Value) {
++    if value == old {
++        *value = new.clone();
++        return;
++    }
++    match value {
++        Value::Array(values) => values
++            .iter_mut()
++            .for_each(|value| replace_reference(value, old, new)),
++        Value::Object(values) => values
++            .values_mut()
++            .for_each(|value| replace_reference(value, old, new)),
++        _ => {}
++    }
++}
++
++#[tokio::test]
++async fn checkpoint_rejects_revision_rollback_even_when_record_hashes_are_recomputed() {
++    let mut fixture = Fixture::new();
++    fixture.add(
++        "records",
++        ContextTrigger::BeforeModel,
++        true,
++        vec![Reply::ReadySame, Reply::ReadySame],
++    );
++    let agent = fixture.agent();
++    let handle = fixture.start(&agent).await;
++    assert_eq!(
++        fixture.outcome(&handle).await.result.status(),
++        RunStatus::Succeeded
++    );
++    let image =
++        serde_json::to_value(fixture.store.inner.export_checkpoint(&scope()).unwrap()).unwrap();
++    restore(&image).unwrap();
++    for forged_revision in [1, 3] {
++        let mut changed = image.clone();
++        let old = changed["runs"][0]["snapshot"]["context_batches"][1].clone();
++        let record = changed["records"]
++            .as_array_mut()
++            .unwrap()
++            .iter_mut()
++            .find(|record| record["reference"] == old)
++            .unwrap();
++        let fragment = record["value"]["fragments"]
++            .as_array_mut()
++            .unwrap()
++            .iter_mut()
++            .find(|fragment| fragment["value"]["type"] == "item")
++            .unwrap();
++        fragment["core_revision"] = json!(forged_revision);
++        let mut new = old.clone();
++        new["digest"] = serde_json::to_value(canonical_digest(&record["value"])).unwrap();
++        replace_reference(&mut changed, &old, &new);
++        assert!(
++            restore(&changed).is_err(),
++            "accepted skipped or rolled-back core revision {forged_revision}"
++        );
++    }
++}
+diff --git a/crates/wickle/tests/support/context_sources.rs b/crates/wickle/tests/support/context_sources.rs
+index fab8cd240a62a9581197b196106a9c68ef19a2d6..8cd1614118a771f305c9060b4414b0f533f3e0c4 100644
+--- a/crates/wickle/tests/support/context_sources.rs
++++ b/crates/wickle/tests/support/context_sources.rs
+@@ -18,6 +18,9 @@ use wickle::*;
+ #[derive(Clone, Copy)]
+ pub enum Reply {
+     Ready,
++    ReadySame,
++    ReadyVersion,
++    Deleted,
+     Empty,
+     Unavailable,
+     WrongScope,
+@@ -104,6 +107,13 @@ impl ContextSource for Source {
+                         "source.transport",
+                     ));
+                 }
++                Reply::Deleted => {
++                    return Ok(ContextResult::Deleted {
++                        item_ids: vec![id("shared")],
++                        source_revision: Some(id(&format!("revision-{generation}"))),
++                        reported_usage: None,
++                    });
++                }
+                 Reply::Empty => {
+                     return Ok(ContextResult::Empty {
+                         source_revision: Some(id(&format!("revision-{generation}"))),
+@@ -155,7 +165,7 @@ impl ContextSource for Source {
+                 let value = if matches!(reply, Reply::TooLarge) {
+                     json!({"source":self.definition.source.id,"payload":"x".repeat(5000)})
+                 } else {
+-                    json!({"source":self.definition.source.id,"generation":generation})
++                    json!({"source":self.definition.source.id,"generation":if matches!(reply, Reply::ReadySame) { 0 } else { generation }})
+                 };
+                 let mut item = ContextItem::new(
+                     if count == 1 {
+@@ -176,6 +186,11 @@ impl ContextSource for Source {
+                 items.push(item);
+             }
+             Ok(ContextResult::Ready {
++                item_revisions: if matches!(reply, Reply::ReadyVersion) {
++                    [(id("shared"), id("document-r1"))].into()
++                } else {
++                    Default::default()
++                },
+                 items,
+                 source_revision: Some(id(&format!("revision-{generation}"))),
+                 reported_usage: Some(ContextSourceUsage {
+diff --git a/crates/wickle/tests/support/mod.rs b/crates/wickle/tests/support/mod.rs
+index 5b3f8deec97a7459ae3f3793aab52a3a754849e5..09e9b7bb3b98f8b0d6c7414eed9c6109d0fff963 100644
+--- a/crates/wickle/tests/support/mod.rs
++++ b/crates/wickle/tests/support/mod.rs
+@@ -150,6 +150,7 @@ pub async fn admission(
+         },
+     );
+     let message = Message {
++        source_model_request_id: None,
+         message_id: id(&format!("message-{run}")),
+         run_id: snapshot.run_id.clone(),
+         sequence: 1.try_into().unwrap(),
+diff --git a/crates/wickle/tests/support/tool_execution.rs b/crates/wickle/tests/support/tool_execution.rs
+index 1754435d955f84d405e93dc96237fdc43d3a94c3..af2b1c3e318efd4b9ef142367e47e493cfe7b29d 100644
+--- a/crates/wickle/tests/support/tool_execution.rs
++++ b/crates/wickle/tests/support/tool_execution.rs
+@@ -514,6 +514,7 @@ impl Fixture {
+             content.push(ContentBlock::ToolCall { call });
+         }
+         update.messages.push(Message {
++            source_model_request_id: None,
+             message_id: id("call-message"),
+             run_id: id("run"),
+             sequence: (saved.session.transcript_revision + 1).try_into().unwrap(),
+diff --git a/crates/wickle/tests/tool_execution.rs b/crates/wickle/tests/tool_execution.rs
+index 7175880d486dec65c891a7b5c6d015c9fd358eea..41faf5717e75b60702bac9e9db0c4f64eaf17ae5 100644
+--- a/crates/wickle/tests/tool_execution.rs
++++ b/crates/wickle/tests/tool_execution.rs
+@@ -810,6 +810,7 @@ async fn a_saved_failed_result_with_unknown_effect_still_blocks_following_tools(
+         },
+     ));
+     update.messages.push(Message {
++        source_model_request_id: None,
+         message_id: id("historical-result-message"),
+         run_id: id("run"),
+         sequence: (saved.session.transcript_revision + 1).try_into().unwrap(),
+diff --git a/crates/wickle/tests/verification.rs b/crates/wickle/tests/verification.rs
+index 322ef89446230a7e6f47ac1baf8262fb2b33c70c..ccaa7cbca5d3da11d86b76c839d09ad3d76c5518 100644
+--- a/crates/wickle/tests/verification.rs
++++ b/crates/wickle/tests/verification.rs
+@@ -2,6 +2,16 @@
+ #[path = "support/agent.rs"]
+ #[allow(dead_code)]
+ mod support;
++use support as agent_support;
++#[path = "support/agent_hooks.rs"]
++#[allow(dead_code)]
++mod hooks_support;
++#[path = "support/agent_resume.rs"]
++#[allow(dead_code)]
++mod resume_support;
++#[path = "support/context_sources.rs"]
++#[allow(dead_code, unused_imports)]
++mod source_support;
+ use futures_util::{TryStreamExt, stream};
+ use serde_json::json;
+ use std::{
+@@ -994,3 +1004,86 @@ async fn replay_precedes_current_verifier_lookup_and_new_request_limits() {
+             .is_none()
+     );
+ }
++
++#[tokio::test]
++async fn repaired_text_keeps_its_original_source_attempt_after_later_inference() {
++    let (fixture, mut profile, mut bindings, _, _) = setup(
++        &["incomplete", "complete"],
++        vec![
++            Ok(VerificationDecision::Revise {
++                feedback: "Add evidence".into(),
++            }),
++            Ok(VerificationDecision::Pass {}),
++        ],
++    );
++    let mut source_fixture = source_support::Fixture::new();
++    let source = source_fixture.add(
++        "records",
++        ContextTrigger::BeforeModel,
++        true,
++        vec![source_support::Reply::Ready, source_support::Reply::Ready],
++    );
++    profile.context_sources = Some(source_fixture.bindings.clone());
++    let registry = Arc::new(
++        ContextSourceRegistry::new(
++            scope(),
++            vec![ContextSourceRegistration {
++                selection: source.selection.clone(),
++                definition: source.definition.clone(),
++                source: source.clone(),
++            }],
++        )
++        .unwrap(),
++    );
++    let runtime = Arc::new(
++        ContextSourceRuntime::new(
++            bindings.state.clone(),
++            bindings.policy.clone(),
++            bindings.clock.clone(),
++            bindings.ids.clone(),
++            registry,
++            source_fixture.estimator.clone(),
++        )
++        .unwrap(),
++    );
++    bindings.context_sources = Some(runtime.clone());
++    bindings.context_token_estimator = Some(source_fixture.estimator.clone());
++    let agent = create_agent(profile, bindings).unwrap();
++    let handle = fixture.started(&agent, "request").await;
++    let outcome = completed(handle.outcome(&context()).await.unwrap());
++    assert_eq!(outcome.result.status(), RunStatus::Succeeded);
++    let saved = fixture.store.load(&scope(), handle.run_id()).await.unwrap();
++    let answer = saved
++        .messages
++        .iter()
++        .find(|message| message.origin == MessageOrigin::Model)
++        .unwrap();
++    assert_eq!(
++        answer.source_model_request_id.as_ref(),
++        Some(&saved.snapshot.model_ledger[0].attempt_id)
++    );
++    let lineage = runtime
++        .lineage_for_messages(
++            &saved.snapshot.request.session_id,
++            std::slice::from_ref(answer),
++            &context(),
++            tokio::time::Instant::now() + Duration::from_secs(5),
++        )
++        .await
++        .unwrap();
++    assert_eq!(
++        lineage,
++        vec![ContextLineage {
++            run_id: handle.run_id().clone(),
++            batch_ref: saved.snapshot.context_batches[0].clone()
++        }]
++    );
++    assert!(
++        source
++            .use_requests
++            .lock()
++            .unwrap()
++            .iter()
++            .any(|check| check.derived && check.batch_ref == saved.snapshot.context_batches[1])
++    );
++}
+diff --git a/docs/context-compaction.md b/docs/context-compaction.md
+index a15e7f31c5abb1607d4db4c9acc4a5661cd208b0..119dee4436581e1ba540034fc6fa1796924b21e9 100644
+--- a/docs/context-compaction.md
++++ b/docs/context-compaction.md
+@@ -88,3 +88,23 @@ new rewrite behavior during recovery.
+ The [independent compaction consumer](../tests/support/compaction_consumer.rs)
+ exercises model-budget accounting, complete-group summaries, SQLite restoration,
+ and fresh Host replay using synthetic model ports.
++
++## Recheck source access for derived data
++
++Context revisions preserve `source_lineage`: immutable original Run and batch
++references for the covered conversation. Each batch preserves its fragment
++versions. Model messages also retain `source_model_request_id` when known, so a
++later inference cannot change which observation produced an earlier answer.
++Legacy terminal history without an attempt anchor conservatively depends on
++all observations from its original Run. An active legacy Run with unanchored
++source-derived text stops with `context.unanchored_active_history`; finish it
++with its original engine before migrating. The core does not invent an attempt
++association and later reinterpret an already stored summary.
++
++Before projection, compression, and each physical model attempt (including
++verification), the core checks current access to the original sources. This also
++protects retained historical responses and summaries reused by another Run in
++the same session. An explicit deletion or denied access stops use; the core does
++not silently resend the summary or regenerate it from revoked material. A Host
++can start a fresh authorized session when the previous history is no longer
++usable.
+diff --git a/docs/context-sources.md b/docs/context-sources.md
+index 632dd8a0555182a0f1c630f540436736880e5880..faabd00f1c168e512a0b3d96a98f6b4a0dfc30b7 100644
+--- a/docs/context-sources.md
++++ b/docs/context-sources.md
+@@ -24,6 +24,7 @@ The source returns one of these results:
+ | --- | --- | --- |
+ | `Ready` | Valid, nonempty data | Save and authorize before use |
+ | `Empty` | Successful lookup without data | Save an empty active slot, including for a required source |
++| `Deleted` | Explicitly deleted native item IDs | Save deletion markers and reject subsequent use of the old data or its derivatives |
+ | `Unavailable` | Explicit operational failure | Save the diagnostic; stop if the source is required |
+ 
+ A callback timeout may become optional unavailability. Cancellation, permission
+@@ -113,3 +114,34 @@ Run it with the other independent consumers using
+ `python3 scripts/check-package.py --allow-dirty`.
+ 
+ For post-run memory updates, see [external event consumers](event-consumers.md). The Host owns delivery and application receipts; the next Run reads applied data through `ContextSource`.
++
++## Track observations and deletions
++
++New batches carry `ContextFragment` records with stable scope, Run owner,
++producer and native item identity. `core_revision` starts at one and advances
++for each committed observation, including unchanged content and withdrawals.
++Physical retries reuse that observation. `content_digest` identifies content and
++provenance independently of the observation's batch or step. The pinned
++`assembler_version` specifies the assembly rules. Store validation checks the
++complete revision history before accepting a commit or checkpoint.
++
++`Ready.item_revisions` supplies optional external versions keyed by native item
++ID. Omit entries when the source cannot report document versions. The separate
++`source_revision` describes the query/index snapshot and is never copied into
++an item's version. Neither hashes nor timestamps substitute for unknown external
++versions. Old batches remain readable without invented fragment metadata.
++
++An empty or unavailable selection withdraws its current slot without reviving an
++older result. `Deleted` is stronger: it names deleted items, so matching cached
++data and derived conversation cannot be sent again. Deletion matching uses the
++exact source definition and native item ID across triggers and the current Run's
++use of earlier Runs. Run-local revision counters are not compared across Runs.
++The source's `authorize_use` must still check current external ACL/deletion state;
++the core cannot discover deletions that the source has never reported.
++
++For historical or summarized use, `ContextUseRequest.derived` is true and
++`consumer_run_id` identifies the current Run. `request.run_id` remains the
++original observation's owner, while `ContextCallContext.run_id` is the current
++consumer. Check access using the current actor and grant, with the original
++item IDs and item revisions. Do not treat either a stored batch or a prior
++successful permission check as a current access grant.
+diff --git a/tests/support/budget_consumer.rs b/tests/support/budget_consumer.rs
+index 85f6291205dc56739426618d30e895eba29bba7d..4e30bbdaa5cdef5bfd81875aea789bb596bd3738 100644
+--- a/tests/support/budget_consumer.rs
++++ b/tests/support/budget_consumer.rs
+@@ -136,6 +136,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+                 snapshot,
+                 prompt_snapshot: prompt.reference().clone(),
+                 messages: vec![Message {
++                    source_model_request_id: None,
+                     message_id: id("user-message"),
+                     run_id: run_id.clone(),
+                     sequence: 1.try_into()?,
+diff --git a/tests/support/context_consumer.rs b/tests/support/context_consumer.rs
+index fae65905c08434d92d1a3217db9006938483335b..dd26482952f2ac3e7865734aa91341abe200a0f9 100644
+--- a/tests/support/context_consumer.rs
++++ b/tests/support/context_consumer.rs
+@@ -134,6 +134,7 @@ fn admission(
+         prompt_snapshot: prompt.reference().clone(),
+         require_durable: false,
+         messages: vec![Message {
++            source_model_request_id: None,
+             message_id: id(&format!("user-{run}")),
+             run_id: id(run),
+             sequence: first_sequence.try_into().unwrap(),
+@@ -253,6 +254,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+         "Review the available evidence",
+     );
+     first_input.messages.push(Message {
++        source_model_request_id: None,
+         message_id: id("private-state"),
+         run_id: id("first"),
+         sequence: 2.try_into()?,
+diff --git a/tests/support/event_consumer.rs b/tests/support/event_consumer.rs
+index d3b9448654ded7e9473587dcf22043b33b979345..78d91a7ac0015433fab67358ca00faa580f52346 100644
+--- a/tests/support/event_consumer.rs
++++ b/tests/support/event_consumer.rs
+@@ -226,6 +226,7 @@ impl ContextSource for MemorySource {
+                     reported_usage: None,
+                 },
+                 Some(value) => ContextResult::Ready {
++                item_revisions: Default::default(),
+                     items: vec![ContextItem::new(
+                         id("memory-row"),
+                         ContextOrigin::Memory,
+diff --git a/tests/support/gather_consumer.rs b/tests/support/gather_consumer.rs
+index 1455b586816a60605a6021925b65b815d82a59a0..64efba2d9ebcbac281d8ae955c32ad4af042ce75 100644
+--- a/tests/support/gather_consumer.rs
++++ b/tests/support/gather_consumer.rs
+@@ -12,6 +12,7 @@ mod host {
+         value: serde_json::Value,
+     ) -> ContextResult {
+         ContextResult::Ready {
++                item_revisions: Default::default(),
+             items: vec![ContextItem::new(
+                 id("row-1"),
+                 origin,
+diff --git a/tests/support/input_binding_consumer.rs b/tests/support/input_binding_consumer.rs
+index 2340c1c5ce5ad84a7ffdaae5aa0a5b8282ea9e12..8b2f3ba66c019546675c784e9a099b2c33beca7b 100644
+--- a/tests/support/input_binding_consumer.rs
++++ b/tests/support/input_binding_consumer.rs
+@@ -294,6 +294,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+                 snapshot,
+                 prompt_snapshot: prompt.reference().clone(),
+                 messages: vec![Message {
++                    source_model_request_id: None,
+                     message_id: id("user-message"),
+                     run_id: run.clone(),
+                     sequence: 1.try_into()?,
+diff --git a/tests/support/routing_consumer.rs b/tests/support/routing_consumer.rs
+index 09790ed45be27301edbfc1fe27cfc3495d9401b1..7768e96bcd16a2556970dcbed4db54e9758a099c 100644
+--- a/tests/support/routing_consumer.rs
++++ b/tests/support/routing_consumer.rs
+@@ -342,6 +342,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+         },
+     };
+     let message = Message {
++        source_model_request_id: None,
+         message_id: id("user-message"),
+         run_id: id("run"),
+         sequence: 1.try_into()?,
+diff --git a/tests/support/source_consumer.rs b/tests/support/source_consumer.rs
+index d10da18850c66e436ba7551b3e452622c6fe0a17..d3cb5afc8530ae6a6c414c3bac30fdd491527f7d 100644
+--- a/tests/support/source_consumer.rs
++++ b/tests/support/source_consumer.rs
+@@ -204,6 +204,7 @@ impl ContextSource for Source {
+                 });
+             }
+             Ok(ContextResult::Ready {
++                item_revisions: Default::default(),
+                 items: vec![ContextItem::new(
+                     id("row-1"),
+                     ContextOrigin::Retrieval,
+diff --git a/tests/support/sqlite_consumer.rs b/tests/support/sqlite_consumer.rs
+index b2ee090bb04a5a609530603042e59ec652d3ecc3..e713cc7431430e5681cff412600166f15f2d3dd7 100644
+--- a/tests/support/sqlite_consumer.rs
++++ b/tests/support/sqlite_consumer.rs
+@@ -179,6 +179,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+         },
+     };
+     let message = Message {
++        source_model_request_id: None,
+         message_id: id("user-message"),
+         run_id: id("run"),
+         sequence: 1.try_into()?,
+diff --git a/tests/support/state_consumer.rs b/tests/support/state_consumer.rs
+index 0e8ddeff09b6cfd263e3ba0dc61bb3a535d197bb..de9f50b617eb8c28e1eea18d2ae38262e69b9241 100644
+--- a/tests/support/state_consumer.rs
++++ b/tests/support/state_consumer.rs
+@@ -108,6 +108,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+         },
+     };
+     let message = Message {
++        source_model_request_id: None,
+         message_id: id("user-message"),
+         run_id: id("run"),
+         sequence: 1.try_into()?,

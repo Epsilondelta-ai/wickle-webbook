@@ -1,0 +1,643 @@
+diff --git a/crates/wickle-model-bedrock/src/model.rs b/crates/wickle-model-bedrock/src/model.rs
+index c4f24ddf5b7acc0442b8985382f99c9bb586b3e5..74072c90e50b48a9ea31f3e5a7247d620a598b31 100644
+--- a/crates/wickle-model-bedrock/src/model.rs
++++ b/crates/wickle-model-bedrock/src/model.rs
+@@ -229,6 +229,12 @@ impl State<'_> {
+             .transpose()?;
+         if !response.status().is_success() {
+             let status = response.status().as_u16();
++            let error_type = response
++                .headers()
++                .get("x-amzn-errortype")
++                .and_then(|value| value.to_str().ok())
++                .map(aws_error_name)
++                .map(str::to_owned);
+             let mut kind = match status {
+                 401 | 403 => ModelFailureKind::Authentication,
+                 404 => ModelFailureKind::Unavailable,
+@@ -238,7 +244,12 @@ impl State<'_> {
+                 500..=599 => ModelFailureKind::Transport,
+                 _ => ModelFailureKind::Unsupported,
+             };
+-            if status == 400 {
++            // Only the named stream error is documented as retryable at 424.
++            // Generic ModelErrorException shares that status and stays unchanged.
++            if status == 424 && error_type.as_deref() == Some("ModelStreamErrorException") {
++                kind = ModelFailureKind::Transport;
++            }
++            if status == 400 || (status == 424 && error_type.is_none()) {
+                 let mut bytes = vec![];
+                 loop {
+                     let chunk = tokio::select! { biased;
+@@ -260,8 +271,19 @@ impl State<'_> {
+                     .map_err(|_| ())
+                     .and_then(|text| parse_json(text).map_err(|_| ()))
+                 {
+-                    if value.pointer("/error/code").and_then(Value::as_str)
+-                        == Some("context_length_exceeded")
++                    if status == 424
++                        && value
++                            .get("code")
++                            .or_else(|| value.get("__type"))
++                            .and_then(Value::as_str)
++                            .map(aws_error_name)
++                            == Some("ModelStreamErrorException")
++                    {
++                        kind = ModelFailureKind::Transport;
++                    }
++                    if status == 400
++                        && value.pointer("/error/code").and_then(Value::as_str)
++                            == Some("context_length_exceeded")
+                     {
+                         kind = ModelFailureKind::ContextOverflow;
+                     }
+@@ -334,3 +356,9 @@ fn transport_error(error_value: reqwest::Error) -> ContractError {
+         "transport",
+     )
+ }
++
++// AWS restJson1 error names may include a colon suffix and namespace prefix.
++fn aws_error_name(value: &str) -> &str {
++    let value = value.split_once(':').map_or(value, |(name, _)| name);
++    value.split_once('#').map_or(value, |(_, name)| name)
++}
+diff --git a/crates/wickle-model-bedrock/tests/agent_contract.rs b/crates/wickle-model-bedrock/tests/agent_contract.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..35a2b57248cc568f3d39bc90223e3c5e5850f998
+--- /dev/null
++++ b/crates/wickle-model-bedrock/tests/agent_contract.rs
+@@ -0,0 +1,333 @@
++//! Actual HTTP/SSE through the core: provider projection, repair and system binding.
++#[path = "../../wickle/tests/support/agent.rs"]
++#[allow(dead_code)]
++mod core_host;
++#[allow(dead_code)]
++mod support;
++use core_host::{completed, id, reference, scope};
++use serde_json::{Value, json};
++use std::sync::{
++    Arc, Mutex,
++    atomic::{AtomicUsize, Ordering},
++};
++use std::time::Duration;
++use wickle::*;
++use wickle_model_bedrock::*;
++const WORKSPACE: &str = "11111111-1111-4111-8111-111111111111";
++
++struct Catalog(core_host::Catalog);
++impl ProfileResolver for Catalog {
++    fn resolve<'a>(
++        &'a self,
++        reference: &'a ComponentRef,
++        scope: &'a Scope,
++    ) -> PortFuture<'a, ComponentMetadata> {
++        Box::pin(async move {
++            let mut metadata = self.0.resolve(reference, scope).await?;
++            if reference.kind == ComponentKind::Tool {
++                metadata.model_name = Some(reference.id.clone());
++            }
++            if let Some(version) = &reference.version {
++                metadata.reference.version = Some(version.clone());
++            }
++            Ok(metadata)
++        })
++    }
++}
++struct Inspector;
++impl ModelRouteInspector for Inspector {
++    fn inspect<'a>(
++        &'a self,
++        route: &'a ResolvedModelRoute,
++        _: &'a ModelInspectionContext,
++    ) -> PortFuture<'a, ModelRouteObservation> {
++        Box::pin(async move {
++            Ok(ModelRouteObservation {
++                route_digest: route.digest(),
++                availability: ModelRouteAvailability::Available,
++                model_id: Some(route.model_id.clone()),
++                model_version: Some(route.model_version.clone()),
++                deployment_revision: None,
++                version_semantics: VersionSemantics::Pinned,
++                evidence_ref: id("local-http-fixture"),
++            })
++        })
++    }
++}
++struct Capture(Mutex<Vec<JsonObject>>);
++impl ToolExecutor for Capture {
++    fn execute<'a>(
++        &'a self,
++        call: &'a JsonObject,
++        _: &'a ToolExecutionContext,
++    ) -> PortFuture<'a, ToolExecutionResult> {
++        Box::pin(async move {
++            self.0.lock().unwrap().push(call.clone());
++            Ok(ToolExecutionResult {
++                outcome: ToolExecutionOutcome::Succeeded {
++                    value: json!("observed"),
++                },
++                effect: ToolEffect::NotApplied,
++                receipt: None,
++            })
++        })
++    }
++}
++fn call_events(index: usize, arguments: &str) -> Vec<Value> {
++    let mut data = support::events("claude-opus-5", "");
++    data.truncate(4);
++    data[0]["message"]["id"] = json!(format!("msg_{index}"));
++    data.extend([
++        json!({"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":format!("call_{index}"),"name":"lookup","input":{}}}),
++        json!({"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":arguments}}),
++        json!({"type":"content_block_stop","index":1}),
++        json!({"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":20}}),
++        json!({"type":"message_stop"}),
++    ]);
++    data
++}
++#[tokio::test]
++async fn native_and_binary_transports_repair_before_scoped_execution_with_core_owned_retry() {
++    for (operation, endpoint) in [
++        (BedrockOperation::Messages, BedrockEndpoint::Runtime),
++        (BedrockOperation::Messages, BedrockEndpoint::Mantle),
++        (BedrockOperation::InvokeStream, BedrockEndpoint::Runtime),
++    ] {
++        exercise(operation, endpoint).await;
++    }
++}
++async fn exercise(operation: BedrockOperation, endpoint: BedrockEndpoint) {
++    let invalid_constraint =
++        json!({"query":"latest","limit":7,"note":null,"filter":{"category":"finance"}}).to_string();
++    let invalid_json =
++        json!({"query":"latest","limit":9,"note":null,"filter":"invalid-shape"}).to_string();
++    let valid =
++        json!({"query":"latest","limit":9,"note":null,"filter":{"category":"finance"}}).to_string();
++    let malformed = "{not json";
++    let rounded = r#"{"query":"latest","limit":0.12345678901234567890123456789}"#;
++    let mut transport_failure = support::Reply::json(
++        424,
++        json!({"__type":"ModelStreamErrorException","message":"private failure detail"}),
++    );
++    transport_failure
++        .headers
++        .push(("x-amzn-requestid", "failed-attempt".into()));
++    let server = support::Server::new(vec![
++        transport_failure,
++        support::reply(operation, &call_events(0, malformed)),
++        support::reply(operation, &call_events(4, rounded)),
++        support::reply(operation, &call_events(1, &invalid_constraint)),
++        support::reply(operation, &call_events(2, &invalid_json)),
++        support::reply(operation, &call_events(3, &valid)),
++        support::reply(operation, &support::events("claude-opus-5", "complete")),
++    ])
++    .await;
++    let mut options = support::options(&server);
++    options.operation = operation;
++    options.endpoint = endpoint;
++    let connection = BedrockConnection::new(
++        scope(),
++        reference("account"),
++        support::credentials(),
++        options,
++    )
++    .unwrap()
++    .with_clock(Arc::new(support::FixedClock));
++    let fixture = core_host::Fixture::new(core_host::Response::Text, false);
++    let mut catalog = fixture.router.snapshot.catalog().clone();
++    catalog.models[0].provider = id("aws-bedrock");
++    catalog.models[0].model_id = id(support::MODEL);
++    catalog.models[0]
++        .capabilities
++        .features
++        .insert(id("tool_calling"));
++    catalog.models[0].capabilities.options_schema = json!({"type":"object","properties":{"effort":{"enum":["low","medium","high"]}},"additionalProperties":false});
++    catalog.bindings[0].model = catalog.models[0].reference();
++    catalog.bindings[0].requested_model = id(support::MODEL);
++    catalog.bindings[0].adapter = connection.binding().adapter;
++    catalog.bindings[0].connection_ref = connection.binding().connection_ref;
++    catalog.bindings[0].api_contract = connection.api_contract();
++    catalog.bindings[0].target = connection.target().clone();
++    let properties: serde_json::Map<String, Value> = connection
++        .target()
++        .iter()
++        .map(|(key, value)| (key.clone(), json!({"const":value})))
++        .collect();
++    let required: Vec<_> = connection.target().keys().cloned().collect();
++    catalog.bindings[0].target_schema = json!({"type":"object","properties":properties,"required":required,"additionalProperties":false});
++    catalog.bindings[0]
++        .default_options
++        .insert("effort".into(), json!("high"));
++    catalog.bindings[0].capabilities = catalog.models[0].capabilities.clone();
++    catalog.bindings[0].evidence[0].binding_digest = catalog.bindings[0]
++        .contract_digest(&catalog.models[0])
++        .unwrap();
++    let snapshot = RoutingSnapshot::new(catalog, fixture.router.snapshot.policy().clone()).unwrap();
++    let mut bindings = fixture.bindings();
++    bindings.profile_resolver = Arc::new(Catalog(core_host::Catalog::default()));
++    bindings.router = Arc::new(core_host::Router {
++        snapshot,
++        queries: AtomicUsize::new(0),
++        snapshots: AtomicUsize::new(0),
++    });
++    bindings.model_exchange = Arc::new(
++        ModelExchange::new(
++            Arc::new(BedrockModel::new(connection)),
++            bindings.policy.clone(),
++        )
++        .with_route_inspector(Arc::new(Inspector), Duration::from_secs(1))
++        .unwrap()
++        .with_retry_policy(ModelRetryPolicy {
++            max_retries: 1,
++            backoff_ms: 0,
++        }),
++    );
++    bindings.system_inputs = SystemInputRegistry::new(vec![SystemInputDefinition {
++        key: id("workspace_id"),
++        version: id("1"),
++        value_schema: json!({"type":"string","format":"uuid"}),
++        source: SystemInputSource::Run {},
++    }])
++    .unwrap();
++    let tool = SchemaCompiler::new().compile(ToolDescriptor {
++        tool: reference("lookup"), name: id("lookup"), description: "Read scoped data".into(),
++        input_schema: json!({"type":"object","properties":{
++            "query":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":10,"default":7},"note":{"type":["string","null"]},
++            "filter":{"type":"object","properties":{"category":{"type":"string"},"term":{"type":"string"}},"required":["category"],"additionalProperties":false},
++            "workspace_id":{"type":"string","format":"uuid"}
++        },"required":["query","workspace_id"],"additionalProperties":false,"if":{"properties":{"query":{"const":"latest"}}},"then":{"properties":{"limit":{"minimum":8}}}}),
++        agent_parameters: vec!["query".into(),"limit".into(),"note".into(),"filter".into()], system_bindings: None,
++        output_schema: json!({"type":"string"}), side_effect: ToolSideEffect::ReadOnly, concurrency: ToolConcurrency::Serial, retry: ToolRetryPolicy::Never, reconcile: false, max_output_bytes: 4096.try_into().unwrap(),
++    }, &bindings.system_inputs).unwrap();
++    let expected_schema = tool.model_input_schema().clone();
++    assert!(expected_schema["properties"].get("workspace_id").is_none());
++    let capture = Arc::new(Capture(Mutex::new(vec![])));
++    bindings.tools = Some(Arc::new(
++        ToolRegistry::new(
++            scope(),
++            vec![ToolRegistration {
++                compiled: tool,
++                executor: capture.clone(),
++            }],
++        )
++        .unwrap(),
++    ));
++    let mut profile = core_host::profile();
++    profile.limits.max_model_calls = 8.try_into().unwrap();
++    profile.limits.max_recovery_attempts = 1;
++    profile.model_options.insert("effort".into(), json!("low"));
++    profile.limits.max_tool_attempts = 2;
++    profile.limits.max_repair_attempts = 4;
++    profile.tools.push(ToolBindingRef::Catalog(CatalogToolRef {
++        tool_id: id("lookup"),
++        version: id("1"),
++        bindings: None,
++        config: None,
++    }));
++    let agent = create_agent(profile, bindings).unwrap();
++    let mut context = core_host::context();
++    context.data.system_inputs = Some(SystemInputs::new(
++        [("workspace_id".into(), json!(WORKSPACE))].into(),
++    ));
++    let mut request = core_host::request("contract");
++    request
++        .model_options
++        .insert("effort".into(), json!("medium"));
++    let handle = completed(agent.start(request, context.clone()).await.unwrap());
++    let outcome = completed(
++        tokio::time::timeout(Duration::from_secs(10), handle.outcome(&context))
++            .await
++            .unwrap()
++            .unwrap(),
++    );
++    assert_eq!(
++        outcome.result.status(),
++        RunStatus::Succeeded,
++        "{:?}",
++        outcome.result
++    );
++    assert_eq!(outcome.usage.repair_attempts, 4);
++    assert_eq!(outcome.usage.recovery_attempts, 1);
++    assert_eq!(outcome.usage.model_calls, 7);
++    assert_eq!(outcome.usage.tool_attempts, 1);
++    assert_eq!(
++        capture.0.lock().unwrap().as_slice(),
++        &[JsonObject::from([
++            ("query".into(), json!("latest")),
++            ("limit".into(), json!(9)),
++            ("note".into(), Value::Null),
++            ("filter".into(), json!({"category":"finance"})),
++            ("workspace_id".into(), json!(WORKSPACE))
++        ])]
++    );
++    let requests = server.requests.lock().unwrap();
++    assert_eq!(requests.len(), 7);
++    assert_eq!(requests[0].body, requests[1].body);
++    for request in requests.iter() {
++        assert_eq!(request.body["tools"][0]["input_schema"], expected_schema);
++        assert_eq!(
++            request.body["tools"][0]["input_schema"]["required"],
++            json!(["query"])
++        );
++        assert_eq!(request.body["output_config"]["effort"], "medium");
++        let headers = request.headers.to_ascii_lowercase();
++        assert!(headers.contains(if endpoint == BedrockEndpoint::Mantle {
++            "/us-east-1/bedrock-mantle/aws4_request"
++        } else {
++            "/us-east-1/bedrock/aws4_request"
++        }));
++        if operation == BedrockOperation::InvokeStream {
++            assert!(request.path.ends_with("/invoke-with-response-stream"));
++            assert_eq!(request.body["anthropic_version"], "bedrock-2023-05-31");
++            assert!(request.body.get("model").is_none());
++            assert!(request.body.get("stream").is_none());
++        } else {
++            assert_eq!(request.path, "/anthropic/v1/messages");
++            assert_eq!(request.body["model"], support::MODEL);
++        }
++        assert!(!request.body.to_string().contains(WORKSPACE));
++    }
++    let content: Vec<_> = requests[6].body["messages"]
++        .as_array()
++        .unwrap()
++        .iter()
++        .flat_map(|message| message["content"].as_array().unwrap())
++        .collect();
++    let replayed: Vec<_> = content
++        .iter()
++        .filter(|item| item["type"] == "tool_use")
++        .map(|item| item["input"].clone())
++        .collect();
++    assert_eq!(
++        replayed,
++        vec![
++            json!({"INVALID_JSON":malformed}),
++            json!({"INVALID_JSON":rounded}),
++            parse_json(&invalid_constraint).unwrap(),
++            parse_json(&invalid_json).unwrap(),
++            parse_json(&valid).unwrap()
++        ]
++    );
++    let failures: Vec<_> = content
++        .iter()
++        .filter(|item| item["type"] == "tool_result" && item["is_error"] == true)
++        .collect();
++    assert_eq!(failures.len(), 2);
++    for (result, raw) in failures.into_iter().zip([malformed, rounded]) {
++        assert_eq!(
++            parse_json(result["content"].as_str().unwrap()).unwrap()["INVALID_JSON"],
++            raw
++        );
++    }
++    let thinking: Vec<_> = content
++        .iter()
++        .filter(|item| item["type"] == "thinking")
++        .collect();
++    assert_eq!(thinking.len(), 5);
++    assert!(
++        thinking
++            .iter()
++            .all(|block| block["signature"] == "signature-fixture")
++    );
++    assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 0);
++}
+diff --git a/crates/wickle-model-bedrock/tests/bedrock.rs b/crates/wickle-model-bedrock/tests/bedrock.rs
+index 375098aaa36c9d8db6072286f0c6c860b37ca189..32e9d0fb6a2d9a475be0ea47acd489bfa806c036 100644
+--- a/crates/wickle-model-bedrock/tests/bedrock.rs
++++ b/crates/wickle-model-bedrock/tests/bedrock.rs
+@@ -1,7 +1,6 @@
+ //! AWS signing, endpoint, binary/SSE framing and metadata contracts without AWS calls.
+ mod support;
+ use aws_smithy_types::event_stream::{Header, HeaderValue, Message};
+-use base64::{Engine, engine::general_purpose::STANDARD};
+ use futures_util::StreamExt;
+ use serde_json::{Value, json};
+ use std::{sync::Arc, time::Duration};
+@@ -9,37 +8,6 @@ use support::*;
+ use wickle::*;
+ use wickle_model_bedrock::*;
+ 
+-fn frame(value: &Value) -> Vec<u8> {
+-    let payload =
+-        serde_json::to_vec(&json!({"bytes":STANDARD.encode(serde_json::to_vec(value).unwrap())}))
+-            .unwrap();
+-    let message = Message::new(payload)
+-        .add_header(Header::new(
+-            ":message-type",
+-            HeaderValue::String("event".into()),
+-        ))
+-        .add_header(Header::new(
+-            ":event-type",
+-            HeaderValue::String("chunk".into()),
+-        ))
+-        .add_header(Header::new(
+-            ":content-type",
+-            HeaderValue::String("application/json".into()),
+-        ));
+-    let mut bytes = vec![];
+-    aws_smithy_eventstream::frame::write_message_to(&message, &mut bytes).unwrap();
+-    bytes
+-}
+-fn reply(operation: BedrockOperation, data: &[Value]) -> Reply {
+-    let mut reply = Reply::sse(data);
+-    reply.headers = vec![("x-amzn-requestid", "aws-request".into())];
+-    if operation == BedrockOperation::InvokeStream {
+-        reply.content_type = "application/vnd.amazon.eventstream";
+-        reply.body = data.iter().flat_map(frame).collect();
+-        reply.chunk = 3;
+-    }
+-    reply
+-}
+ fn configured(
+     server: &Server,
+     operation: BedrockOperation,
+@@ -694,3 +662,114 @@ async fn two_documented_releases_keep_independent_selectors() {
+         }
+     }
+ }
++
++#[tokio::test]
++async fn named_http_stream_errors_are_recoverable_without_classifying_every_424_as_transient() {
++    for (header, body, expected) in [
++        (
++            Some("ModelStreamErrorException"),
++            json!({}),
++            ModelFailureKind::Transport,
++        ),
++        (
++            Some("aws.bedrock#ModelStreamErrorException:legacy"),
++            json!({}),
++            ModelFailureKind::Transport,
++        ),
++        (
++            None,
++            json!({"__type":"aws.bedrock#ModelStreamErrorException"}),
++            ModelFailureKind::Transport,
++        ),
++        (
++            None,
++            json!({"code":"ModelStreamErrorException:legacy"}),
++            ModelFailureKind::Transport,
++        ),
++        (
++            Some("ModelErrorException"),
++            json!({"__type":"ModelStreamErrorException"}),
++            ModelFailureKind::Unsupported,
++        ),
++        (
++            None,
++            json!({"code":"ModelErrorException"}),
++            ModelFailureKind::Unsupported,
++        ),
++        (None, json!({}), ModelFailureKind::Unsupported),
++        (
++            None,
++            json!({"code":"UnknownException","message":"ModelStreamErrorException"}),
++            ModelFailureKind::Unsupported,
++        ),
++    ] {
++        let mut response = Reply::json(424, body);
++        if let Some(header) = header {
++            response.headers.push(("x-amzn-errortype", header.into()));
++        }
++        let server = Server::new(vec![response]).await;
++        let connection = configured(
++            &server,
++            BedrockOperation::InvokeStream,
++            BedrockEndpoint::Runtime,
++            false,
++        );
++        let request = request(&connection, MODEL);
++        let model = BedrockModel::new(connection);
++        let failure =
++            collect_model_response(&request, model.generate(&request, &context(&request)))
++                .await
++                .unwrap_err();
++        assert_eq!(failure.kind, expected, "header {header:?}");
++        assert_eq!(server.requests.lock().unwrap().len(), 1);
++    }
++}
++
++#[tokio::test]
++async fn error_classification_does_not_wait_for_named_bodies_and_bounds_unknown_bodies() {
++    for case in ["header-stall", "body-deadline", "body-limit"] {
++        let mut response = Reply::json(
++            424,
++            json!({"__type":"ModelStreamErrorException","message":"x".repeat(10000)}),
++        );
++        response.stall = case != "body-limit";
++        if case == "header-stall" {
++            response
++                .headers
++                .push(("x-amzn-errortype", "ModelStreamErrorException".into()));
++        }
++        let server = Server::new(vec![response]).await;
++        let mut options = options(&server);
++        options.operation = BedrockOperation::InvokeStream;
++        if case == "body-limit" {
++            options.max_transport_bytes = 64;
++            options.max_event_bytes = 64;
++        }
++        let connection =
++            BedrockConnection::new(scope(), reference("account"), credentials(), options)
++                .unwrap()
++                .with_clock(Arc::new(FixedClock));
++        let request = request(&connection, MODEL);
++        let model = BedrockModel::new(connection);
++        let mut context = context(&request);
++        if case == "body-deadline" {
++            context.deadline = tokio::time::Instant::now() + Duration::from_millis(50);
++        }
++        let failure = tokio::time::timeout(
++            Duration::from_secs(1),
++            collect_model_response(&request, model.generate(&request, &context)),
++        )
++        .await
++        .unwrap()
++        .unwrap_err();
++        assert_eq!(
++            failure.kind,
++            match case {
++                "header-stall" => ModelFailureKind::Transport,
++                "body-deadline" => ModelFailureKind::Timeout,
++                _ => ModelFailureKind::Unsupported,
++            }
++        );
++        assert_eq!(server.requests.lock().unwrap().len(), 1);
++    }
++}
+diff --git a/crates/wickle-model-bedrock/tests/support/mod.rs b/crates/wickle-model-bedrock/tests/support/mod.rs
+index 338da13f2ee54d1acde5ca56472476081412aa7d..9fd4e40732c74f5bcf5accb8bfa444f813acf518 100644
+--- a/crates/wickle-model-bedrock/tests/support/mod.rs
++++ b/crates/wickle-model-bedrock/tests/support/mod.rs
+@@ -1,3 +1,5 @@
++use aws_smithy_types::event_stream::{Header, HeaderValue, Message};
++use base64::{Engine, engine::general_purpose::STANDARD};
+ use serde_json::{Value, json};
+ use wickle::*;
+ use wickle_model_bedrock::*;
+@@ -125,3 +127,35 @@ pub fn events(model: &str, text: &str) -> Vec<Value> {
+ #[path = "../../../../tests/support/model_http.rs"]
+ mod http;
+ pub use http::*;
++
++pub fn frame(value: &Value) -> Vec<u8> {
++    let payload =
++        serde_json::to_vec(&json!({"bytes":STANDARD.encode(serde_json::to_vec(value).unwrap())}))
++            .unwrap();
++    let message = Message::new(payload)
++        .add_header(Header::new(
++            ":message-type",
++            HeaderValue::String("event".into()),
++        ))
++        .add_header(Header::new(
++            ":event-type",
++            HeaderValue::String("chunk".into()),
++        ))
++        .add_header(Header::new(
++            ":content-type",
++            HeaderValue::String("application/json".into()),
++        ));
++    let mut bytes = vec![];
++    aws_smithy_eventstream::frame::write_message_to(&message, &mut bytes).unwrap();
++    bytes
++}
++pub fn reply(operation: BedrockOperation, data: &[Value]) -> Reply {
++    let mut reply = Reply::sse(data);
++    reply.headers = vec![("x-amzn-requestid", "aws-request".into())];
++    if operation == BedrockOperation::InvokeStream {
++        reply.content_type = "application/vnd.amazon.eventstream";
++        reply.body = data.iter().flat_map(frame).collect();
++        reply.chunk = 3;
++    }
++    reply
++}
+diff --git a/docs/bedrock.md b/docs/bedrock.md
+index 584d4b2e7c0c1eab9d409e685a543f3bf1b37f7a..7467baf63400307b2dac77bdb45ca48536c7a540 100644
+--- a/docs/bedrock.md
++++ b/docs/bedrock.md
+@@ -29,12 +29,24 @@ Native Messages uses `/anthropic/v1/messages`, header `anthropic-version: 2023-0
+ 
+ Implement `BedrockCredentialProvider` to obtain or refresh AWS credentials through the Host's chosen credential chain. The callback receives scope, region, audience, cancellation and deadline. Return `BedrockCredential::Aws` for SigV4, including a session token and expiry when appropriate. Inference also accepts `BedrockCredential::Bearer`. Metadata inspection requires a separate IAM provider; an inference bearer token is not reused for control-plane calls. Static credential values implement the provider interface for simple Hosts and fixtures. Debug output excludes credential values.
+ 
+-The adapter signs the final URL, headers and serialized payload. It refuses expired credentials and disables redirects and transport retries. Core attempt accounting and retry policy remain authoritative. Cancellation and deadlines stop credential lookup or the active HTTP stream.
++The adapter signs the final URL, headers and serialized payload. It refuses expired credentials and disables redirects and transport retries. Core attempt accounting and retry policy remain authoritative. HTTP 424 is
++recoverable only when the AWS error identifier names `ModelStreamErrorException`;
++other 424 failures retain their existing classification. The adapter reads bounded
++error bodies only when the header does not identify the error, and never retries
++locally. [AWS streaming errors](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_InvokeModelWithResponseStream.html),
++[Error identifier format](https://smithy.io/2.0/aws/protocols/aws-restjson1-protocol.html#operation-error-serialization). Cancellation and deadlines stop credential lookup or the active HTTP stream.
+ 
+ ## Messages, tools and output
+ 
+ The adapter reuses the [Anthropic Messages protocol](anthropic.md) for system instructions, ordinary tool calls/results, effort/thinking options and signed continuation blocks. Native service tools and unsupported options fail explicitly. AWS binary frames additionally undergo length, CRC, header, event-count and total-byte validation before Messages decoding. Incomplete or corrupt streams cannot complete an attempt.
+ 
++The native Tool compiler preserves the model-owned JSON Schema, optional fields,
++and conditional constraints. Core validation restores defaults and binds system
++inputs before execution. Complete invalid argument text is retained for bounded
++repair, including through AWS binary framing; signed thinking and unrelated valid
++calls remain intact. Transport truncation and frame corruption cannot produce an
++executable Tool plan. See the [shared repair contract](anthropic.md#streaming-and-replay).
++
+ Register capabilities for the specific model, endpoint and operation. Mantle Messages rejects JSON-schema output; the adapter refuses that combination before HTTP. Runtime structured output still depends on the selected model and operation. A shared codec does not establish service capability or account availability.
+ 
+ ## Model and profile inspection

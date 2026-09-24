@@ -1,0 +1,2589 @@
+diff --git a/.env.example b/.env.example
+index 931a73bd60bb9a0f3c3e265dfe8fc3d756fdc5da..c418ef732cb58a2a05d2e5aade5d9057927778f5 100644
+--- a/.env.example
++++ b/.env.example
+@@ -19,6 +19,8 @@ OPENAI_MODEL_1_MAX_OUTPUT_TOKENS=4096
+ 
+ # Azure Foundry OpenAI GPT: resource origin, without /openai/v1/.
+ AZURE_OPENAI_ENDPOINT=
++# ARM account ID for deployment model/version inspection (management Entra access required).
++AZURE_OPENAI_RESOURCE_ID=
+ AZURE_OPENAI_MODEL_1_DEPLOYMENT=
+ AZURE_OPENAI_MODEL_1_REASONING_EFFORT=
+ AZURE_OPENAI_MODEL_1_MAX_OUTPUT_TOKENS=4096
+diff --git a/Cargo.lock b/Cargo.lock
+index c1001c831c5a0ea7083973b954a9ac526f24edc9..b39c7e847026e847b915c747d406c512809afb5a 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -1968,6 +1968,19 @@ dependencies = [
+  "wickle-state-sqlite",
+ ]
+ 
++[[package]]
++name = "wickle-model-azure-openai"
++version = "0.1.0"
++dependencies = [
++ "futures-util",
++ "reqwest",
++ "serde_json",
++ "tokio",
++ "tokio-util",
++ "wickle",
++ "wickle-model-responses",
++]
++
+ [[package]]
+ name = "wickle-model-openai"
+ version = "0.1.0"
+@@ -1978,6 +1991,15 @@ dependencies = [
+  "tokio",
+  "tokio-util",
+  "wickle",
++ "wickle-model-responses",
++]
++
++[[package]]
++name = "wickle-model-responses"
++version = "0.1.0"
++dependencies = [
++ "serde_json",
++ "wickle",
+ ]
+ 
+ [[package]]
+diff --git a/Cargo.toml b/Cargo.toml
+index 2d0bf5c7817628e5dd9621978a13eaf7dc3a45c5..9cb19885068a1428ee77e5bcbcf4b4abaef42ed1 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -1,5 +1,5 @@
+ [workspace]
+-members = ["crates/wickle", "crates/wickle-model-router", "crates/wickle-state-sqlite", "crates/wickle-adapter-runtime", "crates/wickle-model-openai"]
++members = ["crates/wickle", "crates/wickle-model-router", "crates/wickle-state-sqlite", "crates/wickle-adapter-runtime", "crates/wickle-model-openai", "crates/wickle-model-responses", "crates/wickle-model-azure-openai"]
+ default-members = ["crates/wickle"]
+ resolver = "3"
+ 
+diff --git a/README.de.md b/README.de.md
+index a875dada23cc17a7f239bc48c1a4adffbed52fae..52eb70183a014d5abeddb9ee271a8f9ac5692724 100644
+--- a/README.de.md
++++ b/README.de.md
+@@ -23,3 +23,5 @@ Die [Kontextauswahl und -komprimierung](docs/context-compaction.md) bewahrt den
+ Die [Ausgabeprüfung](docs/verification.md) unterstützt JSON-Schemas, versionierte Kriterien, begrenzte Überarbeitungen und die Genehmigung eines festgelegten Kandidaten. Modellbasierte Prüfungen nutzen dasselbe Run-Budget.
+ 
+ Der [OpenAI-Responses-Adapter](docs/openai.md) unterstützt begrenzte HTTP/SSE-Generierung, Funktionsaufrufe, strukturierte Ausgaben und Modellversionsprüfungen mit von der Anwendung bereitgestellten Zugangsdaten.
++
++Informationen zu Azure-Bereitstellungen und vom Host verwalteten API-Schlüsseln oder Entra-Token stehen im [Leitfaden zum Azure-OpenAI-Adapter](docs/azure-openai.md).
+diff --git a/README.es.md b/README.es.md
+index cc302e425efd8a8fdf3d8db53d9c16ac51c873fa..214aa5046d128ca273ada78d9d276f3f82abb2e4 100644
+--- a/README.es.md
++++ b/README.es.md
+@@ -23,3 +23,5 @@ La [selección y compresión de contexto](docs/context-compaction.md) conserva l
+ La [verificación de resultados](docs/verification.md) admite esquemas JSON, criterios con versión fija, revisiones limitadas y aprobación de un candidato fijo. Las revisiones mediante modelos comparten el presupuesto del Run.
+ 
+ El [adaptador OpenAI Responses](docs/openai.md) ofrece generación HTTP/SSE con límites, llamadas a funciones, salida estructurada y comprobación de versiones, con credenciales proporcionadas por la aplicación.
++
++Para despliegues de Azure y autenticación con claves API o Entra gestionada por el Host, consulta la [guía del adaptador Azure OpenAI](docs/azure-openai.md).
+diff --git a/README.fr.md b/README.fr.md
+index bfae16618c32da7a640146a91d0617e96e58a9d2..bfbcb6d80e8188e40a567ee5706a33f2f3c5769a 100644
+--- a/README.fr.md
++++ b/README.fr.md
+@@ -23,3 +23,5 @@ La [sélection et compression du contexte](docs/context-compaction.md) conserve
+ La [vérification des résultats](docs/verification.md) prend en charge les schémas JSON, les critères versionnés, les révisions limitées et l’approbation d’un candidat figé. Les vérifications par modèle partagent le budget du Run.
+ 
+ L’[adaptateur OpenAI Responses](docs/openai.md) propose la génération HTTP/SSE avec limites, les appels de fonctions, les sorties structurées et la vérification des versions, avec les identifiants fournis par l’application.
++
++Pour les déploiements Azure et l’authentification par clé API ou Entra gérée par le Host, consultez le [guide de l’adaptateur Azure OpenAI](docs/azure-openai.md).
+diff --git a/README.ja.md b/README.ja.md
+index 33c2da009d25ad6dba1339665133f707f9317864..9170555052b6f72e5fa2e5f20cbdf3c1ad62a054 100644
+--- a/README.ja.md
++++ b/README.ja.md
+@@ -23,3 +23,5 @@ Agent Profile でエージェントの振る舞いを設定し、アダプター
+ [出力検証](docs/verification.md)は JSON Schema、バージョンを固定した評価基準、上限付きの修正、固定された候補の承認に対応します。モデルによる検証も同じ Run 予算を使います。
+ 
+ [OpenAI Responses アダプター](docs/openai.md)は、アプリケーションが渡す認証情報を使い、制限付き HTTP/SSE 生成、関数呼び出し、構造化出力、モデルバージョンの確認に対応します。
++
++Azure リソースのデプロイと Host が管理する API キー・Entra 認証については、[Azure OpenAI アダプターガイド](docs/azure-openai.md)を参照してください。
+diff --git a/README.ko.md b/README.ko.md
+index 21d61dbaab2873eedc20007204acf65ed6b331d7..966692e377c6464fd37fe3c578dca9c7a715d56e 100644
+--- a/README.ko.md
++++ b/README.ko.md
+@@ -23,3 +23,5 @@ Agent Profile로 에이전트의 동작을 구성하고, 어댑터를 통해 다
+ [출력 검증](docs/verification.md)은 JSON 스키마, 버전이 고정된 검증 기준, 한도 내 보완과 고정된 후보의 승인을 지원합니다. 모델 기반 검증도 같은 Run 예산을 사용합니다.
+ 
+ [OpenAI Responses 어댑터](docs/openai.md)는 애플리케이션이 제공한 인증 정보로 제한된 HTTP/SSE 생성, 함수 호출, 구조화 출력, 모델 버전 확인을 지원합니다.
++
++Azure 리소스별 배포와 Host가 관리하는 API key·Entra 인증은 [Azure OpenAI 어댑터 가이드](docs/azure-openai.md)를 참고하세요.
+diff --git a/README.md b/README.md
+index 5318c5f217952ae968d417be9efb100a54c3d18a..79201f178377ca85c7166bf0a07a9425394b699b 100644
+--- a/README.md
++++ b/README.md
+@@ -23,3 +23,5 @@ Read-only [context sources](docs/context-sources.md) support Run and model-step
+ [Output verification](docs/verification.md) supports JSON schemas, versioned criteria, bounded repair, and approval of a fixed candidate. Model-based reviews share the Run budget.
+ 
+ The [OpenAI Responses adapter](docs/openai.md) provides bounded HTTP/SSE generation, function calling, structured output, and explicit model-version inspection with application-supplied credentials.
++
++For resource-scoped Azure deployments and Host-managed API-key/Entra authentication, see the [Azure OpenAI adapter guide](docs/azure-openai.md).
+diff --git a/README.ru.md b/README.ru.md
+index 1f81b1fcbd6af5894c987bfea4e7e163172c31f3..1ceb626fc06011125711516a7f2d66aa3d665922 100644
+--- a/README.ru.md
++++ b/README.ru.md
+@@ -23,3 +23,5 @@ Wickle — движок агентов, который EpsilonDelta разраб
+ [Проверка результатов](docs/verification.md) поддерживает схемы JSON, версионированные критерии, ограниченные доработки и одобрение зафиксированного кандидата. Проверки с помощью модели используют общий бюджет Run.
+ 
+ [Адаптер OpenAI Responses](docs/openai.md) поддерживает HTTP/SSE-генерацию с ограничениями, вызовы функций, структурированный вывод и проверку версий моделей с учётными данными приложения.
++
++Развёртывания Azure и аутентификация через ключ API или Entra, управляемая Host, описаны в [руководстве по адаптеру Azure OpenAI](docs/azure-openai.md).
+diff --git a/README.zh-CN.md b/README.zh-CN.md
+index 458cd329c099e3426eac33fe659a573653dcead9..eea9ee1bdeb698f61e13593b240e11c8f9062973 100644
+--- a/README.zh-CN.md
++++ b/README.zh-CN.md
+@@ -23,3 +23,5 @@ Wickle 是 EpsilonDelta 正在使用 Rust 开发的智能体引擎，旨在以
+ [输出验证](docs/verification.md)支持 JSON Schema、固定版本的验证标准、限定次数的修正和固定候选结果的审批。模型验证也使用同一 Run 预算。
+ 
+ [OpenAI Responses 适配器](docs/openai.md)使用应用程序提供的凭据，支持有界 HTTP/SSE 生成、函数调用、结构化输出和明确的模型版本检查。
++
++Azure 资源部署及由 Host 管理的 API 密钥和 Entra 身份验证，请参阅 [Azure OpenAI 适配器指南](docs/azure-openai.md)。
+diff --git a/crates/wickle-model-azure-openai/Cargo.toml b/crates/wickle-model-azure-openai/Cargo.toml
+new file mode 100644
+index 0000000000000000000000000000000000000000..24e3f4c2dfe326e0b4672827f93048b638f364ad
+--- /dev/null
++++ b/crates/wickle-model-azure-openai/Cargo.toml
+@@ -0,0 +1,24 @@
++[package]
++name = "wickle-model-azure-openai"
++version.workspace = true
++edition.workspace = true
++rust-version.workspace = true
++repository.workspace = true
++description = "Azure OpenAI Responses and deployment metadata adapters for Wickle"
++publish = false
++include = ["Cargo.toml", "src/**"]
++
++[dependencies]
++wickle = { path = "../wickle", version = "=0.1.0" }
++wickle-model-responses = { path = "../wickle-model-responses", version = "=0.1.0" }
++reqwest.workspace = true
++serde_json.workspace = true
++futures-util.workspace = true
++tokio.workspace = true
++tokio-util.workspace = true
++
++[dev-dependencies]
++tokio = { workspace = true, features = ["net", "io-util", "rt-multi-thread", "test-util"] }
++
++[lints]
++workspace = true
+diff --git a/crates/wickle-model-azure-openai/src/auth.rs b/crates/wickle-model-azure-openai/src/auth.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..b23d80be0d572d69617f818cbc6628a40a52539d
+--- /dev/null
++++ b/crates/wickle-model-azure-openai/src/auth.rs
+@@ -0,0 +1,96 @@
++use crate::error;
++use reqwest::header::{HeaderMap, HeaderValue};
++use std::fmt;
++use wickle::*;
++
++/// The authentication audience requested by this adapter.
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub enum AzureAudience {
++    /// Azure OpenAI inference endpoint.
++    Inference,
++    /// Azure Resource Manager deployment metadata.
++    Management,
++}
++
++/// Host-owned authorization lookup, with a bounded lifetime and explicit scope.
++pub struct AzureCredentialContext<'a> {
++    /// Connection owner; credentials must be authorized for this scope.
++    pub scope: &'a Scope,
++    /// Service audience; management always requires an Entra token.
++    pub audience: AzureAudience,
++    /// Cooperative cancellation while obtaining or refreshing a token.
++    pub cancellation: &'a tokio_util::sync::CancellationToken,
++    /// Effective deadline for authorization and its HTTP request.
++    pub deadline: tokio::time::Instant,
++}
++
++/// Credential material is supplied by the Host and never written to a catalog.
++#[derive(Clone)]
++pub enum AzureCredential {
++    /// Resource API key, sent in the `api-key` header for inference only.
++    ApiKey(String),
++    /// Entra access token for the requested audience, refreshed by the Host.
++    EntraToken(String),
++}
++impl fmt::Debug for AzureCredential {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.write_str(match self {
++            Self::ApiKey(_) => "AzureCredential::ApiKey([redacted])",
++            Self::EntraToken(_) => "AzureCredential::EntraToken([redacted])",
++        })
++    }
++}
++
++/// Called once per physical request; the Host owns token acquisition and renewal.
++pub trait AzureCredentialProvider: Send + Sync {
++    /// Return credentials for the connection scope and requested service audience.
++    fn credential<'a>(
++        &'a self,
++        context: &'a AzureCredentialContext<'a>,
++    ) -> PortFuture<'a, AzureCredential>;
++}
++impl AzureCredentialProvider for AzureCredential {
++    fn credential<'a>(
++        &'a self,
++        _: &'a AzureCredentialContext<'a>,
++    ) -> PortFuture<'a, AzureCredential> {
++        Box::pin(async { Ok(self.clone()) })
++    }
++}
++
++pub(crate) async fn authorize(
++    provider: &dyn AzureCredentialProvider,
++    context: AzureCredentialContext<'_>,
++) -> Result<HeaderMap, ContractError> {
++    let credential = tokio::select! { biased;
++        _ = context.cancellation.cancelled() => return Err(error(ErrorCode::Cancelled, "credential")),
++        _ = tokio::time::sleep_until(context.deadline) => return Err(error(ErrorCode::DeadlineExceeded, "credential")),
++        result = provider.credential(&context) => result.map_err(|_| error(ErrorCode::AccessDenied, "credential"))?,
++    };
++    let (name, value) = match credential {
++        AzureCredential::ApiKey(key) if context.audience == AzureAudience::Inference => {
++            ("api-key", key)
++        }
++        AzureCredential::EntraToken(token) => {
++            validate(&token)?;
++            ("authorization", format!("Bearer {token}"))
++        }
++        _ => return Err(error(ErrorCode::AccessDenied, "credential_audience")),
++    };
++    // HeaderValue's sensitive bit also keeps HTTP diagnostic formatting redacted.
++    if name == "api-key" {
++        validate(&value)?;
++    }
++    let mut value = HeaderValue::from_str(&value)
++        .map_err(|_| error(ErrorCode::AccessDenied, "credential_format"))?;
++    value.set_sensitive(true);
++    let mut headers = HeaderMap::new();
++    headers.insert(name, value);
++    Ok(headers)
++}
++fn validate(value: &str) -> Result<(), ContractError> {
++    if value.is_empty() || value.chars().any(char::is_whitespace) {
++        return Err(error(ErrorCode::AccessDenied, "credential_format"));
++    }
++    Ok(())
++}
+diff --git a/crates/wickle-model-azure-openai/src/connection.rs b/crates/wickle-model-azure-openai/src/connection.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..04af9660ab3e5ac2b7d6faf2a6beaa3f529f6082
+--- /dev/null
++++ b/crates/wickle-model-azure-openai/src/connection.rs
+@@ -0,0 +1,197 @@
++use crate::{AzureCredentialProvider, error};
++use reqwest::{Client, Url};
++use serde_json::json;
++use std::{fmt, sync::Arc, time::Duration};
++use wickle::*;
++
++/// Azure resource, deployment and finite transport bounds supplied by the Host.
++#[derive(Debug, Clone)]
++pub struct AzureOpenAiOptions {
++    /// Resource origin, for example `https://example.openai.azure.com/`.
++    pub endpoint: String,
++    /// Exact deployed name sent as the Responses request's `model` field.
++    pub deployment: String,
++    /// Optional ARM account resource ID, required by the deployment inspector.
++    pub resource_id: Option<String>,
++    /// Maximum connection establishment time.
++    pub connect_timeout: Duration,
++    /// Maximum duration of one HTTP request.
++    pub request_timeout: Duration,
++    /// Maximum raw response bytes.
++    pub max_transport_bytes: usize,
++    /// Maximum raw bytes per SSE event.
++    pub max_event_bytes: usize,
++    /// Maximum raw SSE data records, independent of normalized event limits.
++    pub max_protocol_events: usize,
++}
++impl AzureOpenAiOptions {
++    /// Select a resource and deployment, with bounded default transport settings.
++    pub fn new(endpoint: impl Into<String>, deployment: impl Into<String>) -> Self {
++        Self {
++            endpoint: endpoint.into(),
++            deployment: deployment.into(),
++            resource_id: None,
++            connect_timeout: Duration::from_secs(10),
++            request_timeout: Duration::from_secs(120),
++            max_transport_bytes: 8 * 1024 * 1024,
++            max_event_bytes: 1024 * 1024,
++            max_protocol_events: 16_384,
++        }
++    }
++}
++
++/// A scoped Azure connection; construction does not authenticate or access the network.
++#[derive(Clone)]
++pub struct AzureOpenAiConnection(pub(crate) Arc<Connection>);
++pub(crate) struct Connection {
++    pub client: Client,
++    pub base: Url,
++    pub scope: Scope,
++    pub binding: ModelPortBinding,
++    pub target: JsonObject,
++    pub credentials: Arc<dyn AzureCredentialProvider>,
++    pub options: AzureOpenAiOptions,
++}
++impl fmt::Debug for AzureOpenAiConnection {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_struct("AzureOpenAiConnection")
++            .field("binding", &self.0.binding)
++            .finish_non_exhaustive()
++    }
++}
++impl AzureOpenAiConnection {
++    /// Bind explicit Host credentials to one resource, deployment and scope.
++    pub fn new(
++        scope: Scope,
++        connection_ref: VersionedRef,
++        credentials: Arc<dyn AzureCredentialProvider>,
++        mut options: AzureOpenAiOptions,
++    ) -> Result<Self, ContractError> {
++        let origin = origin(&options.endpoint)?;
++        if options.deployment.is_empty()
++            || options
++                .deployment
++                .chars()
++                .any(|c| c.is_whitespace() || c.is_control() || "/?#%".contains(c))
++            || options.connect_timeout.is_zero()
++            || options.request_timeout.is_zero()
++            || options.max_transport_bytes == 0
++            || options.max_event_bytes == 0
++            || options.max_protocol_events == 0
++            || options.max_event_bytes > options.max_transport_bytes
++        {
++            return Err(error(ErrorCode::InvalidConfiguration, "connection"));
++        }
++        options.endpoint = origin.as_str().into();
++        let mut target = JsonObject::from([
++            ("endpoint".into(), json!(options.endpoint)),
++            ("deployment".into(), json!(options.deployment)),
++        ]);
++        if let Some(resource_id) = &options.resource_id {
++            validate_resource_id(resource_id)?;
++            target.insert("resource_id".into(), json!(resource_id));
++        }
++        let client = Client::builder()
++            .redirect(reqwest::redirect::Policy::none())
++            .retry(reqwest::retry::never())
++            .connect_timeout(options.connect_timeout)
++            .timeout(options.request_timeout)
++            .build()
++            .map_err(|_| error(ErrorCode::ComponentUnavailable, "client"))?;
++        let base = origin
++            .join("openai/v1/")
++            .map_err(|_| error(ErrorCode::InvalidConfiguration, "endpoint"))?;
++        Ok(Self(Arc::new(Connection {
++            client,
++            base,
++            scope,
++            target,
++            credentials,
++            options,
++            binding: ModelPortBinding {
++                provider: Id::new("azure-openai")?,
++                adapter: VersionedRef {
++                    id: Id::new("wickle-model-azure-openai")?,
++                    version: Id::new(env!("CARGO_PKG_VERSION"))?,
++                },
++                connection_ref,
++            },
++        })))
++    }
++    /// Adapter and credential revision used for route dispatch.
++    pub fn binding(&self) -> ModelPortBinding {
++        self.0.binding.clone()
++    }
++    /// Canonical resource/deployment target to register in the model binding.
++    pub fn target(&self) -> &JsonObject {
++        &self.0.target
++    }
++    /// Connection owner used for authorization.
++    pub fn scope(&self) -> &Scope {
++        &self.0.scope
++    }
++    /// This adapter supports Responses v1, without a dated `api-version` query.
++    pub fn api_contract() -> ApiContract {
++        ApiContract {
++            operation: Id::new("responses").expect("static identifier"),
++            version: Id::new("v1").expect("static identifier"),
++        }
++    }
++    pub(crate) fn validate(
++        &self,
++        route: &ResolvedModelRoute,
++        scope: &Scope,
++    ) -> Result<(), ContractError> {
++        if scope != &self.0.scope {
++            return Err(error(ErrorCode::AccessDenied, "scope"));
++        }
++        if !self.0.binding.matches_route(route)
++            || route.target != self.0.target
++            || route.api_contract != Self::api_contract()
++        {
++            return Err(error(ErrorCode::ModelBindingInvalid, "route"));
++        }
++        Ok(())
++    }
++}
++pub(crate) fn origin(value: &str) -> Result<Url, ContractError> {
++    let url = Url::parse(value).map_err(|_| error(ErrorCode::InvalidConfiguration, "endpoint"))?;
++    let loopback = url.host_str().is_some_and(|host| {
++        host == "localhost"
++            || host
++                .trim_matches(['[', ']'])
++                .parse::<std::net::IpAddr>()
++                .is_ok_and(|ip| ip.is_loopback())
++    });
++    if !(url.scheme() == "https" || (url.scheme() == "http" && loopback))
++        || url.host_str().is_none()
++        || !url.username().is_empty()
++        || url.password().is_some()
++        || url.query().is_some()
++        || url.fragment().is_some()
++        || url.path() != "/"
++    {
++        return Err(error(ErrorCode::InvalidConfiguration, "endpoint"));
++    }
++    Ok(url)
++}
++pub(crate) fn validate_resource_id(value: &str) -> Result<(), ContractError> {
++    let parts: Vec<_> = value.split('/').collect();
++    if parts.len() != 9
++        || !parts[0].is_empty()
++        || !parts[1].eq_ignore_ascii_case("subscriptions")
++        || !parts[3].eq_ignore_ascii_case("resourceGroups")
++        || !parts[5].eq_ignore_ascii_case("providers")
++        || !parts[6].eq_ignore_ascii_case("Microsoft.CognitiveServices")
++        || !parts[7].eq_ignore_ascii_case("accounts")
++        || parts[1..].iter().any(|part| {
++            part.is_empty()
++                || *part == "."
++                || *part == ".."
++                || part.chars().any(|c| c.is_control() || "?#%".contains(c))
++        })
++    {
++        return Err(error(ErrorCode::InvalidConfiguration, "resource_id"));
++    }
++    Ok(())
++}
+diff --git a/crates/wickle-model-azure-openai/src/inspection.rs b/crates/wickle-model-azure-openai/src/inspection.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..6ed04e307700fafa381e1a5aeed23bb74609326a
+--- /dev/null
++++ b/crates/wickle-model-azure-openai/src/inspection.rs
+@@ -0,0 +1,214 @@
++use crate::{
++    AzureAudience, AzureCredentialContext, AzureCredentialProvider, AzureOpenAiConnection, auth,
++    connection::origin, error,
++};
++use serde_json::{Value, json};
++use std::sync::Arc;
++use wickle::*;
++
++/// Azure Resource Manager connection for deployment metadata, separate from inference.
++#[derive(Debug, Clone)]
++pub struct AzureInspectionOptions {
++    /// Management origin; supports explicit loopback HTTP for transport tests.
++    pub endpoint: String,
++    /// Exact ARM protocol version, unrelated to the model or inference API version.
++    pub api_version: String,
++}
++impl Default for AzureInspectionOptions {
++    fn default() -> Self {
++        Self {
++            endpoint: "https://management.azure.com/".into(),
++            api_version: "2025-06-01".into(),
++        }
++    }
++}
++
++/// Observes the actual model release behind a mutable Azure deployment.
++#[derive(Clone)]
++pub struct AzureOpenAiInspector {
++    connection: AzureOpenAiConnection,
++    credentials: Arc<dyn AzureCredentialProvider>,
++    url: reqwest::Url,
++    resource_id: String,
++}
++impl AzureOpenAiInspector {
++    /// Configure an ARM GET with Host-supplied management credentials.
++    /// No request occurs until `inspect`; a data-plane API key cannot authorize ARM.
++    pub fn new(
++        connection: AzureOpenAiConnection,
++        credentials: Arc<dyn AzureCredentialProvider>,
++        options: AzureInspectionOptions,
++    ) -> Result<Self, ContractError> {
++        // This schema is verified against the selected protocol generation only.
++        if options.api_version != "2025-06-01" {
++            return Err(error(
++                ErrorCode::InvalidConfiguration,
++                "management_api_version",
++            ));
++        }
++        let account = connection
++            .0
++            .options
++            .resource_id
++            .as_ref()
++            .ok_or_else(|| error(ErrorCode::InvalidConfiguration, "resource_id"))?;
++        let resource_id = format!("{account}/deployments/{}", connection.0.options.deployment);
++        let mut url = origin(&options.endpoint)?;
++        {
++            let mut segments = url
++                .path_segments_mut()
++                .map_err(|_| error(ErrorCode::InvalidConfiguration, "management_endpoint"))?;
++            segments.clear();
++            for segment in resource_id.trim_start_matches('/').split('/') {
++                segments.push(segment);
++            }
++        }
++        url.query_pairs_mut()
++            .append_pair("api-version", &options.api_version);
++        Ok(Self {
++            connection,
++            credentials,
++            url,
++            resource_id,
++        })
++    }
++}
++impl ModelRouteInspector for AzureOpenAiInspector {
++    fn inspect<'a>(
++        &'a self,
++        route: &'a ResolvedModelRoute,
++        context: &'a ModelInspectionContext,
++    ) -> PortFuture<'a, ModelRouteObservation> {
++        Box::pin(async move {
++            self.connection.validate(route, &context.scope)?;
++            let operation = async {
++                let headers = auth::authorize(
++                    self.credentials.as_ref(),
++                    AzureCredentialContext {
++                        scope: &context.scope,
++                        audience: AzureAudience::Management,
++                        cancellation: &context.cancellation,
++                        deadline: context.deadline,
++                    },
++                )
++                .await?;
++                let mut response = self
++                    .connection
++                    .0
++                    .client
++                    .get(self.url.clone())
++                    .headers(headers)
++                    .send()
++                    .await
++                    .map_err(|_| {
++                        error(ErrorCode::ModelInspectionUnavailable, "management_request")
++                    })?;
++                if response.status().as_u16() == 404 {
++                    return Ok(ModelRouteObservation {
++                        route_digest: route.digest(),
++                        availability: ModelRouteAvailability::Unavailable,
++                        model_id: None,
++                        model_version: None,
++                        deployment_revision: None,
++                        version_semantics: VersionSemantics::MutableDeployment,
++                        evidence_ref: Id::new("azure.arm.deployments.get")?,
++                    });
++                }
++                if !response.status().is_success() {
++                    return Err(error(
++                        ErrorCode::ModelInspectionUnavailable,
++                        "management_status",
++                    ));
++                }
++                let mut bytes = Vec::new();
++                while let Some(chunk) = response
++                    .chunk()
++                    .await
++                    .map_err(|_| error(ErrorCode::ModelInspectionUnavailable, "management_body"))?
++                {
++                    if bytes.len().saturating_add(chunk.len())
++                        > 65_536.min(self.connection.0.options.max_transport_bytes)
++                    {
++                        return Err(error(
++                            ErrorCode::ModelInspectionUnavailable,
++                            "management_limit",
++                        ));
++                    }
++                    bytes.extend_from_slice(&chunk);
++                }
++                let body = std::str::from_utf8(&bytes)
++                    .ok()
++                    .and_then(|text| parse_json(text).ok())
++                    .ok_or_else(|| {
++                        error(ErrorCode::ModelInspectionUnavailable, "management_json")
++                    })?;
++                if !body
++                    .get("id")
++                    .and_then(Value::as_str)
++                    .is_some_and(|value| value.eq_ignore_ascii_case(&self.resource_id))
++                    || body.get("name").and_then(Value::as_str)
++                        != Some(self.connection.0.options.deployment.as_str())
++                    || !body
++                        .get("type")
++                        .and_then(Value::as_str)
++                        .is_some_and(|value| {
++                            value.eq_ignore_ascii_case(
++                                "Microsoft.CognitiveServices/accounts/deployments",
++                            )
++                        })
++                {
++                    return Err(error(ErrorCode::ModelVersionDrift, "management_target"));
++                }
++                if body
++                    .pointer("/properties/model/format")
++                    .and_then(Value::as_str)
++                    != Some("OpenAI")
++                {
++                    return Err(error(
++                        ErrorCode::ModelInspectionUnavailable,
++                        "management_model_format",
++                    ));
++                }
++                let model_id = identifier(&body, "/properties/model/name")?;
++                let model_version = identifier(&body, "/properties/model/version")?;
++                let availability = match body
++                    .pointer("/properties/provisioningState")
++                    .and_then(Value::as_str)
++                {
++                    Some("Succeeded") => ModelRouteAvailability::Available,
++                    Some("Failed" | "Canceled" | "Deleted") => ModelRouteAvailability::Unavailable,
++                    _ => ModelRouteAvailability::Unknown,
++                };
++                // A metadata fingerprint detects observed changes; it does not
++                // make a mutable deployment immutable or prevent later upgrades.
++                let revision = canonical_digest(&json!({
++                    "resource_id": self.resource_id,
++                    "model": body.pointer("/properties/model"),
++                    "upgrade": body.pointer("/properties/versionUpgradeOption"),
++                    "etag": body.get("etag"),
++                }));
++                Ok(ModelRouteObservation {
++                    route_digest: route.digest(),
++                    availability,
++                    model_id: Some(model_id),
++                    model_version: Some(model_version),
++                    deployment_revision: Some(Id::new(revision.as_str())?),
++                    version_semantics: VersionSemantics::MutableDeployment,
++                    evidence_ref: Id::new("azure.arm.deployments.get.2025-06-01")?,
++                })
++            };
++            tokio::select! { biased;
++                _ = context.cancellation.cancelled() => Err(error(ErrorCode::Cancelled, "inspection")),
++                _ = tokio::time::sleep_until(context.deadline) => Err(error(ErrorCode::DeadlineExceeded, "inspection")),
++                result = operation => result,
++            }
++        })
++    }
++}
++fn identifier(value: &Value, path: &str) -> Result<Id, ContractError> {
++    value
++        .pointer(path)
++        .and_then(Value::as_str)
++        .and_then(|value| Id::new(value).ok())
++        .ok_or_else(|| error(ErrorCode::ModelInspectionUnavailable, "management_model"))
++}
+diff --git a/crates/wickle-model-azure-openai/src/lib.rs b/crates/wickle-model-azure-openai/src/lib.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..3d40530690bf44301d64ce4df13815d2e82b188d
+--- /dev/null
++++ b/crates/wickle-model-azure-openai/src/lib.rs
+@@ -0,0 +1,15 @@
++//! Azure OpenAI Responses v1 with Host-owned authorization and explicit deployment identity.
++//! Model metadata uses a separate Azure Resource Manager authorization path.
++#![forbid(unsafe_code)]
++mod auth;
++mod connection;
++mod inspection;
++mod model;
++pub use auth::{AzureAudience, AzureCredential, AzureCredentialContext, AzureCredentialProvider};
++pub use connection::{AzureOpenAiConnection, AzureOpenAiOptions};
++pub use inspection::{AzureInspectionOptions, AzureOpenAiInspector};
++pub use model::AzureOpenAiModel;
++use wickle::{ContractError, ErrorCode};
++fn error(code: ErrorCode, location: &str) -> ContractError {
++    ContractError::new(code, format!("azure_openai.{location}"))
++}
+diff --git a/crates/wickle-model-azure-openai/src/model.rs b/crates/wickle-model-azure-openai/src/model.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..4395973981bd20d06df399777494d2b021283276
+--- /dev/null
++++ b/crates/wickle-model-azure-openai/src/model.rs
+@@ -0,0 +1,290 @@
++use crate::{AzureAudience, AzureCredentialContext, AzureOpenAiConnection, auth, error};
++use futures_util::stream;
++use reqwest::Response;
++use serde_json::Value;
++use std::collections::VecDeque;
++use wickle::*;
++use wickle_model_responses::{ResponsesDecoder, SseDecoder, encode_request};
++
++/// One Azure OpenAI Responses POST per invocation, streamed into Wickle model events.
++/// The adapter does not retry, run Tool handlers, or load environment variables.
++#[derive(Debug, Clone)]
++pub struct AzureOpenAiModel {
++    connection: AzureOpenAiConnection,
++}
++impl AzureOpenAiModel {
++    /// Bind an already configured connection without making a network request.
++    pub fn new(connection: AzureOpenAiConnection) -> Self {
++        Self { connection }
++    }
++}
++impl ModelPort for AzureOpenAiModel {
++    fn binding(&self) -> ModelPortBinding {
++        self.connection.binding()
++    }
++    fn generate<'a>(
++        &'a self,
++        request: &'a ModelRequest,
++        context: &'a ModelCallContext,
++    ) -> PortStream<'a, ModelEvent> {
++        let state = State {
++            connection: &self.connection,
++            request,
++            context,
++            response: None,
++            decoder: ResponsesDecoder::new(request, None),
++            framing: SseDecoder::new(
++                self.connection.0.options.max_transport_bytes,
++                self.connection.0.options.max_event_bytes,
++                self.connection.0.options.max_protocol_events,
++            ),
++            queue: VecDeque::new(),
++            started: false,
++            finished: false,
++        };
++        Box::pin(stream::unfold(state, |mut state| async move {
++            loop {
++                if !state.finished && state.context.cancellation.is_cancelled() {
++                    state.queue.clear();
++                    state.fail(error(ErrorCode::Cancelled, "stream"));
++                }
++                if !state.finished && tokio::time::Instant::now() >= state.context.deadline {
++                    state.queue.clear();
++                    state.fail(error(ErrorCode::DeadlineExceeded, "stream"));
++                }
++                if let Some(event) = state.queue.pop_front() {
++                    return Some((event, state));
++                }
++                if state.finished {
++                    return None;
++                }
++                if !state.started {
++                    state.started = true;
++                    if let Err(failure) = state.start().await {
++                        state.fail(failure);
++                    }
++                    continue;
++                }
++                let result = {
++                    let response = state
++                        .response
++                        .as_mut()
++                        .expect("started response or finished state");
++                    tokio::select! { biased;
++                        _ = state.context.cancellation.cancelled() => Err(error(ErrorCode::Cancelled, "stream")),
++                        _ = tokio::time::sleep_until(state.context.deadline) => Err(error(ErrorCode::DeadlineExceeded, "stream")),
++                        chunk = response.chunk() => chunk.map_err(transport_error),
++                    }
++                };
++                match result {
++                    Ok(Some(bytes)) => match state.framing.push(&bytes) {
++                        Ok(events) => {
++                            for event in events {
++                                match state.decoder.event(event) {
++                                    Ok(events) => state.queue.extend(events.into_iter().map(Ok)),
++                                    Err(error) => {
++                                        state.fail(error);
++                                        break;
++                                    }
++                                }
++                            }
++                        }
++                        Err(error) => state.fail(error),
++                    },
++                    Ok(None) => match state.framing.finish().and_then(|_| state.decoder.finish()) {
++                        Ok(event) => {
++                            state.queue.push_back(Ok(event));
++                            state.finished = true;
++                            state.response = None;
++                        }
++                        Err(error) => state.fail(error),
++                    },
++                    Err(error) => state.fail(error),
++                }
++            }
++        }))
++    }
++}
++struct State<'a> {
++    connection: &'a AzureOpenAiConnection,
++    request: &'a ModelRequest,
++    context: &'a ModelCallContext,
++    response: Option<Response>,
++    decoder: ResponsesDecoder<'a>,
++    framing: SseDecoder,
++    queue: VecDeque<Result<ModelEvent, ContractError>>,
++    started: bool,
++    finished: bool,
++}
++impl State<'_> {
++    async fn start(&mut self) -> Result<(), ContractError> {
++        self.connection
++            .validate(&self.request.route, &self.context.scope)?;
++        if self.context.attempt_id != self.request.request_id {
++            return Err(error(ErrorCode::RequestConflict, "attempt"));
++        }
++        self.request.validate()?;
++        let mut value = encode_request(self.request)?;
++        // The wire selects a deployment; the core route retains its underlying
++        // model/release and the original route-bound opaque continuation.
++        value["model"] = serde_json::json!(self.connection.0.options.deployment);
++        let body =
++            serde_json::to_vec(&value).map_err(|_| error(ErrorCode::InvalidJson, "request"))?;
++        if body.len() > self.request.limits.max_input_bytes {
++            return Err(error(ErrorCode::ModelCapabilityUnsupported, "request_size"));
++        }
++        let url = self
++            .connection
++            .0
++            .base
++            .join("responses")
++            .map_err(|_| error(ErrorCode::InvalidConfiguration, "responses_url"))?;
++        let headers = match auth::authorize(
++            self.connection.0.credentials.as_ref(),
++            AzureCredentialContext {
++                scope: &self.context.scope,
++                audience: AzureAudience::Inference,
++                cancellation: &self.context.cancellation,
++                deadline: self.context.deadline,
++            },
++        )
++        .await
++        {
++            Ok(headers) => headers,
++            Err(failure) if failure.code == ErrorCode::AccessDenied => {
++                self.queue.push_back(Ok(ModelEvent::ResponseError {
++                    kind: ModelFailureKind::Authentication,
++                    metadata: self.decoder.metadata.clone(),
++                }));
++                self.finished = true;
++                return Ok(());
++            }
++            Err(failure) => return Err(failure),
++        };
++        let operation = self
++            .connection
++            .0
++            .client
++            .post(url)
++            .headers(headers)
++            .header("content-type", "application/json")
++            .header("accept", "text/event-stream")
++            .header("accept-encoding", "identity")
++            .body(body)
++            .send();
++        let mut response = tokio::select! { biased;
++            _ = self.context.cancellation.cancelled() => return Err(error(ErrorCode::Cancelled, "request")),
++            _ = tokio::time::sleep_until(self.context.deadline) => return Err(error(ErrorCode::DeadlineExceeded, "request")),
++            result = operation => result.map_err(transport_error)?,
++        };
++        self.decoder.metadata.provider_request_id = response
++            .headers()
++            .get("apim-request-id")
++            .or_else(|| response.headers().get("x-request-id"))
++            .map(|value| {
++                value
++                    .to_str()
++                    .map_err(|_| error(ErrorCode::InvalidContract, "request_id"))
++                    .and_then(Id::new)
++            })
++            .transpose()?;
++        if !response.status().is_success() {
++            let status = response.status().as_u16();
++            let mut kind = match status {
++                401 | 403 => ModelFailureKind::Authentication,
++                404 => ModelFailureKind::Unavailable,
++                408 | 504 => ModelFailureKind::Timeout,
++                429 => ModelFailureKind::RateLimited,
++                500..=599 => ModelFailureKind::Transport,
++                _ => ModelFailureKind::Unsupported,
++            };
++            if status == 400 {
++                let mut bytes = vec![];
++                loop {
++                    let chunk = tokio::select! { biased;
++                        _ = self.context.cancellation.cancelled() => return Err(error(ErrorCode::Cancelled, "error_body")),
++                        _ = tokio::time::sleep_until(self.context.deadline) => return Err(error(ErrorCode::DeadlineExceeded, "error_body")),
++                        chunk = response.chunk() => chunk.map_err(transport_error)?,
++                    };
++                    let Some(chunk) = chunk else {
++                        break;
++                    };
++                    if bytes.len().saturating_add(chunk.len())
++                        > 65_536.min(self.connection.0.options.max_transport_bytes)
++                    {
++                        break;
++                    }
++                    bytes.extend_from_slice(&chunk);
++                }
++                if let Ok(value) = std::str::from_utf8(&bytes)
++                    .map_err(|_| ())
++                    .and_then(|text| parse_json(text).map_err(|_| ()))
++                {
++                    if value.pointer("/error/code").and_then(Value::as_str)
++                        == Some("context_length_exceeded")
++                    {
++                        kind = ModelFailureKind::ContextOverflow;
++                    }
++                }
++            }
++            self.queue.push_back(Ok(ModelEvent::ResponseError {
++                kind,
++                metadata: self.decoder.metadata.clone(),
++            }));
++            self.finished = true;
++            return Ok(());
++        }
++        let content_type = response
++            .headers()
++            .get("content-type")
++            .and_then(|value| value.to_str().ok())
++            .and_then(|value| value.split(';').next())
++            .map(str::trim);
++        if !content_type.is_some_and(|value| value.eq_ignore_ascii_case("text/event-stream")) {
++            return Err(error(ErrorCode::InvalidContract, "content_type"));
++        }
++        if response
++            .content_length()
++            .is_some_and(|bytes| bytes > self.connection.0.options.max_transport_bytes as u64)
++        {
++            return Err(error(ErrorCode::InvalidContract, "response_size"));
++        }
++        self.response = Some(response);
++        Ok(())
++    }
++    fn fail(&mut self, failure: ContractError) {
++        self.finished = true;
++        self.response = None;
++        if matches!(
++            failure.code,
++            ErrorCode::Cancelled | ErrorCode::AccessDenied | ErrorCode::RequestConflict
++        ) {
++            self.queue.push_back(Err(failure));
++            return;
++        }
++        let kind = match failure.code {
++            ErrorCode::DeadlineExceeded => ModelFailureKind::Timeout,
++            ErrorCode::ModelUnavailable => ModelFailureKind::Transport,
++            ErrorCode::ModelOptionUnsupported
++            | ErrorCode::ModelCapabilityUnsupported
++            | ErrorCode::CapabilityUnsupported
++            | ErrorCode::ModelBindingInvalid
++            | ErrorCode::InvalidConfiguration => ModelFailureKind::Unsupported,
++            _ => ModelFailureKind::Protocol,
++        };
++        self.queue.push_back(Ok(ModelEvent::ResponseError {
++            kind,
++            metadata: self.decoder.metadata.clone(),
++        }));
++    }
++}
++fn transport_error(error_value: reqwest::Error) -> ContractError {
++    error(
++        if error_value.is_timeout() {
++            ErrorCode::DeadlineExceeded
++        } else {
++            ErrorCode::ModelUnavailable
++        },
++        "transport",
++    )
++}
+diff --git a/crates/wickle-model-azure-openai/tests/responses.rs b/crates/wickle-model-azure-openai/tests/responses.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..e9b02faef06a6fb0d874d528ef28f4cc9088b6cf
+--- /dev/null
++++ b/crates/wickle-model-azure-openai/tests/responses.rs
+@@ -0,0 +1,516 @@
++//! Azure inference/authentication and deployment metadata transport contracts.
++mod support;
++use futures_util::StreamExt;
++use serde_json::{Value, json};
++use std::{
++    sync::{
++        Arc,
++        atomic::{AtomicUsize, Ordering},
++    },
++    time::Duration,
++};
++use support::*;
++use wickle::*;
++use wickle_model_azure_openai::*;
++
++struct Tokens(AtomicUsize);
++impl AzureCredentialProvider for Tokens {
++    fn credential<'a>(
++        &'a self,
++        context: &'a AzureCredentialContext<'a>,
++    ) -> PortFuture<'a, AzureCredential> {
++        Box::pin(async move {
++            assert_eq!(context.scope, &scope());
++            assert_eq!(context.audience, AzureAudience::Inference);
++            let number = self.0.fetch_add(1, Ordering::SeqCst);
++            Ok(AzureCredential::EntraToken(format!("token-{number}")))
++        })
++    }
++}
++
++#[tokio::test]
++async fn deployment_mapping_preserves_model_identity_and_refreshes_entra_per_request() {
++    for entra in [false, true] {
++        let mut reply = Reply::sse(&events("base-model", "42"));
++        reply.headers = vec![("apim-request-id", "azure-request".into())];
++        let server = Server::new(vec![reply, Reply::sse(&events("base-model", "43"))]).await;
++        let tokens = Arc::new(Tokens(AtomicUsize::new(0)));
++        let credentials: Arc<dyn AzureCredentialProvider> = if entra {
++            tokens.clone()
++        } else {
++            Arc::new(AzureCredential::ApiKey("fixture-key".into()))
++        };
++        let connection = AzureOpenAiConnection::new(
++            scope(),
++            reference("account"),
++            credentials,
++            options(&server),
++        )
++        .unwrap();
++        let model = AzureOpenAiModel::new(connection.clone());
++        let mut request = request(&connection, "base-model");
++        let original = request.route.clone();
++        for answer in ["42", "43"] {
++            let response =
++                collect_model_response(&request, model.generate(&request, &context(&request)))
++                    .await
++                    .unwrap();
++            assert_eq!(response.text, answer);
++            assert_eq!(response.metadata.reported_model_id, Some(id("base-model")));
++            assert!(response.metadata.reported_model_version.is_none());
++            assert_eq!(response.metadata.usage.unwrap().output_tokens, Some(7));
++            if answer == "42" {
++                assert_eq!(
++                    response.metadata.provider_request_id,
++                    Some(id("azure-request"))
++                );
++            }
++            request.request_id = id("second-attempt");
++        }
++        assert_eq!(request.route, original);
++        assert_eq!(tokens.0.load(Ordering::SeqCst), if entra { 2 } else { 0 });
++        let calls = server.requests.lock().unwrap();
++        assert_eq!(calls.len(), 2);
++        for (index, call) in calls.iter().enumerate() {
++            assert_eq!(call.method, "POST");
++            assert_eq!(call.path, "/openai/v1/responses");
++            assert_eq!(call.body["model"], "finance-deployment");
++            assert_eq!(call.body["reasoning"]["effort"], "medium");
++            assert_eq!(call.body["store"], false);
++            let headers = call.headers.to_ascii_lowercase();
++            if entra {
++                assert!(headers.contains(&format!("authorization: bearer token-{index}")));
++                assert!(!headers.contains("api-key:"));
++            } else {
++                assert!(headers.contains("api-key: fixture-key"));
++                assert!(!headers.contains("authorization:"));
++            }
++            assert!(!call.body.to_string().contains("hidden-workspace"));
++            assert!(!call.body.to_string().contains("fixture-key"));
++        }
++    }
++}
++
++#[tokio::test]
++async fn wrong_scope_route_api_and_credentials_never_make_an_http_request() {
++    for case in [
++        "scope",
++        "target",
++        "provider",
++        "api",
++        "options",
++        "credential",
++    ] {
++        let server = Server::new(vec![]).await;
++        let tokens = Arc::new(Tokens(AtomicUsize::new(0)));
++        let credentials: Arc<dyn AzureCredentialProvider> = if case == "credential" {
++            Arc::new(AzureCredential::ApiKey("bad\nkey".into()))
++        } else {
++            tokens.clone()
++        };
++        let connection = AzureOpenAiConnection::new(
++            scope(),
++            reference("account"),
++            credentials,
++            options(&server),
++        )
++        .unwrap();
++        let model = AzureOpenAiModel::new(connection.clone());
++        let mut request = request(&connection, "base-model");
++        let mut context = context(&request);
++        match case {
++            "scope" => context.scope.workspace_id = id("another-workspace"),
++            "target" => {
++                request
++                    .route
++                    .target
++                    .insert("deployment".into(), json!("another-deployment"));
++            }
++            "provider" => request.route.provider = id("openai"),
++            "api" => request.route.api_contract.version = id("2025-04-01-preview"),
++            "options" => {
++                request.options.insert("model".into(), json!("injected"));
++            }
++            _ => {}
++        }
++        let failure = collect_model_response(&request, model.generate(&request, &context))
++            .await
++            .unwrap_err();
++        if case == "credential" {
++            assert_eq!(failure.kind, ModelFailureKind::Authentication);
++        }
++        assert!(server.requests.lock().unwrap().is_empty());
++        assert_eq!(tokens.0.load(Ordering::SeqCst), 0);
++    }
++}
++
++#[tokio::test]
++async fn azure_tools_and_json_output_keep_original_route_bound_replay() {
++    let call = json!({"id":"fc","type":"function_call","call_id":"call-1","name":"lookup","arguments":"{\"query\":\"figures\"}","status":"completed"});
++    let first = vec![
++        json!({"type":"response.created","response":{"id":"resp_1","model":"base-model","status":"in_progress"}}),
++        json!({"type":"response.output_item.added","output_index":0,"item":{"id":"fc","type":"function_call","call_id":"call-1","name":"lookup","arguments":""}}),
++        json!({"type":"response.function_call_arguments.delta","output_index":0,"item_id":"fc","delta":"{\"query\":\"figures\"}"}),
++        json!({"type":"response.completed","response":{"id":"resp_1","model":"base-model","status":"completed","output":[call]}}),
++    ];
++    let server = Server::new(vec![
++        Reply::sse(&first),
++        Reply::sse(&events("base-model", "{\"answer\":42}")),
++    ])
++    .await;
++    let connection = connection(&server);
++    let model = AzureOpenAiModel::new(connection.clone());
++    let mut request = request(&connection, "base-model");
++    request.tools = vec![ModelTool {
++        name: id("lookup"),
++        description: "Read figures".into(),
++        model_input_schema: json!({"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":false}),
++    }];
++    let first = collect_model_response(&request, model.generate(&request, &context(&request)))
++        .await
++        .unwrap();
++    assert_eq!(first.finish, ModelFinish::ToolCalls);
++    assert_eq!(first.tool_calls[0].model_inputs["query"], "figures");
++    request.messages.push(ModelMessage {
++        role: ModelRole::Assistant,
++        content: vec![
++            ModelContent::ToolCall {
++                provider_call_id: id("call-1"),
++                name: id("lookup"),
++                arguments: JsonObject::from([("query".into(), json!("figures"))]),
++            },
++            ModelContent::Opaque {
++                continuation: first.continuation[0].clone(),
++            },
++        ],
++    });
++    request.messages.push(ModelMessage {
++        role: ModelRole::Tool,
++        content: vec![ModelContent::ToolResult {
++            provider_call_id: id("call-1"),
++            content: json!({"answer":42}),
++        }],
++    });
++    request.output = ModelOutput::JsonSchema {
++        schema: json!({"type":"object","properties":{"answer":{"type":"integer"}},"required":["answer"],"additionalProperties":false}),
++    };
++    let response = collect_model_response(&request, model.generate(&request, &context(&request)))
++        .await
++        .unwrap();
++    assert_eq!(parse_json(&response.text).unwrap(), json!({"answer":42}));
++    let calls = server.requests.lock().unwrap();
++    let input = calls[1].body["input"].as_array().unwrap();
++    assert_eq!(
++        input
++            .iter()
++            .filter(|value| value["type"] == "function_call")
++            .count(),
++        1
++    );
++    assert_eq!(calls[1].body["model"], "finance-deployment");
++    assert_eq!(calls[1].body["text"]["format"]["strict"], true);
++    assert_eq!(calls[0].body["tools"][0]["strict"], false);
++}
++
++fn inspection_context() -> ModelInspectionContext {
++    ModelInspectionContext {
++        scope: scope(),
++        principal_ref: id("user"),
++        capability_grant_ref: id("grant"),
++        cancellation: Default::default(),
++        deadline: tokio::time::Instant::now() + Duration::from_secs(3),
++    }
++}
++fn deployment(version: &str) -> Value {
++    json!({"id":format!("{ACCOUNT}/deployments/finance-deployment"),"name":"finance-deployment","type":"Microsoft.CognitiveServices/accounts/deployments","properties":{"model":{"format":"OpenAI","name":"base-model","version":version},"provisioningState":"Succeeded","versionUpgradeOption":"OnceNewDefaultVersionAvailable"}})
++}
++fn inspector(
++    connection: AzureOpenAiConnection,
++    server: &Server,
++    credentials: AzureCredential,
++) -> AzureOpenAiInspector {
++    AzureOpenAiInspector::new(
++        connection,
++        Arc::new(credentials),
++        AzureInspectionOptions {
++            endpoint: origin(server),
++            ..Default::default()
++        },
++    )
++    .unwrap()
++}
++
++#[tokio::test]
++async fn arm_inspection_detects_model_upgrade_without_claiming_deployment_immutability() {
++    let inference = Server::new(vec![]).await;
++    let management = Server::new(vec![
++        Reply::json(200, deployment("release")),
++        Reply::json(200, deployment("next-release")),
++    ])
++    .await;
++    let connection = connection(&inference);
++    let mut request = request(&connection, "base-model");
++    let inspector = inspector(
++        connection,
++        &management,
++        AzureCredential::EntraToken("management-token".into()),
++    );
++    let first = inspector
++        .inspect(&request.route, &inspection_context())
++        .await
++        .unwrap();
++    assert_eq!(first.model_version, Some(id("release")));
++    assert_eq!(first.version_semantics, VersionSemantics::MutableDeployment);
++    first
++        .validate(&request.route, VersionPolicy::AllowMutable)
++        .unwrap();
++    assert_eq!(
++        first
++            .validate(&request.route, VersionPolicy::RequirePinned)
++            .unwrap_err()
++            .code,
++        ErrorCode::ModelVersionUnpinned
++    );
++    request.route.deployment_revision = first.deployment_revision.clone();
++    let changed = inspector
++        .inspect(&request.route, &inspection_context())
++        .await
++        .unwrap();
++    assert_eq!(changed.model_version, Some(id("next-release")));
++    assert_ne!(changed.deployment_revision, first.deployment_revision);
++    assert_eq!(
++        changed
++            .validate(&request.route, VersionPolicy::AllowMutable)
++            .unwrap_err()
++            .code,
++        ErrorCode::ModelVersionDrift
++    );
++    assert!(inference.requests.lock().unwrap().is_empty());
++    for call in management.requests.lock().unwrap().iter() {
++        assert_eq!(call.method, "GET");
++        assert_eq!(
++            call.path,
++            format!("{ACCOUNT}/deployments/finance-deployment?api-version=2025-06-01")
++        );
++        assert!(
++            call.headers
++                .to_ascii_lowercase()
++                .contains("authorization: bearer management-token")
++        );
++        assert!(!call.headers.contains("fixture-key"));
++    }
++}
++
++#[tokio::test]
++async fn metadata_unavailability_mismatch_and_wrong_audience_do_not_invent_a_version() {
++    for case in [
++        "missing",
++        "wrong-target",
++        "version-missing",
++        "provisioning",
++        "api-key",
++    ] {
++        let mut body = deployment("release");
++        if case == "wrong-target" {
++            body["id"] = json!(format!("{ACCOUNT}/deployments/other"));
++        }
++        if case == "version-missing" {
++            body["properties"]["model"]
++                .as_object_mut()
++                .unwrap()
++                .remove("version");
++        }
++        if case == "provisioning" {
++            body["properties"]["provisioningState"] = json!("Updating");
++        }
++        let server = Server::new(vec![Reply::json(
++            if case == "missing" { 404 } else { 200 },
++            body,
++        )])
++        .await;
++        let connection = connection(&server);
++        let request = request(&connection, "base-model");
++        let credential = if case == "api-key" {
++            AzureCredential::ApiKey("data-plane-key".into())
++        } else {
++            AzureCredential::EntraToken("management-token".into())
++        };
++        let result = inspector(connection, &server, credential)
++            .inspect(&request.route, &inspection_context())
++            .await;
++        match case {
++            "missing" => {
++                let value = result.unwrap();
++                assert_eq!(value.availability, ModelRouteAvailability::Unavailable);
++                assert!(value.model_version.is_none());
++            }
++            "provisioning" => assert_eq!(
++                result.unwrap().availability,
++                ModelRouteAvailability::Unknown
++            ),
++            _ => assert!(result.is_err(), "{case}"),
++        }
++        if case == "api-key" {
++            assert!(server.requests.lock().unwrap().is_empty());
++        }
++    }
++}
++
++#[tokio::test]
++async fn azure_errors_and_redirects_do_not_retry_or_forward_credentials() {
++    let redirected = Server::new(vec![]).await;
++    for (status, expected) in [
++        (401, ModelFailureKind::Authentication),
++        (429, ModelFailureKind::RateLimited),
++        (503, ModelFailureKind::Transport),
++        (307, ModelFailureKind::Unsupported),
++    ] {
++        let mut reply = Reply::json(status, json!({"error":{"message":"private diagnostics"}}));
++        if status == 307 {
++            reply
++                .headers
++                .push(("location", format!("{}responses", redirected.base)));
++        }
++        let server = Server::new(vec![reply]).await;
++        let connection = connection(&server);
++        let request = request(&connection, "base-model");
++        let model = AzureOpenAiModel::new(connection);
++        let failure =
++            collect_model_response(&request, model.generate(&request, &context(&request)))
++                .await
++                .unwrap_err();
++        assert_eq!(failure.kind, expected);
++        assert!(!format!("{failure:?}").contains("private diagnostics"));
++        assert_eq!(server.requests.lock().unwrap().len(), 1);
++    }
++    assert!(redirected.requests.lock().unwrap().is_empty());
++}
++
++#[tokio::test]
++async fn cancelled_or_truncated_streams_never_become_a_completed_response() {
++    for cancel in [false, true] {
++        let mut data = events("base-model", "partial");
++        data.truncate(3);
++        let mut reply = Reply::sse(&data);
++        reply.stall = cancel;
++        let server = Server::new(vec![reply]).await;
++        let connection = connection(&server);
++        let request = request(&connection, "base-model");
++        let model = AzureOpenAiModel::new(connection);
++        let context = context(&request);
++        let mut stream = model.generate(&request, &context);
++        assert!(matches!(
++            stream.next().await.unwrap().unwrap(),
++            ModelEvent::TextDelta { .. }
++        ));
++        server.entered.notified().await;
++        if cancel {
++            context.cancellation.cancel();
++        }
++        let terminal = stream.next().await.unwrap();
++        if cancel {
++            assert_eq!(terminal.unwrap_err().code, ErrorCode::Cancelled);
++        } else {
++            assert!(matches!(
++                terminal.unwrap(),
++                ModelEvent::ResponseError {
++                    kind: ModelFailureKind::Protocol,
++                    ..
++                }
++            ));
++        }
++        assert!(stream.next().await.is_none());
++        tokio::time::timeout(Duration::from_secs(1), server.closed.notified())
++            .await
++            .unwrap();
++        assert_eq!(server.requests.lock().unwrap().len(), 1);
++    }
++}
++
++struct PendingCredential(tokio::sync::Notify);
++impl AzureCredentialProvider for PendingCredential {
++    fn credential<'a>(
++        &'a self,
++        _: &'a AzureCredentialContext<'a>,
++    ) -> PortFuture<'a, AzureCredential> {
++        Box::pin(async move {
++            self.0.notify_one();
++            std::future::pending().await
++        })
++    }
++}
++
++#[tokio::test(start_paused = true)]
++async fn cancellation_and_deadline_bound_host_token_refresh_before_http() {
++    for cancel in [false, true] {
++        let server = Server::new(vec![]).await;
++        let credentials = Arc::new(PendingCredential(tokio::sync::Notify::new()));
++        let connection = AzureOpenAiConnection::new(
++            scope(),
++            reference("account"),
++            credentials.clone(),
++            options(&server),
++        )
++        .unwrap();
++        let model = AzureOpenAiModel::new(connection.clone());
++        let request = request(&connection, "base-model");
++        let mut context = context(&request);
++        context.deadline = tokio::time::Instant::now() + Duration::from_secs(1);
++        let mut stream = model.generate(&request, &context);
++        let mut next = Box::pin(stream.next());
++        tokio::select! {
++            _ = credentials.0.notified() => {},
++            value = &mut next => panic!("refresh completed unexpectedly: {value:?}"),
++        }
++        if cancel {
++            context.cancellation.cancel();
++        } else {
++            tokio::time::advance(Duration::from_secs(2)).await;
++        }
++        let value = next.await.unwrap();
++        if cancel {
++            assert_eq!(value.unwrap_err().code, ErrorCode::Cancelled);
++        } else {
++            assert!(matches!(
++                value.unwrap(),
++                ModelEvent::ResponseError {
++                    kind: ModelFailureKind::Timeout,
++                    ..
++                }
++            ));
++        }
++        assert!(stream.next().await.is_none());
++        assert!(server.requests.lock().unwrap().is_empty());
++    }
++}
++
++#[tokio::test]
++async fn arm_scope_and_target_rejection_precedes_credential_lookup() {
++    for wrong_scope in [true, false] {
++        let server = Server::new(vec![]).await;
++        let connection = connection(&server);
++        let mut request = request(&connection, "base-model");
++        let credentials = Arc::new(Tokens(AtomicUsize::new(0)));
++        let inspector = AzureOpenAiInspector::new(
++            connection,
++            credentials.clone(),
++            AzureInspectionOptions {
++                endpoint: origin(&server),
++                ..Default::default()
++            },
++        )
++        .unwrap();
++        let mut context = inspection_context();
++        if wrong_scope {
++            context.scope.workspace_id = id("different-workspace");
++        } else {
++            request
++                .route
++                .target
++                .insert("deployment".into(), json!("different-deployment"));
++        }
++        assert!(inspector.inspect(&request.route, &context).await.is_err());
++        assert_eq!(credentials.0.load(Ordering::SeqCst), 0);
++        assert!(server.requests.lock().unwrap().is_empty());
++    }
++}
+diff --git a/crates/wickle-model-azure-openai/tests/support/mod.rs b/crates/wickle-model-azure-openai/tests/support/mod.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..a9533064a5e2376b629723f1df8699a8bd7175f0
+--- /dev/null
++++ b/crates/wickle-model-azure-openai/tests/support/mod.rs
+@@ -0,0 +1,106 @@
++use serde_json::{Value, json};
++use std::sync::Arc;
++use wickle::*;
++use wickle_model_azure_openai::*;
++
++pub fn id(value: &str) -> Id {
++    Id::new(value).unwrap()
++}
++pub fn reference(value: &str) -> VersionedRef {
++    VersionedRef {
++        id: id(value),
++        version: id("1"),
++    }
++}
++pub fn scope() -> Scope {
++    Scope {
++        tenant_id: id("tenant"),
++        workspace_id: id("hidden-workspace"),
++        user_id: None,
++    }
++}
++pub const ACCOUNT: &str = "/subscriptions/sub/resourceGroups/group/providers/Microsoft.CognitiveServices/accounts/account";
++pub fn origin(server: &Server) -> String {
++    server.base.trim_end_matches("v1/").into()
++}
++pub fn options(server: &Server) -> AzureOpenAiOptions {
++    let mut options = AzureOpenAiOptions::new(origin(server), "finance-deployment");
++    options.resource_id = Some(ACCOUNT.into());
++    options
++}
++pub fn connection(server: &Server) -> AzureOpenAiConnection {
++    AzureOpenAiConnection::new(
++        scope(),
++        reference("account"),
++        Arc::new(AzureCredential::ApiKey("fixture-key".into())),
++        options(server),
++    )
++    .unwrap()
++}
++pub fn request(connection: &AzureOpenAiConnection, model: &str) -> ModelRequest {
++    let binding = connection.binding();
++    ModelRequest {
++        request_id: id("attempt"),
++        purpose: ModelPurpose::Agent,
++        route: ResolvedModelRoute {
++            binding: reference("primary"),
++            catalog_revision: id("catalog"),
++            routing_policy_revision: id("policy"),
++            requested_model: id(model),
++            model_id: id(model),
++            model_version: id("release"),
++            version_semantics: VersionSemantics::MutableDeployment,
++            provider: binding.provider,
++            target: connection.target().clone(),
++            deployment_revision: None,
++            api_contract: AzureOpenAiConnection::api_contract(),
++            adapter: binding.adapter,
++            capability_revision: id("capabilities"),
++            connection_ref: binding.connection_ref,
++        },
++        messages: vec![ModelMessage {
++            role: ModelRole::User,
++            content: vec![ModelContent::Text {
++                text: "Find the requested figures".into(),
++            }],
++        }],
++        tools: vec![],
++        output: ModelOutput::Text {},
++        max_output_tokens: 128.try_into().unwrap(),
++        options: JsonObject::from([("reasoning_effort".into(), json!("medium"))]),
++        limits: ModelResponseLimits {
++            max_input_bytes: 32_768,
++            max_response_bytes: 32_768,
++            max_delta_bytes: 128,
++            max_events: 256,
++            max_tool_calls: 4,
++        },
++    }
++}
++pub fn context(request: &ModelRequest) -> ModelCallContext {
++    ModelCallContext {
++        attempt_id: request.request_id.clone(),
++        run_id: id("run"),
++        scope: scope(),
++        cancellation: Default::default(),
++        deadline: tokio::time::Instant::now() + std::time::Duration::from_secs(5),
++    }
++}
++pub fn text_item(text: &str) -> Value {
++    json!({"id":"msg_1","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":text,"annotations":[]}]})
++}
++pub fn events(model: &str, text: &str) -> Vec<Value> {
++    let item = text_item(text);
++    vec![
++        json!({"type":"response.created","response":{"id":"resp_1","model":model,"status":"in_progress","usage":null}}),
++        json!({"type":"response.output_item.added","output_index":0,"item":{"id":"msg_1","type":"message","role":"assistant","status":"in_progress","content":[]}}),
++        json!({"type":"response.output_text.delta","output_index":0,"item_id":"msg_1","content_index":0,"delta":text}),
++        json!({"type":"response.output_text.done","output_index":0,"item_id":"msg_1","content_index":0,"text":text}),
++        json!({"type":"response.output_item.done","output_index":0,"item":item}),
++        json!({"type":"response.completed","response":{"id":"resp_1","model":model,"status":"completed","output":[item],"usage":{"input_tokens":11,"output_tokens":7}}}),
++    ]
++}
++
++#[path = "../../../../tests/support/model_http.rs"]
++mod http;
++pub use http::*;
+diff --git a/crates/wickle-model-openai/Cargo.toml b/crates/wickle-model-openai/Cargo.toml
+index cb4c8b735d56d35b9cc8f2aa99174dc28b816742..9f1c67e3b0675b42f10d911641fec0f7748b8b22 100644
+--- a/crates/wickle-model-openai/Cargo.toml
++++ b/crates/wickle-model-openai/Cargo.toml
+@@ -9,6 +9,7 @@ publish = false
+ include = ["Cargo.toml", "src/**"]
+ 
+ [dependencies]
++wickle-model-responses = { path = "../wickle-model-responses", version = "=0.1.0" }
+ wickle = { path = "../wickle", version = "=0.1.0" }
+ reqwest.workspace = true
+ serde_json.workspace = true
+diff --git a/crates/wickle-model-openai/src/lib.rs b/crates/wickle-model-openai/src/lib.rs
+index b027d46db0c72e076f9f1d3e43b5621d1ba0b8e7..4f6eda46ac80b15b1910787f4ade8d656da8f0d4 100644
+--- a/crates/wickle-model-openai/src/lib.rs
++++ b/crates/wickle-model-openai/src/lib.rs
+@@ -5,12 +5,9 @@
+ 
+ #![forbid(unsafe_code)]
+ 
+-mod codec;
+ mod connection;
+ mod inspection;
+ mod model;
+-mod response;
+-mod sse;
+ 
+ pub use connection::{OpenAiConnection, OpenAiOptions};
+ pub use inspection::{OpenAiInspector, OpenAiSnapshot};
+diff --git a/crates/wickle-model-openai/src/model.rs b/crates/wickle-model-openai/src/model.rs
+index 17ddbda48a6e63bdfe2381b7386f82287b6a6f60..dc9e9ae7ac182cb5d26ca70e08376013e0bc6ec3 100644
+--- a/crates/wickle-model-openai/src/model.rs
++++ b/crates/wickle-model-openai/src/model.rs
+@@ -1,9 +1,10 @@
+-use crate::{OpenAiConnection, codec, error, response, sse};
++use crate::{OpenAiConnection, error};
+ use futures_util::stream;
+ use reqwest::Response;
+ use serde_json::Value;
+ use std::collections::VecDeque;
+ use wickle::*;
++use wickle_model_responses::{ResponsesDecoder, SseDecoder, encode_request};
+ 
+ /// One OpenAI Responses POST per invocation, streamed into Wickle model events.
+ /// The adapter does not retry, run Tool handlers, or load environment variables.
+@@ -31,8 +32,8 @@ impl ModelPort for OpenAiModel {
+             request,
+             context,
+             response: None,
+-            decoder: response::Decoder::new(request, None),
+-            framing: sse::Decoder::new(
++            decoder: ResponsesDecoder::new(request, None),
++            framing: SseDecoder::new(
+                 self.connection.0.options.max_transport_bytes,
+                 self.connection.0.options.max_event_bytes,
+                 self.connection.0.options.max_protocol_events,
+@@ -109,8 +110,8 @@ struct State<'a> {
+     request: &'a ModelRequest,
+     context: &'a ModelCallContext,
+     response: Option<Response>,
+-    decoder: response::Decoder<'a>,
+-    framing: sse::Decoder,
++    decoder: ResponsesDecoder<'a>,
++    framing: SseDecoder,
+     queue: VecDeque<Result<ModelEvent, ContractError>>,
+     started: bool,
+     finished: bool,
+@@ -123,7 +124,7 @@ impl State<'_> {
+             return Err(error(ErrorCode::RequestConflict, "attempt"));
+         }
+         self.request.validate()?;
+-        let value = codec::encode_request(self.request)?;
++        let value = encode_request(self.request)?;
+         let body =
+             serde_json::to_vec(&value).map_err(|_| error(ErrorCode::InvalidJson, "request"))?;
+         if body.len() > self.request.limits.max_input_bytes {
+diff --git a/crates/wickle-model-openai/tests/support/mod.rs b/crates/wickle-model-openai/tests/support/mod.rs
+index 4be64596964d965f9317c98d728abf357f16748b..e7845953ced71502ebb9adc9e8d4b892d34abc0a 100644
+--- a/crates/wickle-model-openai/tests/support/mod.rs
++++ b/crates/wickle-model-openai/tests/support/mod.rs
+@@ -1,11 +1,4 @@
+ use serde_json::{Value, json};
+-use std::sync::{Arc, Mutex};
+-use tokio::{
+-    io::{AsyncReadExt, AsyncWriteExt},
+-    net::TcpListener,
+-    sync::Notify,
+-    task::JoinHandle,
+-};
+ use wickle::*;
+ use wickle_model_openai::*;
+ 
+@@ -100,167 +93,7 @@ pub fn events(model: &str, text: &str) -> Vec<Value> {
+         json!({"type":"response.completed","response":{"id":"resp_1","model":model,"status":"completed","output":[item],"usage":{"input_tokens":11,"output_tokens":7}}}),
+     ]
+ }
+-pub fn wire(events: &[Value]) -> Vec<u8> {
+-    let mut bytes = vec![];
+-    for (index, value) in events.iter().enumerate() {
+-        let mut value = value.clone();
+-        value["sequence_number"] = json!(index);
+-        bytes.extend_from_slice(
+-            format!(
+-                "event: {}\r\ndata: {}\r\n\r\n",
+-                value["type"].as_str().unwrap(),
+-                value
+-            )
+-            .as_bytes(),
+-        );
+-    }
+-    bytes
+-}
+-pub struct Reply {
+-    pub status: u16,
+-    pub content_type: &'static str,
+-    pub body: Vec<u8>,
+-    pub headers: Vec<(&'static str, String)>,
+-    pub stall: bool,
+-    pub chunk: usize,
+-}
+-impl Reply {
+-    pub fn sse(events: &[Value]) -> Self {
+-        Self {
+-            status: 200,
+-            content_type: "text/event-stream",
+-            body: wire(events),
+-            headers: vec![("x-request-id", "req-fixture".into())],
+-            stall: false,
+-            chunk: 7,
+-        }
+-    }
+-    pub fn json(status: u16, value: Value) -> Self {
+-        Self {
+-            status,
+-            content_type: "application/json",
+-            body: serde_json::to_vec(&value).unwrap(),
+-            headers: vec![],
+-            stall: false,
+-            chunk: 4096,
+-        }
+-    }
+-}
+-#[derive(Debug)]
+-pub struct Request {
+-    pub method: String,
+-    pub path: String,
+-    pub headers: String,
+-    pub body: Value,
+-}
+-pub struct Server {
+-    pub base: String,
+-    pub requests: Arc<Mutex<Vec<Request>>>,
+-    pub entered: Arc<Notify>,
+-    pub closed: Arc<Notify>,
+-    task: JoinHandle<()>,
+-}
+-impl Server {
+-    pub async fn new(replies: Vec<Reply>) -> Self {
+-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+-        let base = format!("http://{}/v1/", listener.local_addr().unwrap());
+-        let requests = Arc::new(Mutex::new(vec![]));
+-        let records = requests.clone();
+-        let entered = Arc::new(Notify::new());
+-        let signal = entered.clone();
+-        let closed = Arc::new(Notify::new());
+-        let ended = closed.clone();
+-        let task = tokio::spawn(async move {
+-            let mut replies = std::collections::VecDeque::from(replies);
+-            loop {
+-                let (mut socket, _) = listener.accept().await.unwrap();
+-                let reply = replies.pop_front().unwrap_or_else(|| {
+-                    Reply::json(500, json!({"error":{"code":"unexpected_request"}}))
+-                });
+-                let mut bytes = vec![];
+-                let (header_end, length) = loop {
+-                    let mut block = [0; 4096];
+-                    let count = socket.read(&mut block).await.unwrap();
+-                    assert!(count > 0);
+-                    bytes.extend_from_slice(&block[..count]);
+-                    assert!(bytes.len() <= 131_072);
+-                    if let Some(index) = bytes.windows(4).position(|part| part == b"\r\n\r\n") {
+-                        let headers = std::str::from_utf8(&bytes[..index])
+-                            .unwrap()
+-                            .to_ascii_lowercase();
+-                        let length = headers
+-                            .lines()
+-                            .find_map(|line| line.strip_prefix("content-length:"))
+-                            .map(|value| value.trim().parse::<usize>().unwrap())
+-                            .unwrap_or(0);
+-                        break (index + 4, length);
+-                    }
+-                };
+-                while bytes.len() < header_end + length {
+-                    let mut block = [0; 4096];
+-                    let count = socket.read(&mut block).await.unwrap();
+-                    assert!(count > 0);
+-                    bytes.extend_from_slice(&block[..count]);
+-                }
+-                let headers = std::str::from_utf8(&bytes[..header_end])
+-                    .unwrap()
+-                    .to_owned();
+-                let mut first = headers.lines().next().unwrap().split_whitespace();
+-                records.lock().unwrap().push(Request {
+-                    method: first.next().unwrap().into(),
+-                    path: first.next().unwrap().into(),
+-                    headers: headers.clone(),
+-                    body: if length == 0 {
+-                        Value::Null
+-                    } else {
+-                        parse_json(
+-                            std::str::from_utf8(&bytes[header_end..header_end + length]).unwrap(),
+-                        )
+-                        .unwrap()
+-                    },
+-                });
+-                signal.notify_one();
+-                let extra: String = reply
+-                    .headers
+-                    .iter()
+-                    .map(|(key, value)| format!("{key}: {value}\r\n"))
+-                    .collect();
+-                let header = format!(
+-                    "HTTP/1.1 {} Response\r\nContent-Type: {}\r\nContent-Length: {}\r\n{}Connection: close\r\n\r\n",
+-                    reply.status,
+-                    reply.content_type,
+-                    reply.body.len() + if reply.stall { 100 } else { 0 },
+-                    extra
+-                );
+-                if socket.write_all(header.as_bytes()).await.is_err() {
+-                    ended.notify_one();
+-                    continue;
+-                }
+-                for chunk in reply.body.chunks(reply.chunk) {
+-                    if socket.write_all(chunk).await.is_err() {
+-                        break;
+-                    }
+-                    tokio::task::yield_now().await;
+-                }
+-                if reply.stall {
+-                    let mut byte = [0];
+-                    let _ = socket.read(&mut byte).await;
+-                }
+-                let _ = socket.shutdown().await;
+-                ended.notify_one();
+-            }
+-        });
+-        Self {
+-            base,
+-            requests,
+-            entered,
+-            closed,
+-            task,
+-        }
+-    }
+-}
+-impl Drop for Server {
+-    fn drop(&mut self) {
+-        self.task.abort();
+-    }
+-}
++
++#[path = "../../../../tests/support/model_http.rs"]
++mod http;
++pub use http::*;
+diff --git a/crates/wickle-model-responses/Cargo.toml b/crates/wickle-model-responses/Cargo.toml
+new file mode 100644
+index 0000000000000000000000000000000000000000..12340b5b9599443554dd7a342f4dee3064385abe
+--- /dev/null
++++ b/crates/wickle-model-responses/Cargo.toml
+@@ -0,0 +1,16 @@
++[package]
++name = "wickle-model-responses"
++version.workspace = true
++edition.workspace = true
++rust-version.workspace = true
++repository.workspace = true
++description = "Responses request and bounded SSE codecs for Wickle adapters"
++publish = false
++include = ["Cargo.toml", "src/**"]
++
++[dependencies]
++wickle = { path = "../wickle", version = "=0.1.0" }
++serde_json.workspace = true
++
++[lints]
++workspace = true
+diff --git a/crates/wickle-model-openai/src/codec.rs b/crates/wickle-model-responses/src/codec.rs
+similarity index 99%
+rename from crates/wickle-model-openai/src/codec.rs
+rename to crates/wickle-model-responses/src/codec.rs
+index d770d46e52f5e3f342a9421ee3f274d285cae972..fdf65a0dab1a4d0ed6655c48413301162786efdf 100644
+--- a/crates/wickle-model-openai/src/codec.rs
++++ b/crates/wickle-model-responses/src/codec.rs
+@@ -6,7 +6,8 @@ fn failure(code: ErrorCode) -> ContractError {
+     crate::error(code, "codec")
+ }
+ 
+-pub(crate) fn encode_request(request: &ModelRequest) -> Result<Value, ContractError> {
++/// Encode a Responses request, preserving exact route-bound replay and model schemas.
++pub fn encode_request(request: &ModelRequest) -> Result<Value, ContractError> {
+     request.validate()?;
+     if request.options.keys().any(|key| {
+         !["reasoning_effort", "temperature", "top_p", "verbosity"].contains(&key.as_str())
+diff --git a/crates/wickle-model-responses/src/lib.rs b/crates/wickle-model-responses/src/lib.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..e5e1e2a98df83bdf7e7d5ce3348bdf3d5de2359c
+--- /dev/null
++++ b/crates/wickle-model-responses/src/lib.rs
+@@ -0,0 +1,13 @@
++//! Shared Responses wire codecs. Provider authentication, endpoints, model
++//! selection, and capability policy belong to the calling adapter and Host.
++#![forbid(unsafe_code)]
++mod codec;
++mod response;
++mod sse;
++pub use codec::encode_request;
++pub use response::Decoder as ResponsesDecoder;
++pub use sse::{Decoder as SseDecoder, Event as SseEvent};
++use wickle::{ContractError, ErrorCode};
++fn error(code: ErrorCode, location: &str) -> ContractError {
++    ContractError::new(code, format!("responses.{location}"))
++}
+diff --git a/crates/wickle-model-openai/src/response.rs b/crates/wickle-model-responses/src/response.rs
+similarity index 98%
+rename from crates/wickle-model-openai/src/response.rs
+rename to crates/wickle-model-responses/src/response.rs
+index 2db86cc7f5aaa4486f07c0a90be4249c0f1fba3d..dd00d3570717c1811b8fd6528108983c03827779 100644
+--- a/crates/wickle-model-openai/src/response.rs
++++ b/crates/wickle-model-responses/src/response.rs
+@@ -8,8 +8,10 @@ struct Call {
+     name: String,
+     arguments: String,
+ }
+-pub(crate) struct Decoder<'a> {
++/// Stateful Responses event validation for one physical model request.
++pub struct Decoder<'a> {
+     request: &'a ModelRequest,
++    /// Provider-reported metadata, including an optional HTTP request identifier.
+     pub metadata: ModelResponseMetadata,
+     response_id: Option<String>,
+     sequence: Option<u64>,
+@@ -24,6 +26,7 @@ pub(crate) struct Decoder<'a> {
+     done: bool,
+ }
+ impl<'a> Decoder<'a> {
++    /// Start an attempt without making an HTTP request.
+     pub fn new(request: &'a ModelRequest, request_id: Option<Id>) -> Self {
+         Self {
+             request,
+@@ -44,6 +47,7 @@ impl<'a> Decoder<'a> {
+             done: false,
+         }
+     }
++    /// Validate a framed provider event and emit normalized model deltas.
+     pub fn event(&mut self, event: sse::Event) -> Result<Vec<ModelEvent>, ContractError> {
+         if event.data == "[DONE]" {
+             if self.terminal.is_none() || self.done {
+@@ -337,6 +341,7 @@ impl<'a> Decoder<'a> {
+             .ok_or_else(invalid)?;
+         Ok(output)
+     }
++    /// Return the validated terminal only after the transport reaches a clean EOF.
+     pub fn finish(&mut self) -> Result<ModelEvent, ContractError> {
+         self.terminal.take().ok_or_else(invalid)
+     }
+diff --git a/crates/wickle-model-openai/src/sse.rs b/crates/wickle-model-responses/src/sse.rs
+similarity index 93%
+rename from crates/wickle-model-openai/src/sse.rs
+rename to crates/wickle-model-responses/src/sse.rs
+index 5e76d9acb7a53407b8b99b572db3e82f00765a97..d19c58a017df6a9e377faee1627861695a08096e 100644
+--- a/crates/wickle-model-openai/src/sse.rs
++++ b/crates/wickle-model-responses/src/sse.rs
+@@ -1,13 +1,16 @@
+ use crate::error;
+ use wickle::{ContractError, ErrorCode};
+ 
+-pub(crate) struct Event {
++/// A complete SSE data record.
++pub struct Event {
++    /// Optional SSE event name.
+     pub name: Option<String>,
++    /// UTF-8 data with multiline fields joined by newlines.
+     pub data: String,
+ }
+ 
+ /// Incremental SSE framing; JSON and UTF-8 may be split across network chunks.
+-pub(crate) struct Decoder {
++pub struct Decoder {
+     line: Vec<u8>,
+     data: Vec<u8>,
+     name: Option<String>,
+@@ -20,6 +23,7 @@ pub(crate) struct Decoder {
+     max_frames: usize,
+ }
+ impl Decoder {
++    /// Set finite limits on total bytes, one event, and event count.
+     pub fn new(max_bytes: usize, max_frame: usize, max_frames: usize) -> Self {
+         Self {
+             line: vec![],
+@@ -34,6 +38,7 @@ impl Decoder {
+             max_frames,
+         }
+     }
++    /// Frame arbitrary network chunks without assuming UTF-8 or line boundaries.
+     pub fn push(&mut self, bytes: &[u8]) -> Result<Vec<Event>, ContractError> {
+         self.bytes = self
+             .bytes
+@@ -103,6 +108,7 @@ impl Decoder {
+         self.line.clear();
+         Ok(())
+     }
++    /// Reject a truncated final record.
+     pub fn finish(&self) -> Result<(), ContractError> {
+         if !self.line.is_empty() || !self.data.is_empty() || self.name.is_some() {
+             return Err(invalid());
+diff --git a/docs/azure-openai.md b/docs/azure-openai.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..39460a8a879fe9c3fe655e4292d7c2c9bdf16fa4
+--- /dev/null
++++ b/docs/azure-openai.md
+@@ -0,0 +1,92 @@
++# Azure OpenAI Responses adapter
++
++`wickle-model-azure-openai` implements `ModelPort` for resource-level Azure OpenAI
++Responses v1 endpoints. The adapter owns HTTP and authentication; the core remains
++independent of Azure SDKs, credentials, and environment files.
++
++```rust,ignore
++use std::sync::Arc;
++use wickle_model_azure_openai::{
++    AzureCredential, AzureOpenAiConnection, AzureOpenAiModel, AzureOpenAiOptions,
++};
++
++let mut options = AzureOpenAiOptions::new(resource_endpoint, deployment_name);
++options.resource_id = Some(arm_account_resource_id);
++let connection = AzureOpenAiConnection::new(
++    scope.clone(),
++    connection_ref,
++    Arc::new(AzureCredential::ApiKey(api_key)),
++    options,
++)?;
++let model = Arc::new(AzureOpenAiModel::new(connection.clone()));
++```
++
++Register `connection.binding()`, `connection.target()`, and
++`AzureOpenAiConnection::api_contract()` in the catalog. The target fixes the
++resource origin, deployment name, and optional ARM account resource ID. The route
++keeps the underlying model ID and release; only the HTTP request's `model` field is
++mapped to the deployment name. The endpoint is `/openai/v1/responses`; this adapter
++does not support dated inference APIs or project-level endpoint paths.
++[Azure Responses](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/responses).
++
++## Authentication
++
++API keys use `api-key`; Entra tokens use `Authorization: Bearer`. Implement
++`AzureCredentialProvider` to obtain or refresh tokens. It is called once per
++physical request with the authenticated scope, service audience, cancellation
++signal, and effective deadline. The Host supplies correctly scoped tokens and owns
++their lifetime. `AzureCredential` itself also implements the trait for explicitly
++supplied static credentials; long-lived applications should use a refreshing Host
++provider for Entra tokens. The library never reads `.env`, shells out to `az`, or
++acquires credentials through an implicit environment chain.
++
++Scope, binding, target, API contract and input validation occur before credential
++lookup or HTTP. Redirects and SDK retries are disabled. Cancellation and deadlines
++also bound credential refresh. Transport errors and authentication failures do not
++cause hidden second requests.
++
++## Deployment metadata and versions
++
++`AzureOpenAiInspector` reads the selected deployment through Azure Resource Manager
++using a separate management credential provider. Its protocol version is
++`2025-06-01`, independent of Responses v1 and the model release. Configure the ARM
++account resource ID as
++`/subscriptions/<subscription>/resourceGroups/<group>/providers/Microsoft.CognitiveServices/accounts/<account>`.
++The inspector requests that account's selected deployment and checks the response
++resource identity before using its model name, version and provisioning state.
++[Deployment GET](https://learn.microsoft.com/en-us/rest/api/microsoftfoundry/accountmanagement/deployments/get?view=rest-microsoftfoundry-accountmanagement-2025-06-01).
++
++```rust,ignore
++use wickle_model_azure_openai::{AzureInspectionOptions, AzureOpenAiInspector};
++let inspector = Arc::new(AzureOpenAiInspector::new(
++    connection.clone(),
++    management_credentials,
++    AzureInspectionOptions::default(),
++)?);
++```
++
++An inference API key cannot authorize the management API. Missing metadata or
++permissions are not replaced with requested versions or assumptions. Observed
++model/release changes and the deployment metadata fingerprint can trigger core
++route-drift validation. Deployments remain `MutableDeployment`, including those
++with automatic upgrades disabled: metadata inspection does not lock the deployment.
++Use `VersionPolicy::AllowMutable` only when the Host permits that guarantee. A
++policy requiring pinned targets will reject it. Reported response model and token
++counts are recorded as returned; an unreported separate version remains absent.
++
++## Responses behavior and verification
++
++The OpenAI and Azure adapters share `wickle-model-responses` for text/JSON,
++function calls/results, strict-schema output, bounded SSE parsing, and route-bound
++opaque replay. Azure retains its own resource validation, credentials, transport,
++and metadata inspection. The shared codec does not imply identical model features;
++model and binding option schemas must describe each deployment's supported options.
++The adapter explicitly maps `reasoning_effort`, `temperature`, `top_p` and
++`verbosity`, and rejects arbitrary option/body overrides. Native provider tools,
++stored conversation state, automatic truncation and incomplete executable Tool
++plans are disabled.
++
++Local HTTP tests and an extracted-package consumer cover the transport contract.
++Live availability and model-release support require checks against configured Azure
++deployments; local fixture success is not a claim of live validation. Application
++configuration for those checks is described in the [test Host guide](env/azure-openai.md).
+diff --git a/docs/env/azure-openai.md b/docs/env/azure-openai.md
+index 0e1a3a86c0ecaee3a4f612310f5a127a6ce4aab3..6da7d8bb2420ffe3f7d83f40d3ca44d7d8c3d9e3 100644
+--- a/docs/env/azure-openai.md
++++ b/docs/env/azure-openai.md
+@@ -46,4 +46,12 @@ AZURE_OPENAI_API_KEY=
+ 
+ 배포명이 채워진 번호가 독립 테스트 대상입니다. 다른 리소스·계정·API 설정은 별도 `.env` 파일로 나눕니다. 기반 모델 metadata 조회에 추가 권한이 필요한 경우에는 그 검증 상태를 별도로 기록하며, 확인하지 못한 정보를 사용자가 추측해서 채우도록 요구하지 않습니다.
+ 
+-이 설정은 live 테스트 전용이며 실제 어댑터와 runner는 구현 중입니다. 코어가 `.env`를 읽지 않습니다. [공통 안내](README.md).
++이 설정은 live 테스트 Host 전용입니다. 라이브러리는 `.env`를 읽지 않으며 [Azure OpenAI 어댑터](../azure-openai.md)에 명시적인 연결과 credential provider를 전달합니다. 현재 구현은 resource-level Responses v1만 지원하므로 `API_MODE=v1`을 사용합니다. dated API 값은 지원되지 않습니다. [공통 안내](README.md).
++
++ARM 배포 metadata를 실제로 검증하려면 다음 account resource ID와 해당 리소스의 deployment 읽기 권한을 가진 management Entra 인증이 추가로 필요합니다. inference API key를 management API에 보내지 않습니다.
++
++```dotenv
++AZURE_OPENAI_RESOURCE_ID=/subscriptions/<subscription>/resourceGroups/<group>/providers/Microsoft.CognitiveServices/accounts/<account>
++```
++
++관리 API 인증은 Host의 별도 credential provider가 `https://management.azure.com/.default` 대상 토큰을 준비합니다. 모델 버전을 사용자가 추측해서 환경변수에 중복 입력하지 않습니다. 실제 인증·배포가 없는 경우 로컬 fixture만 통과한 것으로 기록하며 live 검증 통과로 표시하지 않습니다.
+diff --git a/scripts/check-package.py b/scripts/check-package.py
+index 92c7ea0e1af588864c4b3dc10e80bca6de6e40d6..7029aa1741e13ece2f3d64a274bba0f3fc8a8e5e 100644
+--- a/scripts/check-package.py
++++ b/scripts/check-package.py
+@@ -40,7 +40,9 @@ def main():
+     sqlite = next(p for p in workspace["packages"] if p["name"] == "wickle-state-sqlite")
+     adapters = next(p for p in workspace["packages"] if p["name"] == "wickle-adapter-runtime")
+     openai = next(p for p in workspace["packages"] if p["name"] == "wickle-model-openai")
+-    libraries = [core, catalog, sqlite, adapters, openai]
++    responses = next(p for p in workspace["packages"] if p["name"] == "wickle-model-responses")
++    azure = next(p for p in workspace["packages"] if p["name"] == "wickle-model-azure-openai")
++    libraries = [core, catalog, sqlite, adapters, responses, openai, azure]
+     versions = {d["name"]: d["req"] for d in core["dependencies"] if d["kind"] is None}
+     for dep in core["dependencies"]:
+         if dep["kind"] != "dev":
+@@ -76,7 +78,7 @@ def main():
+             shutil.copyfile(manifest, destination / "Cargo.toml")
+             shutil.copytree(manifest.parent / "src", destination / "src")
+         package_paths = {core["name"]: base / package_name}
+-        for package in [catalog, sqlite, adapters, openai]:
++        for package in [catalog, sqlite, adapters, responses, openai, azure]:
+             patches = [argument for name, path in package_paths.items()
+                        for argument in ["--config", f'patch.crates-io.{name}.path={json.dumps(str(path))}']]
+             subprocess.run(
+@@ -102,7 +104,7 @@ def main():
+             f'serde_json = "{versions["serde_json"]}"\n'
+             f'futures-util = {{ version = "{versions["futures-util"]}", default-features = false, features = ["std", "async-await"] }}\n'
+             f'tokio = {{ version = "{versions["tokio"]}", features = ["rt", "macros", "net", "io-util"] }}\n'
+-            f'\n[patch.crates-io]\nwickle = {{ path = "../{package_name}" }}\n',
++            f'\n[patch.crates-io]\n{library_dependencies}',
+             encoding="utf-8",
+         )
+         shutil.copyfile(ROOT / "tests/support/consumer.rs", consumer / "src/main.rs")
+@@ -113,8 +115,11 @@ def main():
+                 shutil.copyfile(example, consumer / "src/bin" / example.name)
+         # Keep consumer builds independent of the checkout and its build cache.
+         env["CARGO_TARGET_DIR"] = str(base / "target")
+-        subprocess.run(["cargo", "generate-lockfile", "--offline"],
+-                       cwd=consumer, env=env, check=True)
++        # Preserve the verified transitive versions when adding the consumer.
++        # A fresh lockfile would select newer compatible entries in the local cache.
++        shutil.copyfile(ROOT / "Cargo.lock", consumer / "Cargo.lock")
++        subprocess.run(["cargo", "metadata", "--format-version", "1", "--offline"],
++                       cwd=consumer, env=env, stdout=subprocess.DEVNULL, check=True)
+         resolved = metadata(consumer)
+         allowed_registry = {(p["name"], p["version"], p["source"])
+                             for p in workspace["packages"] if p["source"] is not None}
+@@ -134,7 +139,7 @@ def main():
+         for example in examples:
+             subprocess.run(["cargo", "run", "--locked", "--offline", "--bin", example.stem],
+                            cwd=consumer, env=env, check=True)
+-    print("Independent package consumers: passed (core, model catalog, SQLite store, adapter runtime, OpenAI adapter)", flush=True)
++    print("Independent package consumers: passed (core, model catalog, SQLite store, adapter runtime, Responses codec, OpenAI and Azure adapters)", flush=True)
+ 
+ 
+ if __name__ == "__main__":
+diff --git a/tests/support/azure_consumer.rs b/tests/support/azure_consumer.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..39ef81bd3dc3666b2bd4c31e65055faf55889137
+--- /dev/null
++++ b/tests/support/azure_consumer.rs
+@@ -0,0 +1,167 @@
++// Real loopback HTTP/SSE against the extracted Azure adapter package; no provider call.
++use serde_json::json;
++use std::sync::Arc;
++use std::time::Duration;
++use tokio::{
++    io::{AsyncReadExt, AsyncWriteExt},
++    net::TcpListener,
++};
++use wickle::*;
++use wickle_model_azure_openai::*;
++fn id(value: &str) -> Id {
++    Id::new(value).expect("example identifier")
++}
++fn reference(value: &str) -> VersionedRef {
++    VersionedRef {
++        id: id(value),
++        version: id("1"),
++    }
++}
++#[tokio::main(flavor = "current_thread")]
++async fn main() -> Result<(), Box<dyn std::error::Error>> {
++    let listener = TcpListener::bind("127.0.0.1:0").await?;
++    let base = format!("http://{}/", listener.local_addr()?);
++    let server = tokio::spawn(async move {
++        let (mut socket, _) = listener.accept().await.unwrap();
++        let mut bytes = vec![];
++        let (header_end, length) = loop {
++            let mut chunk = [0; 4096];
++            let size = socket.read(&mut chunk).await.unwrap();
++            assert!(size > 0);
++            bytes.extend_from_slice(&chunk[..size]);
++            assert!(bytes.len() < 65536);
++            if let Some(end) = bytes.windows(4).position(|s| s == b"\r\n\r\n") {
++                let headers = std::str::from_utf8(&bytes[..end])
++                    .unwrap()
++                    .to_ascii_lowercase();
++                let length = headers
++                    .lines()
++                    .find_map(|s| s.strip_prefix("content-length:"))
++                    .unwrap()
++                    .trim()
++                    .parse::<usize>()
++                    .unwrap();
++                break (end + 4, length);
++            }
++        };
++        while bytes.len() < header_end + length {
++            let mut chunk = [0; 4096];
++            let size = socket.read(&mut chunk).await.unwrap();
++            assert!(size > 0);
++            bytes.extend_from_slice(&chunk[..size]);
++        }
++        let headers = std::str::from_utf8(&bytes[..header_end])
++            .unwrap()
++            .to_ascii_lowercase();
++        assert!(headers.starts_with("post /openai/v1/responses "));
++        assert!(headers.contains("api-key: fixture-key"));
++        let body =
++            parse_json(std::str::from_utf8(&bytes[header_end..header_end + length]).unwrap())
++                .unwrap();
++        assert_eq!(body["model"], "fixture-deployment");
++        assert_eq!(body["stream"], true);
++        assert_eq!(body["store"], false);
++        assert_eq!(body["reasoning"]["effort"], "medium");
++        assert_eq!(body["text"]["format"]["strict"], true);
++        assert!(!body.to_string().contains("private-workspace"));
++        assert!(!body.to_string().contains("fixture-key"));
++        let item = json!({"id":"message","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"{\"answer\":42}","annotations":[]}]});
++        let events = vec![
++            json!({"type":"response.created","response":{"id":"response","model":"fixture-model","status":"in_progress"}}),
++            json!({"type":"response.output_item.added","output_index":0,"item":{"id":"message","type":"message","role":"assistant","content":[]}}),
++            json!({"type":"response.output_text.delta","output_index":0,"content_index":0,"item_id":"message","delta":"{\"answer\":42}"}),
++            json!({"type":"response.output_item.done","output_index":0,"item":item}),
++            json!({"type":"response.completed","response":{"id":"response","model":"fixture-model","status":"completed","output":[item],"usage":{"input_tokens":12,"output_tokens":5}}}),
++        ];
++        let wire: String = events
++            .into_iter()
++            .map(|value| format!("data: {value}\n\n"))
++            .collect();
++        socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",wire.len()).as_bytes()).await.unwrap();
++        for chunk in wire.as_bytes().chunks(5) {
++            socket.write_all(chunk).await.unwrap();
++            tokio::task::yield_now().await;
++        }
++        socket.shutdown().await.unwrap();
++    });
++    let scope = Scope {
++        tenant_id: id("tenant"),
++        workspace_id: id("private-workspace"),
++        user_id: None,
++    };
++    let connection = AzureOpenAiConnection::new(
++        scope.clone(),
++        reference("account"),
++        Arc::new(AzureCredential::ApiKey("fixture-key".into())),
++        AzureOpenAiOptions::new(base, "fixture-deployment"),
++    )?;
++    let binding = connection.binding();
++    let model = AzureOpenAiModel::new(connection.clone());
++    let request = ModelRequest {
++        request_id: id("attempt"),
++        purpose: ModelPurpose::Agent,
++        route: ResolvedModelRoute {
++            binding: reference("model"),
++            catalog_revision: id("catalog"),
++            routing_policy_revision: id("policy"),
++            requested_model: id("fixture-model"),
++            model_id: id("fixture-model"),
++            model_version: id("release"),
++            version_semantics: VersionSemantics::Unverified,
++            provider: binding.provider,
++            target: connection.target().clone(),
++            deployment_revision: None,
++            api_contract: AzureOpenAiConnection::api_contract(),
++            adapter: binding.adapter,
++            capability_revision: id("caps"),
++            connection_ref: binding.connection_ref,
++        },
++        messages: vec![ModelMessage {
++            role: ModelRole::User,
++            content: vec![ModelContent::Text {
++                text: "Return the fixture answer.".into(),
++            }],
++        }],
++        tools: vec![],
++        output: ModelOutput::JsonSchema {
++            schema: json!({"type":"object","properties":{"answer":{"type":"integer"}},"required":["answer"],"additionalProperties":false}),
++        },
++        max_output_tokens: 128.try_into()?,
++        options: JsonObject::from([("reasoning_effort".into(), json!("medium"))]),
++        limits: ModelResponseLimits {
++            max_input_bytes: 32768,
++            max_response_bytes: 32768,
++            max_delta_bytes: 128,
++            max_events: 64,
++            max_tool_calls: 0,
++        },
++    };
++    let context = ModelCallContext {
++        attempt_id: request.request_id.clone(),
++        run_id: id("run"),
++        scope,
++        cancellation: Default::default(),
++        deadline: tokio::time::Instant::now() + Duration::from_secs(10),
++    };
++    let response = collect_model_response(&request, model.generate(&request, &context)).await?;
++    assert_eq!(parse_json(&response.text)?, json!({"answer":42}));
++    assert_eq!(response.finish, ModelFinish::Stop);
++    assert_eq!(
++        response.metadata.reported_model_id,
++        Some(id("fixture-model"))
++    );
++    assert!(response.metadata.reported_model_version.is_none());
++    assert_eq!(
++        response
++            .metadata
++            .usage
++            .as_ref()
++            .and_then(|u| u.output_tokens),
++        Some(5)
++    );
++    server.await?;
++    println!(
++        "Azure consumer: extracted adapter performs one HTTP/SSE request, maps deployment separately from model identity, supplies scoped API-key authentication and options, decodes JSON and reported usage, and excludes Host context from the wire (local fixture, no provider network)"
++    );
++    Ok(())
++}
+diff --git a/tests/support/model_http.rs b/tests/support/model_http.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..5c5a5ff67bff6ac6502b2de148ffd50ec7c4be99
+--- /dev/null
++++ b/tests/support/model_http.rs
+@@ -0,0 +1,173 @@
++use serde_json::{Value, json};
++use std::sync::{Arc, Mutex};
++use tokio::{
++    io::{AsyncReadExt, AsyncWriteExt},
++    net::TcpListener,
++    sync::Notify,
++    task::JoinHandle,
++};
++use wickle::parse_json;
++pub fn wire(events: &[Value]) -> Vec<u8> {
++    let mut bytes = vec![];
++    for (index, value) in events.iter().enumerate() {
++        let mut value = value.clone();
++        value["sequence_number"] = json!(index);
++        bytes.extend_from_slice(
++            format!(
++                "event: {}\r\ndata: {}\r\n\r\n",
++                value["type"].as_str().unwrap(),
++                value
++            )
++            .as_bytes(),
++        );
++    }
++    bytes
++}
++pub struct Reply {
++    pub status: u16,
++    pub content_type: &'static str,
++    pub body: Vec<u8>,
++    pub headers: Vec<(&'static str, String)>,
++    pub stall: bool,
++    pub chunk: usize,
++}
++impl Reply {
++    pub fn sse(events: &[Value]) -> Self {
++        Self {
++            status: 200,
++            content_type: "text/event-stream",
++            body: wire(events),
++            headers: vec![("x-request-id", "req-fixture".into())],
++            stall: false,
++            chunk: 7,
++        }
++    }
++    pub fn json(status: u16, value: Value) -> Self {
++        Self {
++            status,
++            content_type: "application/json",
++            body: serde_json::to_vec(&value).unwrap(),
++            headers: vec![],
++            stall: false,
++            chunk: 4096,
++        }
++    }
++}
++#[derive(Debug)]
++pub struct Request {
++    pub method: String,
++    pub path: String,
++    pub headers: String,
++    pub body: Value,
++}
++pub struct Server {
++    pub base: String,
++    pub requests: Arc<Mutex<Vec<Request>>>,
++    pub entered: Arc<Notify>,
++    pub closed: Arc<Notify>,
++    task: JoinHandle<()>,
++}
++impl Server {
++    pub async fn new(replies: Vec<Reply>) -> Self {
++        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
++        let base = format!("http://{}/v1/", listener.local_addr().unwrap());
++        let requests = Arc::new(Mutex::new(vec![]));
++        let records = requests.clone();
++        let entered = Arc::new(Notify::new());
++        let signal = entered.clone();
++        let closed = Arc::new(Notify::new());
++        let ended = closed.clone();
++        let task = tokio::spawn(async move {
++            let mut replies = std::collections::VecDeque::from(replies);
++            loop {
++                let (mut socket, _) = listener.accept().await.unwrap();
++                let reply = replies.pop_front().unwrap_or_else(|| {
++                    Reply::json(500, json!({"error":{"code":"unexpected_request"}}))
++                });
++                let mut bytes = vec![];
++                let (header_end, length) = loop {
++                    let mut block = [0; 4096];
++                    let count = socket.read(&mut block).await.unwrap();
++                    assert!(count > 0);
++                    bytes.extend_from_slice(&block[..count]);
++                    assert!(bytes.len() <= 131_072);
++                    if let Some(index) = bytes.windows(4).position(|part| part == b"\r\n\r\n") {
++                        let headers = std::str::from_utf8(&bytes[..index])
++                            .unwrap()
++                            .to_ascii_lowercase();
++                        let length = headers
++                            .lines()
++                            .find_map(|line| line.strip_prefix("content-length:"))
++                            .map(|value| value.trim().parse::<usize>().unwrap())
++                            .unwrap_or(0);
++                        break (index + 4, length);
++                    }
++                };
++                while bytes.len() < header_end + length {
++                    let mut block = [0; 4096];
++                    let count = socket.read(&mut block).await.unwrap();
++                    assert!(count > 0);
++                    bytes.extend_from_slice(&block[..count]);
++                }
++                let headers = std::str::from_utf8(&bytes[..header_end])
++                    .unwrap()
++                    .to_owned();
++                let mut first = headers.lines().next().unwrap().split_whitespace();
++                records.lock().unwrap().push(Request {
++                    method: first.next().unwrap().into(),
++                    path: first.next().unwrap().into(),
++                    headers: headers.clone(),
++                    body: if length == 0 {
++                        Value::Null
++                    } else {
++                        parse_json(
++                            std::str::from_utf8(&bytes[header_end..header_end + length]).unwrap(),
++                        )
++                        .unwrap()
++                    },
++                });
++                signal.notify_one();
++                let extra: String = reply
++                    .headers
++                    .iter()
++                    .map(|(key, value)| format!("{key}: {value}\r\n"))
++                    .collect();
++                let header = format!(
++                    "HTTP/1.1 {} Response\r\nContent-Type: {}\r\nContent-Length: {}\r\n{}Connection: close\r\n\r\n",
++                    reply.status,
++                    reply.content_type,
++                    reply.body.len() + if reply.stall { 100 } else { 0 },
++                    extra
++                );
++                if socket.write_all(header.as_bytes()).await.is_err() {
++                    ended.notify_one();
++                    continue;
++                }
++                for chunk in reply.body.chunks(reply.chunk) {
++                    if socket.write_all(chunk).await.is_err() {
++                        break;
++                    }
++                    tokio::task::yield_now().await;
++                }
++                if reply.stall {
++                    let mut byte = [0];
++                    let _ = socket.read(&mut byte).await;
++                }
++                let _ = socket.shutdown().await;
++                ended.notify_one();
++            }
++        });
++        Self {
++            base,
++            requests,
++            entered,
++            closed,
++            task,
++        }
++    }
++}
++impl Drop for Server {
++    fn drop(&mut self) {
++        self.task.abort();
++    }
++}

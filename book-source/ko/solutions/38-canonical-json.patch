@@ -1,0 +1,488 @@
+diff --git a/crates/wickle/Cargo.toml b/crates/wickle/Cargo.toml
+index d3eb5176131dcc2a02906fa0daf0f951f74e6bbd..040888af9e5edf583c8928d9f91010177e1b55f7 100644
+--- a/crates/wickle/Cargo.toml
++++ b/crates/wickle/Cargo.toml
+@@ -14,7 +14,7 @@ getrandom.workspace = true
+ futures-util.workspace = true
+ jsonschema.workspace = true
+ serde.workspace = true
+-serde_json.workspace = true
++serde_json = { workspace = true, features = ["raw_value"] }
+ sha2.workspace = true
+ thiserror.workspace = true
+ tokio.workspace = true
+diff --git a/crates/wickle/src/canonical.rs b/crates/wickle/src/canonical.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..e3c37e09113d4a344063f79d29fbcbd1116c03ff
+--- /dev/null
++++ b/crates/wickle/src/canonical.rs
+@@ -0,0 +1,169 @@
++//! Versioned canonicalization at the JSON text boundary. Never round-trip new
++//! numeric tokens through floating point or reinterpret an old digest version.
++use std::{collections::BTreeMap, fmt};
++
++use crate::{ContractError, ErrorCode, JsonDigest, canonical_digest_json};
++use serde::{
++    Deserialize, Deserializer,
++    de::{self, MapAccess, Visitor},
++};
++use serde_json::value::RawValue;
++use sha2::{Digest, Sha256};
++
++/// Rules recorded alongside a submitted request, independent of runtime version.
++#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(rename_all = "kebab-case")]
++pub enum CanonicalizationVersion {
++    /// Historical Value-based encoding. Existing stored comparisons keep this rule.
++    SortedJsonV1,
++    /// Object ordering and fixed string escaping with original number lexemes.
++    WickleCanonicalJsonV1,
++}
++use serde::Serialize;
++
++/// Resource bounds applied before allocating the canonical representation.
++#[derive(Debug, Clone, Copy)]
++pub struct JsonTextLimits {
++    /// Maximum input UTF-8 bytes.
++    pub max_bytes: usize,
++    /// Maximum nested object/array depth (a scalar has depth zero).
++    pub max_depth: usize,
++}
++impl Default for JsonTextLimits {
++    fn default() -> Self {
++        Self {
++            max_bytes: 1024 * 1024,
++            max_depth: 128,
++        }
++    }
++}
++fn invalid() -> ContractError {
++    ContractError::new(ErrorCode::InvalidJson, "$")
++}
++
++/// Canonicalize strict JSON, preserving every number token exactly.
++///
++/// Duplicate keys (including equivalent escaped spellings), trailing JSON,
++/// invalid syntax and resource-limit violations are errors. Limits may be lowered;
++/// depth is capped at 128 to bound stack use even with untrusted configuration.
++/// Output string escaping is serde_json's JSON encoder; Unicode is not normalized.
++pub fn canonicalize_json_text(
++    input: &str,
++    limits: JsonTextLimits,
++) -> Result<Vec<u8>, ContractError> {
++    if input.len() > limits.max_bytes || limits.max_depth > 128 {
++        return Err(invalid());
++    }
++    // Bound nesting before RawValue scans the document. Quoted braces are data.
++    let (mut depth, mut quoted, mut escape) = (0usize, false, false);
++    for b in input.bytes() {
++        if quoted {
++            if escape {
++                escape = false;
++            } else if b == b'\\' {
++                escape = true;
++            } else if b == b'"' {
++                quoted = false;
++            }
++        } else {
++            match b {
++                b'"' => quoted = true,
++                b'{' | b'[' => {
++                    depth += 1;
++                    if depth > limits.max_depth {
++                        return Err(invalid());
++                    }
++                }
++                b'}' | b']' => {
++                    depth = depth.checked_sub(1).ok_or_else(invalid)?;
++                }
++                _ => {}
++            }
++        }
++    }
++    let raw: &RawValue = serde_json::from_str(input).map_err(|_| invalid())?;
++    let mut out = Vec::with_capacity(input.len());
++    encode(raw, &mut out)?;
++    Ok(out)
++}
++
++struct Object<'a>(BTreeMap<String, &'a RawValue>);
++impl<'de> Deserialize<'de> for Object<'de> {
++    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
++        struct ObjectVisitor;
++        impl<'de> Visitor<'de> for ObjectVisitor {
++            type Value = Object<'de>;
++            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++                f.write_str("an object with unique keys")
++            }
++            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
++                let mut result = BTreeMap::new();
++                while let Some(key) = map.next_key::<String>()? {
++                    if result.contains_key(&key) {
++                        return Err(de::Error::custom("duplicate object key"));
++                    }
++                    result.insert(key, map.next_value::<&'de RawValue>()?);
++                }
++                Ok(Object(result))
++            }
++        }
++        d.deserialize_map(ObjectVisitor)
++    }
++}
++fn encode(raw: &RawValue, out: &mut Vec<u8>) -> Result<(), ContractError> {
++    let text = raw.get();
++    match text.as_bytes()[0] {
++        b'{' => {
++            let object: Object<'_> = serde_json::from_str(text).map_err(|_| invalid())?;
++            out.push(b'{');
++            for (i, (key, value)) in object.0.into_iter().enumerate() {
++                if i != 0 {
++                    out.push(b',');
++                }
++                serde_json::to_writer(&mut *out, &key).map_err(|_| invalid())?;
++                out.push(b':');
++                encode(value, out)?;
++            }
++            out.push(b'}');
++        }
++        b'[' => {
++            let array: Vec<&RawValue> = serde_json::from_str(text).map_err(|_| invalid())?;
++            out.push(b'[');
++            for (i, value) in array.into_iter().enumerate() {
++                if i != 0 {
++                    out.push(b',');
++                }
++                encode(value, out)?;
++            }
++            out.push(b']');
++        }
++        b'"' => {
++            let value: String = serde_json::from_str(text).map_err(|_| invalid())?;
++            serde_json::to_writer(out, &value).map_err(|_| invalid())?;
++        }
++        _ => out.extend_from_slice(text.as_bytes()), // RawValue already validated JSON grammar.
++    }
++    Ok(())
++}
++
++/// Hash a submitted JSON document using its explicitly selected stored rules.
++///
++/// New rules preserve number lexemes; the legacy branch intentionally uses the
++/// historical parser/encoder and keeps its original range limitations.
++pub fn versioned_digest_json(
++    input: &str,
++    version: CanonicalizationVersion,
++    limits: JsonTextLimits,
++) -> Result<JsonDigest, ContractError> {
++    let bytes = canonicalize_json_text(input, limits)?;
++    match version {
++        CanonicalizationVersion::SortedJsonV1 => canonical_digest_json(input),
++        CanonicalizationVersion::WickleCanonicalJsonV1 => {
++            let hex: String = Sha256::digest(bytes)
++                .iter()
++                .map(|b| format!("{b:02x}"))
++                .collect();
++            JsonDigest::try_from(format!("wickle-canonical-json-v1:sha256:{hex}"))
++        }
++    }
++}
+diff --git a/crates/wickle/src/lib.rs b/crates/wickle/src/lib.rs
+index d25263c3726691d66014966f43bfdd03c61ef5b0..ca124c90d02650d27455f535e6057f321e7d02da 100644
+--- a/crates/wickle/src/lib.rs
++++ b/crates/wickle/src/lib.rs
+@@ -15,6 +15,7 @@
+ mod agent;
+ mod artifacts;
+ mod budget;
++mod canonical;
+ mod clock;
+ mod component_runtime;
+ mod context;
+@@ -36,6 +37,9 @@ mod profile;
+ mod resolution;
+ mod run;
+ mod serialization;
++pub use canonical::{
++    CanonicalizationVersion, JsonTextLimits, canonicalize_json_text, versioned_digest_json,
++};
+ mod skills;
+ mod state;
+ mod tool_execution;
+diff --git a/crates/wickle/src/serialization.rs b/crates/wickle/src/serialization.rs
+index b1742921d11df20f1da6c1662047157a86e1bdfa..341f68a13318b041142347040cd8f10b58c56203 100644
+--- a/crates/wickle/src/serialization.rs
++++ b/crates/wickle/src/serialization.rs
+@@ -47,7 +47,7 @@ impl fmt::Display for Id {
+     }
+ }
+ 
+-/// A SHA-256 digest using the versioned `sorted-json-v1` encoding.
++/// A SHA-256 digest carrying its canonicalization version.
+ #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+ #[serde(try_from = "String", into = "String")]
+ pub struct JsonDigest(String);
+@@ -64,6 +64,7 @@ impl TryFrom<String> for JsonDigest {
+     fn try_from(value: String) -> Result<Self, Self::Error> {
+         let valid = value
+             .strip_prefix("sorted-json-v1:sha256:")
++            .or_else(|| value.strip_prefix("wickle-canonical-json-v1:sha256:"))
+             .is_some_and(|hex| {
+                 hex.len() == 64
+                     && hex
+diff --git a/crates/wickle/tests/versioned_json.rs b/crates/wickle/tests/versioned_json.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..7447ba64f472bf17e11c8093ad3397a6d0e9a05f
+--- /dev/null
++++ b/crates/wickle/tests/versioned_json.rs
+@@ -0,0 +1,172 @@
++//! Behavior checks for versioned JSON text contracts.
++use serde_json::json;
++use wickle::{
++    CanonicalizationVersion as Version, CompletionPolicy, JsonDigest, JsonTextLimits,
++    canonical_digest_json, canonicalize_json_text, versioned_digest_json,
++};
++
++fn canonical(input: &str) -> Vec<u8> {
++    canonicalize_json_text(input, JsonTextLimits::default()).unwrap()
++}
++#[test]
++fn large_numbers_and_exponents_are_preserved_without_float_rounding() {
++    let input = r#"{"z":1E+003,"a":[184467440737095516160001,-0,1.00,1e9999]}"#;
++    assert_eq!(
++        canonical(input),
++        br#"{"a":[184467440737095516160001,-0,1.00,1e9999],"z":1E+003}"#
++    );
++    for (a, b) in [
++        ("1", "1.0"),
++        ("1e3", "1E+003"),
++        ("0", "-0"),
++        ("184467440737095516160001", "184467440737095516160002"),
++    ] {
++        assert_ne!(
++            versioned_digest_json(a, Version::WickleCanonicalJsonV1, JsonTextLimits::default())
++                .unwrap(),
++            versioned_digest_json(b, Version::WickleCanonicalJsonV1, JsonTextLimits::default())
++                .unwrap()
++        );
++    }
++}
++#[test]
++fn string_escaping_key_order_and_array_order_have_stable_meaning() {
++    assert_eq!(
++        canonical(r#"{"z":[2,1],"\u0061":"\u0062"}"#),
++        br#"{"a":"b","z":[2,1]}"#
++    );
++    assert_ne!(canonical(r#"[2,1]"#), canonical(r#"[1,2]"#));
++    assert_ne!(canonical(r#""é""#), canonical(r#""e\u0301""#));
++    let digest = versioned_digest_json(
++        "{}",
++        Version::WickleCanonicalJsonV1,
++        JsonTextLimits::default(),
++    )
++    .unwrap();
++    assert_eq!(
++        digest.as_str(),
++        "wickle-canonical-json-v1:sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
++    );
++    assert_eq!(
++        JsonDigest::try_from(digest.as_str().to_owned()).unwrap(),
++        digest
++    );
++}
++#[test]
++fn ambiguous_invalid_or_oversized_text_cannot_be_hashed() {
++    for input in [
++        r#"{"a":1,"\u0061":2}"#,
++        r#"{"nested":{"a":1,"a":2}}"#,
++        r#"[1,]"#,
++        "01",
++        "+1",
++        "NaN",
++        "Infinity",
++        "{}{}",
++        r#""\ud800""#,
++    ] {
++        assert!(
++            canonicalize_json_text(input, JsonTextLimits::default()).is_err(),
++            "{input}"
++        );
++    }
++    assert!(
++        canonicalize_json_text(
++            "null",
++            JsonTextLimits {
++                max_bytes: 3,
++                max_depth: 1
++            }
++        )
++        .is_err()
++    );
++    assert!(
++        canonicalize_json_text(
++            "[[0]]",
++            JsonTextLimits {
++                max_bytes: 100,
++                max_depth: 1
++            }
++        )
++        .is_err()
++    );
++    assert!(
++        canonicalize_json_text(
++            "[0]",
++            JsonTextLimits {
++                max_bytes: 100,
++                max_depth: 1
++            }
++        )
++        .is_ok()
++    );
++    assert!(
++        canonicalize_json_text(
++            r#""[{\"}]""#,
++            JsonTextLimits {
++                max_bytes: 100,
++                max_depth: 0
++            }
++        )
++        .is_ok()
++    );
++    assert!(
++        canonicalize_json_text(
++            "0",
++            JsonTextLimits {
++                max_bytes: 100,
++                max_depth: 129
++            }
++        )
++        .is_err()
++    );
++}
++#[test]
++fn saved_legacy_rules_are_not_silently_replaced() {
++    for input in [
++        "{}",
++        r#"{"z":1,"a":{"x":[3,1],"b":2}}"#,
++        "1.0",
++        "-0.0",
++        "1e3",
++    ] {
++        assert_eq!(
++            versioned_digest_json(input, Version::SortedJsonV1, JsonTextLimits::default()).unwrap(),
++            canonical_digest_json(input).unwrap()
++        );
++    }
++    assert_eq!(
++        serde_json::to_string(&Version::WickleCanonicalJsonV1).unwrap(),
++        "\"wickle-canonical-json-v1\""
++    );
++    assert!(serde_json::from_str::<Version>("\"unknown\"").is_err());
++}
++#[test]
++fn completion_policy_accepts_only_the_two_tagged_contracts() {
++    for input in [
++        json!({"mode":"turn_end"}),
++        json!({"mode":"verified","verifier_ref":{"id":"report","version":"1"}}),
++    ] {
++        let policy: CompletionPolicy = serde_json::from_value(input.clone()).unwrap();
++        assert_eq!(serde_json::to_value(policy).unwrap(), input);
++    }
++    for input in [
++        json!("turn_end"),
++        json!(null),
++        json!({}),
++        json!({"mode":"unknown"}),
++        json!({"mode":"verified"}),
++        json!({"mode":"turn_end","verifier_ref":{"id":"a","version":"1"}}),
++        json!({"mode":"verified","verifier_ref":null}),
++        json!({"mode":"verified","verifier_ref":{"id":"","version":"1"}}),
++        json!({"mode":"verified","verifier_ref":{"id":"a","version":""}}),
++        json!({"mode":"verified","verifier_ref":{"id":"a"}}),
++        json!({"mode":"verified","verifier_ref":{"id":"a","version":"1","extra":true}}),
++        json!({"mode":"turn_end","extra":true}),
++    ] {
++        assert!(
++            serde_json::from_value::<CompletionPolicy>(input.clone()).is_err(),
++            "{input}"
++        );
++    }
++}
+diff --git a/docs/contracts.md b/docs/contracts.md
+index cff6fc77fc07aebc0e0754ee5af70a95af422209..306bbcacdb2b0d7bd2d2095aad3002314ed94459 100644
+--- a/docs/contracts.md
++++ b/docs/contracts.md
+@@ -185,3 +185,23 @@ application. The Host supplies Tokio, a scoped metadata resolver, and a JSON
+ profile. The program validates the profile, persists and restores its resolved
+ identity, and reports the result. The consumer also accepts a profile JSON file
+ and an optional second file to compare against the pinned profile.
++
++## Versioned JSON text digests
++
++`canonicalize_json_text` sorts object keys, normalizes JSON string escaping and
++preserves the original number tokens. It does not round large integers through a
++floating-point value. `1E+003`, `1e3` and `1000` may have different digests.
++Pass UTF-8 JSON text directly; converting it through `serde_json::Value` first
++cannot recover number spelling that has already been lost.
++
++`versioned_digest_json` requires a `CanonicalizationVersion`. Use the version
++saved with the original request when comparing a retransmission. The
++`SortedJsonV1` branch retains the historical `canonical_digest_json` behavior;
++`WickleCanonicalJsonV1` produces a distinct digest prefix. `JsonTextLimits`
++bounds input bytes and object/array nesting (default 1 MiB and depth 128).
++Duplicate decoded keys, trailing data and invalid JSON are rejected.
++
++These text-boundary functions do not change existing profile or checkpoint
++encodings. Runtime adoption and stored-data migration require an explicit
++versioned contract. They also cannot detect whether a caller previously converted
++a nonfinite native float into JSON null: validate native values before encoding.
+diff --git a/tests/support/canonical_consumer.rs b/tests/support/canonical_consumer.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..5787b214764496605477d3b66b961471edddee47
+--- /dev/null
++++ b/tests/support/canonical_consumer.rs
+@@ -0,0 +1,12 @@
++use wickle::{CanonicalizationVersion, JsonTextLimits, canonical_digest_json, canonicalize_json_text, versioned_digest_json};
++fn main() {
++    let limits = JsonTextLimits::default();
++    let request = r#"{"amount":184467440737095516160001,"scale":1E+003}"#;
++    assert_eq!(canonicalize_json_text(request, limits).unwrap(), request.as_bytes());
++    let digest = versioned_digest_json(request, CanonicalizationVersion::WickleCanonicalJsonV1, limits).unwrap();
++    let changed = request.replace("160001", "160002");
++    assert_ne!(digest, versioned_digest_json(&changed, CanonicalizationVersion::WickleCanonicalJsonV1, limits).unwrap());
++    assert!(canonicalize_json_text(r#"{"amount":1,"amount":2}"#, limits).is_err());
++    assert_eq!(versioned_digest_json("1e3", CanonicalizationVersion::SortedJsonV1, limits).unwrap(), canonical_digest_json("1e3").unwrap());
++    println!("canonical consumer: exact large numbers, exponent spelling, duplicate rejection and legacy digest selection passed");
++}
+diff --git a/tests/support/report_process_consumer.rs b/tests/support/report_process_consumer.rs
+index 2261096bddaa2ea33c039ec0c06d0328265c6f76..253fa64ce50d9ef637250485d69e69403d34a283 100644
+--- a/tests/support/report_process_consumer.rs
++++ b/tests/support/report_process_consumer.rs
+@@ -183,7 +183,7 @@ mod host {
+             clock.clone(),
+         ));
+         // The Run budget includes both process lifetimes and the approval gap.
+-        // Each child has a separate 30-second wall watchdog below; this is a
++        // Each child has a separate 90-second wall watchdog below; this is a
+         // recovery-contract example, not a 30-second end-to-end latency test.
+         let profile = AgentProfile::from_json(
+             r#"{
+@@ -227,6 +227,10 @@ mod host {
+                     token_estimator: Arc::new(Estimate),
+                     settings: AgentSettings {
+                         require_durable: true,
++                        // An abrupt wait-worker exit may retain the normal
++                        // 30-second lease. Allow handoff to outlive that lease;
++                        // the parent watchdog also includes execution/cleanup.
++                        start_timeout_ms: 60_000,
+                         max_output_tokens: 128.try_into().unwrap(),
+                         ..Default::default()
+                     },
+@@ -244,7 +248,7 @@ mod host {
+             .arg(directory)
+             .arg(mode)
+             .spawn()?;
+-        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
++        let deadline = tokio::time::Instant::now() + Duration::from_secs(90);
+         loop {
+             if let Some(status) = child.try_wait()? {
+                 return Ok(status);

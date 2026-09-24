@@ -1,0 +1,2338 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index d89ebd108a0346c9c52614ffdd900bbebd04fd6f..5fe7ba40c2b5de3c59d4d669da0951c6ca776f35 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -2404,6 +2404,19 @@ dependencies = [
+  "wickle-model-responses",
+ ]
+ 
++[[package]]
++name = "wickle-model-xai"
++version = "0.1.0"
++dependencies = [
++ "futures-util",
++ "reqwest",
++ "serde_json",
++ "tokio",
++ "tokio-util",
++ "wickle",
++ "wickle-model-responses",
++]
++
+ [[package]]
+ name = "wickle-state-sqlite"
+ version = "0.1.0"
+diff --git a/Cargo.toml b/Cargo.toml
+index acf054973d665f50ad5a2fe71b89f72cc3040319..f0af52fcab99a46a67b934715c77d0e0f2e1d571 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -1,5 +1,5 @@
+ [workspace]
+-members = ["crates/wickle", "crates/wickle-model-router", "crates/wickle-state-sqlite", "crates/wickle-adapter-runtime", "crates/wickle-model-openai", "crates/wickle-model-responses", "crates/wickle-model-azure-openai", "crates/wickle-model-anthropic", "crates/wickle-model-bedrock", "crates/wickle-model-gemini", "crates/wickle-model-vertex"]
++members = ["crates/wickle", "crates/wickle-model-router", "crates/wickle-state-sqlite", "crates/wickle-adapter-runtime", "crates/wickle-model-openai", "crates/wickle-model-responses", "crates/wickle-model-azure-openai", "crates/wickle-model-anthropic", "crates/wickle-model-bedrock", "crates/wickle-model-gemini", "crates/wickle-model-vertex", "crates/wickle-model-xai"]
+ default-members = ["crates/wickle"]
+ resolver = "3"
+ 
+diff --git a/README.de.md b/README.de.md
+index fd3080d1c159a2fb085407c09c5bac4b787224c7..9ee1504a100b235337442404e0f9ae69704c144a 100644
+--- a/README.de.md
++++ b/README.de.md
+@@ -22,14 +22,4 @@ Die [Kontextauswahl und -komprimierung](docs/context-compaction.md) bewahrt den
+ 
+ Die [Ausgabeprüfung](docs/verification.md) unterstützt JSON-Schemas, versionierte Kriterien, begrenzte Überarbeitungen und die Genehmigung eines festgelegten Kandidaten. Modellbasierte Prüfungen nutzen dasselbe Run-Budget.
+ 
+-Der [OpenAI-Responses-Adapter](docs/openai.md) unterstützt begrenzte HTTP/SSE-Generierung, Funktionsaufrufe, strukturierte Ausgaben und Modellversionsprüfungen mit von der Anwendung bereitgestellten Zugangsdaten.
+-
+-Informationen zu Azure-Bereitstellungen und vom Host verwalteten API-Schlüsseln oder Entra-Token stehen im [Leitfaden zum Azure-OpenAI-Adapter](docs/azure-openai.md).
+-
+-Claude Messages, die Erhaltung von Thinking-Signaturen und Zugangsdaten pro Workspace beschreibt der [Anthropic-Adapter-Leitfaden](docs/anthropic.md).
+-
+-AWS-Signaturen, Inferenzprofile und Streaming-Protokolle beschreibt der [Bedrock-Adapter-Leitfaden](docs/bedrock.md).
+-
+-API-Versionen, Funktionsschemas und die Erhaltung von Gedankensignaturen beschreibt der [Gemini-Adapter-Leitfaden](docs/gemini.md).
+-
+-Google-Cloud-OAuth und globale oder regionale Ziele beschreibt der [Vertex-AI-Adapter-Leitfaden](docs/vertex.md).
++Der [Leitfaden für Modellanbieter](docs/model-providers.md) beschreibt die Anbindung von OpenAI, Azure OpenAI, Anthropic, AWS Bedrock, Gemini API, Vertex AI und xAI. Die Adapter nutzen gemeinsame Kernverträge und behalten eigene Zugangsdaten, API-Versionen und Verhaltensweisen.
+diff --git a/README.es.md b/README.es.md
+index e7d0619748e8fce6a24433c15821857aa1996434..a5fe050e4f1bf2142a50e72cdeaa59c7be4c24b8 100644
+--- a/README.es.md
++++ b/README.es.md
+@@ -22,14 +22,4 @@ La [selección y compresión de contexto](docs/context-compaction.md) conserva l
+ 
+ La [verificación de resultados](docs/verification.md) admite esquemas JSON, criterios con versión fija, revisiones limitadas y aprobación de un candidato fijo. Las revisiones mediante modelos comparten el presupuesto del Run.
+ 
+-El [adaptador OpenAI Responses](docs/openai.md) ofrece generación HTTP/SSE con límites, llamadas a funciones, salida estructurada y comprobación de versiones, con credenciales proporcionadas por la aplicación.
+-
+-Para despliegues de Azure y autenticación con claves API o Entra gestionada por el Host, consulta la [guía del adaptador Azure OpenAI](docs/azure-openai.md).
+-
+-Consulta la [guía del adaptador Anthropic](docs/anthropic.md) para Claude Messages, conservación de firmas de thinking y credenciales por workspace.
+-
+-Consulta la [guía del adaptador Bedrock](docs/bedrock.md) para firmas AWS, perfiles de inferencia y protocolos de streaming.
+-
+-Consulta la [guía del adaptador Gemini](docs/gemini.md) para versiones de API, esquemas de funciones y conservación de firmas de pensamiento.
+-
+-Consulta la [guía del adaptador Vertex AI](docs/vertex.md) para OAuth de Google Cloud y destinos globales o regionales.
++La [guía de proveedores de modelos](docs/model-providers.md) explica cómo conectar OpenAI, Azure OpenAI, Anthropic, AWS Bedrock, Gemini API, Vertex AI y xAI. Los adaptadores comparten los contratos del núcleo y conservan sus credenciales, versiones de API y diferencias de comportamiento.
+diff --git a/README.fr.md b/README.fr.md
+index d0d5f1d6c469933d73d9ee5095d4c569de7792fb..bc9e92efb403fad574791f022c2b684bcff03396 100644
+--- a/README.fr.md
++++ b/README.fr.md
+@@ -22,14 +22,4 @@ La [sélection et compression du contexte](docs/context-compaction.md) conserve
+ 
+ La [vérification des résultats](docs/verification.md) prend en charge les schémas JSON, les critères versionnés, les révisions limitées et l’approbation d’un candidat figé. Les vérifications par modèle partagent le budget du Run.
+ 
+-L’[adaptateur OpenAI Responses](docs/openai.md) propose la génération HTTP/SSE avec limites, les appels de fonctions, les sorties structurées et la vérification des versions, avec les identifiants fournis par l’application.
+-
+-Pour les déploiements Azure et l’authentification par clé API ou Entra gérée par le Host, consultez le [guide de l’adaptateur Azure OpenAI](docs/azure-openai.md).
+-
+-Consultez le [guide de l’adaptateur Anthropic](docs/anthropic.md) pour Claude Messages, la conservation des signatures thinking et les identifiants par workspace.
+-
+-Consultez le [guide de l’adaptateur Bedrock](docs/bedrock.md) pour la signature AWS, les profils d’inférence et les protocoles de streaming.
+-
+-Consultez le [guide de l’adaptateur Gemini](docs/gemini.md) pour les versions d’API, les schémas de fonctions et la conservation des signatures de raisonnement.
+-
+-Consultez le [guide de l’adaptateur Vertex AI](docs/vertex.md) pour OAuth Google Cloud et les connexions globales ou régionales.
++Le [guide des fournisseurs de modèles](docs/model-providers.md) présente les adaptateurs OpenAI, Azure OpenAI, Anthropic, AWS Bedrock, Gemini API, Vertex AI et xAI. Ils partagent les contrats du cœur tout en conservant leurs identifiants, versions d’API et comportements spécifiques.
+diff --git a/README.ja.md b/README.ja.md
+index aac4742af268f1d770d3351c608c87d801609f3f..271f157f3ef1cd5e32e9f1d3fd74489e146140da 100644
+--- a/README.ja.md
++++ b/README.ja.md
+@@ -22,14 +22,4 @@ Agent Profile でエージェントの振る舞いを設定し、アダプター
+ 
+ [出力検証](docs/verification.md)は JSON Schema、バージョンを固定した評価基準、上限付きの修正、固定された候補の承認に対応します。モデルによる検証も同じ Run 予算を使います。
+ 
+-[OpenAI Responses アダプター](docs/openai.md)は、アプリケーションが渡す認証情報を使い、制限付き HTTP/SSE 生成、関数呼び出し、構造化出力、モデルバージョンの確認に対応します。
+-
+-Azure リソースのデプロイと Host が管理する API キー・Entra 認証については、[Azure OpenAI アダプターガイド](docs/azure-openai.md)を参照してください。
+-
+-Claude Messages、thinking の署名保持、workspace ごとの認証については、[Anthropic アダプターガイド](docs/anthropic.md)を参照してください。
+-
+-AWS 署名、推論プロファイル、Bedrock ストリームについては、[Bedrock アダプターガイド](docs/bedrock.md)を参照してください。
+-
+-Gemini API のバージョン、関数スキーマ、思考署名の再送については、[Gemini アダプターガイド](docs/gemini.md)を参照してください。
+-
+-Google Cloud 認証とグローバル・リージョン別接続については、[Vertex AI アダプターガイド](docs/vertex.md)を参照してください。
++[モデルプロバイダーガイド](docs/model-providers.md)では、OpenAI、Azure OpenAI、Anthropic、AWS Bedrock、Gemini API、Vertex AI、xAI アダプターの共通接続方法を説明しています。認証、API バージョン、各プロバイダーの動作の違いは個別に扱います。
+diff --git a/README.ko.md b/README.ko.md
+index 93cb23db9eba83a0b406a09c8829ed445d3423d8..d0a47df0c91e4165cecf1082901f41db40843924 100644
+--- a/README.ko.md
++++ b/README.ko.md
+@@ -22,14 +22,4 @@ Agent Profile로 에이전트의 동작을 구성하고, 어댑터를 통해 다
+ 
+ [출력 검증](docs/verification.md)은 JSON 스키마, 버전이 고정된 검증 기준, 한도 내 보완과 고정된 후보의 승인을 지원합니다. 모델 기반 검증도 같은 Run 예산을 사용합니다.
+ 
+-[OpenAI Responses 어댑터](docs/openai.md)는 애플리케이션이 제공한 인증 정보로 제한된 HTTP/SSE 생성, 함수 호출, 구조화 출력, 모델 버전 확인을 지원합니다.
+-
+-Azure 리소스별 배포와 Host가 관리하는 API key·Entra 인증은 [Azure OpenAI 어댑터 가이드](docs/azure-openai.md)를 참고하세요.
+-
+-Claude Messages, thinking 서명 보존, workspace별 인증은 [Anthropic 어댑터 가이드](docs/anthropic.md)를 참고하세요.
+-
+-AWS 서명, inference profile과 Bedrock 스트림은 [Bedrock 어댑터 가이드](docs/bedrock.md)를 참고하세요.
+-
+-Gemini API 버전, 함수 스키마와 thinking 서명 재전달은 [Gemini 어댑터 가이드](docs/gemini.md)를 참고하세요.
+-
+-Google Cloud 인증과 global·리전별 연결은 [Vertex AI 어댑터 가이드](docs/vertex.md)를 참고하세요.
++[모델 제공자 가이드](docs/model-providers.md)에서 OpenAI, Azure OpenAI, Anthropic, AWS Bedrock, Gemini API, Vertex AI, xAI 어댑터와 공통 연결 방법을 확인할 수 있습니다. 각 제공자의 인증, API 버전과 동작 차이는 별도로 처리합니다.
+diff --git a/README.md b/README.md
+index 29774ed498e51557e004c2cc603efbe35d51a9b5..fdf1f84c7cb802063bbccdda90aeb8e85a7e5038 100644
+--- a/README.md
++++ b/README.md
+@@ -22,14 +22,4 @@ Read-only [context sources](docs/context-sources.md) support Run and model-step
+ 
+ [Output verification](docs/verification.md) supports JSON schemas, versioned criteria, bounded repair, and approval of a fixed candidate. Model-based reviews share the Run budget.
+ 
+-The [OpenAI Responses adapter](docs/openai.md) provides bounded HTTP/SSE generation, function calling, structured output, and explicit model-version inspection with application-supplied credentials.
+-
+-For resource-scoped Azure deployments and Host-managed API-key/Entra authentication, see the [Azure OpenAI adapter guide](docs/azure-openai.md).
+-
+-For Claude Messages, signed thinking replay and workspace-scoped credentials, see the [Anthropic adapter guide](docs/anthropic.md).
+-
+-For AWS signing, inference profiles and both Bedrock stream protocols, see the [Bedrock adapter guide](docs/bedrock.md).
+-
+-For Gemini API versions, function schemas and thought-signature replay, see the [Gemini adapter guide](docs/gemini.md).
+-
+-For Google Cloud OAuth, global and regional targets, see the [Vertex AI adapter guide](docs/vertex.md).
++The [model provider guide](docs/model-providers.md) covers OpenAI, Azure OpenAI, Anthropic, AWS Bedrock, Gemini API, Vertex AI and xAI adapters. They use the same core contracts while retaining explicit credentials, API versions and provider-specific behavior.
+diff --git a/README.ru.md b/README.ru.md
+index 8167b73f6ea02bd7b2f5cb550b522463825744cb..9e53f57f2cd72c24a337ecbddf83a257125991d6 100644
+--- a/README.ru.md
++++ b/README.ru.md
+@@ -22,14 +22,4 @@ Wickle — движок агентов, который EpsilonDelta разраб
+ 
+ [Проверка результатов](docs/verification.md) поддерживает схемы JSON, версионированные критерии, ограниченные доработки и одобрение зафиксированного кандидата. Проверки с помощью модели используют общий бюджет Run.
+ 
+-[Адаптер OpenAI Responses](docs/openai.md) поддерживает HTTP/SSE-генерацию с ограничениями, вызовы функций, структурированный вывод и проверку версий моделей с учётными данными приложения.
+-
+-Развёртывания Azure и аутентификация через ключ API или Entra, управляемая Host, описаны в [руководстве по адаптеру Azure OpenAI](docs/azure-openai.md).
+-
+-Claude Messages, сохранение подписей thinking и учётные данные workspace описаны в [руководстве по адаптеру Anthropic](docs/anthropic.md).
+-
+-Подпись AWS, профили вывода и потоковые протоколы описаны в [руководстве по адаптеру Bedrock](docs/bedrock.md).
+-
+-Версии API, схемы функций и сохранение подписей рассуждений описаны в [руководстве по адаптеру Gemini](docs/gemini.md).
+-
+-OAuth Google Cloud и глобальные или региональные подключения описаны в [руководстве по адаптеру Vertex AI](docs/vertex.md).
++[Руководство по поставщикам моделей](docs/model-providers.md) описывает подключение OpenAI, Azure OpenAI, Anthropic, AWS Bedrock, Gemini API, Vertex AI и xAI. Адаптеры используют общие контракты ядра, сохраняя отдельные учётные данные, версии API и особенности поведения.
+diff --git a/README.zh-CN.md b/README.zh-CN.md
+index 51d2571770ec80751eb32db7d92134c19b967857..a0d171e7664fe3a02f6e4156d8c8f0671df5a716 100644
+--- a/README.zh-CN.md
++++ b/README.zh-CN.md
+@@ -22,14 +22,4 @@ Wickle 是 EpsilonDelta 正在使用 Rust 开发的智能体引擎，旨在以
+ 
+ [输出验证](docs/verification.md)支持 JSON Schema、固定版本的验证标准、限定次数的修正和固定候选结果的审批。模型验证也使用同一 Run 预算。
+ 
+-[OpenAI Responses 适配器](docs/openai.md)使用应用程序提供的凭据，支持有界 HTTP/SSE 生成、函数调用、结构化输出和明确的模型版本检查。
+-
+-Azure 资源部署及由 Host 管理的 API 密钥和 Entra 身份验证，请参阅 [Azure OpenAI 适配器指南](docs/azure-openai.md)。
+-
+-Claude Messages、thinking 签名保留及 workspace 身份验证请参阅 [Anthropic 适配器指南](docs/anthropic.md)。
+-
+-AWS 签名、推理配置文件和 Bedrock 流协议请参阅 [Bedrock 适配器指南](docs/bedrock.md)。
+-
+-Gemini API 版本、函数模式和思考签名重放请参阅 [Gemini 适配器指南](docs/gemini.md)。
+-
+-Google Cloud 身份验证及全球和区域连接请参阅 [Vertex AI 适配器指南](docs/vertex.md)。
++[模型提供商指南](docs/model-providers.md)介绍 OpenAI、Azure OpenAI、Anthropic、AWS Bedrock、Gemini API、Vertex AI 和 xAI 适配器的通用连接方式。各提供商的身份验证、API 版本和行为差异分别处理。
+diff --git a/crates/wickle-model-responses/src/codec.rs b/crates/wickle-model-responses/src/codec.rs
+index fdf65a0dab1a4d0ed6655c48413301162786efdf..bd056b502a8707c3cb25cf6921517603e7b26bfb 100644
+--- a/crates/wickle-model-responses/src/codec.rs
++++ b/crates/wickle-model-responses/src/codec.rs
+@@ -2,12 +2,34 @@ use serde_json::{Value, json};
+ use wickle::*;
+ 
+ pub(crate) const REPLAY_KIND: &str = "wickle.openai.responses.v1";
++pub(crate) const XAI_REPLAY_KIND: &str = "wickle.xai.responses.v1";
+ fn failure(code: ErrorCode) -> ContractError {
+     crate::error(code, "codec")
+ }
+ 
+ /// Encode a Responses request, preserving exact route-bound replay and model schemas.
+ pub fn encode_request(request: &ModelRequest) -> Result<Value, ContractError> {
++    encode(request, false)
++}
++/// Encode xAI's Responses dialect without relaxing OpenAI/Azure validation.
++pub fn encode_xai_request(request: &ModelRequest) -> Result<Value, ContractError> {
++    if request.tools.len() > 350 || request.options.contains_key("verbosity") {
++        return Err(failure(ErrorCode::ModelCapabilityUnsupported));
++    }
++    if let Some(effort) = request.options.get("reasoning_effort") {
++        let effort = effort
++            .as_str()
++            .ok_or_else(|| failure(ErrorCode::ModelOptionUnsupported))?;
++        if !matches!(effort, "none" | "low" | "medium" | "high" | "xhigh")
++            || (matches!(request.route.model_id.as_str(), "grok-4.6" | "grok-4.5")
++                && effort == "none")
++        {
++            return Err(failure(ErrorCode::ModelOptionUnsupported));
++        }
++    }
++    encode(request, true)
++}
++fn encode(request: &ModelRequest, xai: bool) -> Result<Value, ContractError> {
+     request.validate()?;
+     if request.options.keys().any(|key| {
+         !["reasoning_effort", "temperature", "top_p", "verbosity"].contains(&key.as_str())
+@@ -32,14 +54,17 @@ pub fn encode_request(request: &ModelRequest) -> Result<Value, ContractError> {
+             let object = replay
+                 .as_object()
+                 .ok_or_else(|| failure(ErrorCode::ModelContextIncompatible))?;
+-            if object.len() != 2 || object.get("kind") != Some(&json!(REPLAY_KIND)) {
++            if object.len() != 2
++                || object.get("kind")
++                    != Some(&json!(if xai { XAI_REPLAY_KIND } else { REPLAY_KIND }))
++            {
+                 return Err(failure(ErrorCode::ModelContextIncompatible));
+             }
+             let items = replay
+                 .get("items")
+                 .and_then(Value::as_array)
+                 .ok_or_else(|| failure(ErrorCode::ModelContextIncompatible))?;
+-            let decoded = inspect_output_items(items)?;
++            let decoded = inspect_output_items(items, xai)?;
+             let mut text = String::new();
+             let mut calls = Vec::new();
+             for content in &message.content {
+@@ -174,7 +199,10 @@ pub(crate) struct OutputItems {
+     pub calls: Vec<OutputCall>,
+     pub refused: bool,
+ }
+-pub(crate) fn inspect_output_items(items: &[Value]) -> Result<OutputItems, ContractError> {
++pub(crate) fn inspect_output_items(
++    items: &[Value],
++    xai: bool,
++) -> Result<OutputItems, ContractError> {
+     let mut output = OutputItems {
+         text: String::new(),
+         calls: vec![],
+@@ -185,12 +213,12 @@ pub(crate) fn inspect_output_items(items: &[Value]) -> Result<OutputItems, Contr
+         let object = item
+             .as_object()
+             .ok_or_else(|| failure(ErrorCode::InvalidContract))?;
+-        if object
+-            .get("id")
+-            .is_some_and(|id| id.as_str().is_none_or(str::is_empty))
+-            || object
+-                .get("status")
+-                .is_some_and(|status| status != "completed")
++        if object.get("id").is_some_and(|id| {
++            id.as_str()
++                .is_none_or(|id| id.is_empty() && !(xai && item["type"] == "reasoning"))
++        }) || object
++            .get("status")
++            .is_some_and(|status| status != "completed")
+         {
+             return Err(failure(ErrorCode::InvalidContract));
+         }
+diff --git a/crates/wickle-model-responses/src/lib.rs b/crates/wickle-model-responses/src/lib.rs
+index e5e1e2a98df83bdf7e7d5ce3348bdf3d5de2359c..926907d829c830fa2b0882a5637516123ba342f4 100644
+--- a/crates/wickle-model-responses/src/lib.rs
++++ b/crates/wickle-model-responses/src/lib.rs
+@@ -4,7 +4,7 @@
+ mod codec;
+ mod response;
+ mod sse;
+-pub use codec::encode_request;
++pub use codec::{encode_request, encode_xai_request};
+ pub use response::Decoder as ResponsesDecoder;
+ pub use sse::{Decoder as SseDecoder, Event as SseEvent};
+ use wickle::{ContractError, ErrorCode};
+diff --git a/crates/wickle-model-responses/src/response.rs b/crates/wickle-model-responses/src/response.rs
+index dd00d3570717c1811b8fd6528108983c03827779..1e5e28deb1c586fd5ad97f2f54c60bce7275b021 100644
+--- a/crates/wickle-model-responses/src/response.rs
++++ b/crates/wickle-model-responses/src/response.rs
+@@ -24,6 +24,7 @@ pub struct Decoder<'a> {
+     emitted: usize,
+     terminal: Option<ModelEvent>,
+     done: bool,
++    xai: bool,
+ }
+ impl<'a> Decoder<'a> {
+     /// Start an attempt without making an HTTP request.
+@@ -45,6 +46,14 @@ impl<'a> Decoder<'a> {
+             emitted: 0,
+             terminal: None,
+             done: false,
++            xai: false,
++        }
++    }
++    /// Use xAI's documented reasoning identifiers and legacy/modern usage formats.
++    pub fn for_xai(request: &'a ModelRequest, request_id: Option<Id>) -> Self {
++        Self {
++            xai: true,
++            ..Self::new(request, request_id)
+         }
+     }
+     /// Validate a framed provider event and emit normalized model deltas.
+@@ -88,12 +97,12 @@ impl<'a> Decoder<'a> {
+             "response.output_item.added" => {
+                 let index = index(&value, "output_index")?;
+                 let item = value.get("item").ok_or_else(invalid)?;
+-                let item_id = string(item, "id")?;
++                let item_id = item_id(item, self.xai)?;
+                 let item_type = string(item, "type")?;
+                 if !matches!(item_type, "message" | "reasoning" | "function_call") {
+                     return Err(error(ErrorCode::CapabilityUnsupported, "output_item"));
+                 }
+-                if self.items.values().any(|(_, id)| id == item_id)
++                if (!item_id.is_empty() && self.items.values().any(|(_, id)| id == item_id))
+                     || self
+                         .items
+                         .insert(index, (item_type.into(), item_id.into()))
+@@ -214,7 +223,7 @@ impl<'a> Decoder<'a> {
+                 let index = index(&value, "output_index")?;
+                 let item = value.get("item").ok_or_else(invalid)?;
+                 let identity = self.items.get(&index).ok_or_else(invalid)?;
+-                if identity.0 != string(item, "type")? || identity.1 != string(item, "id")? {
++                if identity.0 != string(item, "type")? || identity.1 != item_id(item, self.xai)? {
+                     return Err(invalid());
+                 }
+                 if identity.0 == "message" {
+@@ -244,7 +253,7 @@ impl<'a> Decoder<'a> {
+                             .get("output")
+                             .and_then(Value::as_array)
+                             .ok_or_else(invalid)?;
+-                        let decoded = codec::inspect_output_items(items)?;
++                        let decoded = codec::inspect_output_items(items, self.xai)?;
+                         if decoded.refused != self.refused
+                             || decoded.text != self.text
+                             || decoded.calls.len() != self.calls.len()
+@@ -256,7 +265,7 @@ impl<'a> Decoder<'a> {
+                             let key = u32::try_from(position).map_err(|_| invalid())?;
+                             let identity = self.items.get(&key).ok_or_else(invalid)?;
+                             if identity.0 != string(item, "type")?
+-                                || identity.1 != string(item, "id")?
++                                || identity.1 != item_id(item, self.xai)?
+                             {
+                                 return Err(invalid());
+                             }
+@@ -281,7 +290,7 @@ impl<'a> Decoder<'a> {
+                         let continuation = if items.is_empty() {
+                             vec![]
+                         } else {
+-                            let data = json!({"kind":codec::REPLAY_KIND,"items":items});
++                            let data = json!({"kind":if self.xai {codec::XAI_REPLAY_KIND} else {codec::REPLAY_KIND},"items":items});
+                             self.charge(serde_json::to_vec(&data).map_err(|_| invalid())?.len())?;
+                             vec![OpaqueContinuation::new(&self.request.route, data)]
+                         };
+@@ -444,10 +453,14 @@ impl<'a> Decoder<'a> {
+                     .map(|value| value.as_u64().ok_or_else(invalid))
+                     .transpose()
+             };
+-            self.metadata.usage = Some(ModelUsage {
+-                measurement: UsageMeasurement::Reported,
+-                input_tokens: count("input_tokens")?,
+-                output_tokens: count("output_tokens")?,
++            self.metadata.usage = Some(if self.xai {
++                xai_usage(usage)?
++            } else {
++                ModelUsage {
++                    measurement: UsageMeasurement::Reported,
++                    input_tokens: count("input_tokens")?,
++                    output_tokens: count("output_tokens")?,
++                }
+             });
+         }
+         Ok(())
+@@ -490,3 +503,56 @@ pub(crate) fn failure_kind(code: Option<&str>) -> ModelFailureKind {
+         _ => ModelFailureKind::Protocol,
+     }
+ }
++
++fn item_id(item: &Value, xai: bool) -> Result<&str, ContractError> {
++    if xai && item["type"] == "reasoning" {
++        match item.get("id") {
++            None => Ok(""),
++            Some(value) => value.as_str().ok_or_else(invalid),
++        }
++    } else {
++        string(item, "id")
++    }
++}
++fn xai_usage(usage: &Value) -> Result<ModelUsage, ContractError> {
++    let count = |key| -> Result<Option<u64>, ContractError> {
++        usage
++            .get(key)
++            .filter(|v| !v.is_null())
++            .map(|v| v.as_u64().ok_or_else(invalid))
++            .transpose()
++    };
++    let modern_input = count("input_tokens")?;
++    let prompt = count("prompt_tokens")?;
++    if modern_input.zip(prompt).is_some_and(|(a, b)| a != b) {
++        return Err(invalid());
++    }
++    let input = modern_input.or(prompt);
++    let modern_output = count("output_tokens")?;
++    let total = count("total_tokens")?;
++    let derived = input
++        .zip(total)
++        .map(|(i, t)| t.checked_sub(i).ok_or_else(invalid))
++        .transpose()?;
++    if modern_output.zip(derived).is_some_and(|(a, b)| a != b) {
++        return Err(invalid());
++    }
++    let output = modern_output.or(derived);
++    let completion = count("completion_tokens")?;
++    let reasoning = usage
++        .pointer("/completion_tokens_details/reasoning_tokens")
++        .filter(|v| !v.is_null())
++        .map(|v| v.as_u64().ok_or_else(invalid))
++        .transpose()?;
++    if output.is_some_and(|out| {
++        completion.is_some_and(|n| n > out) || reasoning.is_some_and(|n| n > out)
++    }) {
++        return Err(invalid());
++    }
++    // Legacy completion counts alone do not establish total reasoning-inclusive output.
++    Ok(ModelUsage {
++        measurement: UsageMeasurement::Reported,
++        input_tokens: input,
++        output_tokens: output,
++    })
++}
+diff --git a/crates/wickle-model-xai/Cargo.toml b/crates/wickle-model-xai/Cargo.toml
+new file mode 100644
+index 0000000000000000000000000000000000000000..f3e20db28d0d7d3636ccc64ac343e861e31b8ed5
+--- /dev/null
++++ b/crates/wickle-model-xai/Cargo.toml
+@@ -0,0 +1,24 @@
++[package]
++name = "wickle-model-xai"
++version.workspace = true
++edition.workspace = true
++rust-version.workspace = true
++repository.workspace = true
++description = "xAI Responses model and metadata adapters for Wickle"
++publish = false
++include = ["Cargo.toml", "src/**"]
++
++[dependencies]
++wickle-model-responses = { path = "../wickle-model-responses", version = "=0.1.0" }
++wickle = { path = "../wickle", version = "=0.1.0" }
++reqwest.workspace = true
++serde_json.workspace = true
++futures-util.workspace = true
++tokio.workspace = true
++tokio-util.workspace = true
++
++[dev-dependencies]
++tokio = { workspace = true, features = ["net", "io-util", "rt-multi-thread", "test-util"] }
++
++[lints]
++workspace = true
+diff --git a/crates/wickle-model-xai/src/connection.rs b/crates/wickle-model-xai/src/connection.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..37793c75935188cf034aed352838b95db3ccd312
+--- /dev/null
++++ b/crates/wickle-model-xai/src/connection.rs
+@@ -0,0 +1,184 @@
++use std::{fmt, sync::Arc, time::Duration};
++
++use reqwest::{
++    Client, Url,
++    header::{CONTENT_TYPE, HeaderMap, HeaderValue},
++};
++use serde_json::json;
++use wickle::*;
++
++use crate::error;
++
++/// Explicit transport settings. The library does not read environment files.
++#[derive(Debug, Clone)]
++pub struct XaiOptions {
++    /// API base directory, normally `https://api.x.ai/v1/`.
++    pub base_url: String,
++    /// Explicit REST API generation: `v1`.
++    pub api_version: String,
++    /// Finite time allowed to establish a connection.
++    pub connect_timeout: Duration,
++    /// Upper bound for any request; the core's deadline may be shorter.
++    pub request_timeout: Duration,
++    /// Maximum raw SSE/JSON response bytes, including protocol envelopes.
++    pub max_transport_bytes: usize,
++    /// Maximum buffered bytes in a normalized SSE event, including its JSON envelope.
++    pub max_event_bytes: usize,
++    /// Maximum SSE data frames, including provider metadata and progress events.
++    pub max_protocol_events: usize,
++}
++
++impl Default for XaiOptions {
++    fn default() -> Self {
++        Self {
++            base_url: "https://api.x.ai/v1/".into(),
++            api_version: "v1".into(),
++            connect_timeout: Duration::from_secs(10),
++            request_timeout: Duration::from_secs(120),
++            max_transport_bytes: 8 * 1024 * 1024,
++            max_event_bytes: 1024 * 1024,
++            max_protocol_events: 16_384,
++        }
++    }
++}
++
++/// A scope-bound HTTP connection with an explicit credential revision.
++#[derive(Clone)]
++pub struct XaiConnection(pub(crate) Arc<Connection>);
++
++pub(crate) struct Connection {
++    pub client: Client,
++    pub base: Url,
++    pub scope: Scope,
++    pub binding: ModelPortBinding,
++    pub target: JsonObject,
++    pub options: XaiOptions,
++}
++
++impl fmt::Debug for XaiConnection {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_struct("XaiConnection")
++            .field("binding", &self.0.binding)
++            .finish_non_exhaustive()
++    }
++}
++
++impl XaiConnection {
++    /// Create a client without a network call. Never log the supplied API key.
++    /// HTTPS is required except for explicitly configured loopback test servers.
++    pub fn new(
++        scope: Scope,
++        connection_ref: VersionedRef,
++        api_key: &str,
++        mut options: XaiOptions,
++    ) -> Result<Self, ContractError> {
++        if api_key.is_empty()
++            || api_key.chars().any(char::is_whitespace)
++            || options.connect_timeout.is_zero()
++            || options.request_timeout.is_zero()
++            || options.max_transport_bytes == 0
++            || options.max_event_bytes == 0
++            || options.max_protocol_events == 0
++            || options.max_event_bytes > options.max_transport_bytes
++        {
++            return Err(error(ErrorCode::InvalidConfiguration, "connection"));
++        }
++        let mut base = Url::parse(&options.base_url)
++            .map_err(|_| error(ErrorCode::InvalidConfiguration, "base_url"))?;
++        let loopback = base.host_str().is_some_and(|host| {
++            let address = host
++                .strip_prefix('[')
++                .and_then(|value| value.strip_suffix(']'))
++                .unwrap_or(host);
++            host == "localhost"
++                || address
++                    .parse::<std::net::IpAddr>()
++                    .is_ok_and(|ip| ip.is_loopback())
++        });
++        if !(base.scheme() == "https" || (base.scheme() == "http" && loopback))
++            || base.host_str().is_none()
++            || !base.username().is_empty()
++            || base.password().is_some()
++            || base.query().is_some()
++            || base.fragment().is_some()
++        {
++            return Err(error(ErrorCode::InvalidConfiguration, "base_url"));
++        }
++        if !base.path().ends_with('/') {
++            base.set_path(&format!("{}/", base.path()));
++        }
++        options.base_url = base.as_str().into();
++        let mut headers = HeaderMap::new();
++        let mut authorization = HeaderValue::from_str(&format!("Bearer {api_key}"))
++            .map_err(|_| error(ErrorCode::InvalidConfiguration, "credential"))?;
++        authorization.set_sensitive(true);
++        headers.insert("authorization", authorization);
++        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
++        if options.api_version != "v1" || base.path() != "/v1/" {
++            return Err(error(
++                ErrorCode::InvalidConfiguration,
++                "api_version_or_origin",
++            ));
++        }
++        let target = JsonObject::from([("base_url".into(), json!(base.as_str()))]);
++        let client = Client::builder()
++            .default_headers(headers)
++            .redirect(reqwest::redirect::Policy::none())
++            .retry(reqwest::retry::never())
++            .connect_timeout(options.connect_timeout)
++            .timeout(options.request_timeout)
++            .build()
++            .map_err(|_| error(ErrorCode::ComponentUnavailable, "client"))?;
++        Ok(Self(Arc::new(Connection {
++            client,
++            base,
++            scope,
++            target,
++            options,
++            binding: ModelPortBinding {
++                provider: Id::new("xai")?,
++                adapter: VersionedRef {
++                    id: Id::new("wickle-model-xai")?,
++                    version: Id::new(env!("CARGO_PKG_VERSION"))?,
++                },
++                connection_ref,
++            },
++        })))
++    }
++    /// Exact actual adapter and connection identities for catalog registration.
++    pub fn binding(&self) -> ModelPortBinding {
++        self.0.binding.clone()
++    }
++    /// Canonical endpoint identity required in the selected route.
++    pub fn target(&self) -> &JsonObject {
++        &self.0.target
++    }
++    /// Owner namespace for this connection.
++    pub fn scope(&self) -> &Scope {
++        &self.0.scope
++    }
++    /// The one supported API operation and protocol generation.
++    pub fn api_contract(&self) -> ApiContract {
++        ApiContract {
++            operation: Id::new("responses").expect("static identifier"),
++            version: Id::new(&self.0.options.api_version).expect("static identifier"),
++        }
++    }
++    pub(crate) fn validate(
++        &self,
++        route: &ResolvedModelRoute,
++        scope: &Scope,
++    ) -> Result<(), ContractError> {
++        if scope != &self.0.scope {
++            return Err(error(ErrorCode::AccessDenied, "scope"));
++        }
++        if !self.0.binding.matches_route(route)
++            || route.target != self.0.target
++            || route.api_contract != self.api_contract()
++            || route.deployment_revision.is_some()
++        {
++            return Err(error(ErrorCode::ModelBindingInvalid, "route"));
++        }
++        Ok(())
++    }
++}
+diff --git a/crates/wickle-model-xai/src/inspection.rs b/crates/wickle-model-xai/src/inspection.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..a87e6466a68f0b4034869160cd360ccc026e717e
+--- /dev/null
++++ b/crates/wickle-model-xai/src/inspection.rs
+@@ -0,0 +1,143 @@
++use crate::{XaiConnection, error};
++use serde_json::Value;
++use std::{collections::BTreeMap, sync::Arc};
++use wickle::*;
++
++/// A provider-documented immutable model release, registered by the Host.
++/// API availability alone, a date in a name, or a requested version is not proof.
++#[derive(Debug, Clone)]
++pub struct XaiSnapshot {
++    /// Exact provider model identifier in the cited snapshot metadata.
++    pub model_id: Id,
++    /// Release identity established by that metadata.
++    pub model_version: Id,
++    /// Host-owned reference to the documentation or metadata establishing immutability.
++    pub evidence_ref: Id,
++}
++
++/// Current account availability combined with explicit immutable-release evidence.
++/// Unregistered model identifiers retain unknown release and unverified semantics.
++#[derive(Clone)]
++pub struct XaiInspector {
++    connection: XaiConnection,
++    snapshots: Arc<BTreeMap<Id, XaiSnapshot>>,
++}
++impl XaiInspector {
++    /// Build an inspector without a network call. Duplicate identifiers are rejected.
++    pub fn new(
++        connection: XaiConnection,
++        snapshots: Vec<XaiSnapshot>,
++    ) -> Result<Self, ContractError> {
++        let mut known = BTreeMap::new();
++        for snapshot in snapshots {
++            if known.insert(snapshot.model_id.clone(), snapshot).is_some() {
++                return Err(error(ErrorCode::InvalidConfiguration, "snapshots"));
++            }
++        }
++        Ok(Self {
++            connection,
++            snapshots: Arc::new(known),
++        })
++    }
++}
++impl ModelRouteInspector for XaiInspector {
++    fn inspect<'a>(
++        &'a self,
++        route: &'a ResolvedModelRoute,
++        context: &'a ModelInspectionContext,
++    ) -> PortFuture<'a, ModelRouteObservation> {
++        Box::pin(async move {
++            self.connection.validate(route, &context.scope)?;
++            let mut url = self
++                .connection
++                .0
++                .base
++                .join("models/")
++                .map_err(|_| error(ErrorCode::InvalidConfiguration, "models_url"))?;
++            url.path_segments_mut()
++                .map_err(|_| error(ErrorCode::InvalidConfiguration, "models_url"))?
++                .pop_if_empty()
++                .push(route.model_id.as_str());
++            let operation = async {
++                let mut response = self
++                    .connection
++                    .0
++                    .client
++                    .get(url)
++                    .send()
++                    .await
++                    .map_err(|_| error(ErrorCode::ModelInspectionUnavailable, "models_request"))?;
++                if response.status().as_u16() == 404 {
++                    return Ok(ModelRouteObservation {
++                        route_digest: route.digest(),
++                        availability: ModelRouteAvailability::Unavailable,
++                        model_id: None,
++                        model_version: None,
++                        deployment_revision: None,
++                        version_semantics: VersionSemantics::Unverified,
++                        evidence_ref: Id::new("xai.models.retrieve")?,
++                    });
++                }
++                if !response.status().is_success() {
++                    return Err(error(
++                        ErrorCode::ModelInspectionUnavailable,
++                        "models_status",
++                    ));
++                }
++                let mut bytes = vec![];
++                while let Some(chunk) = response
++                    .chunk()
++                    .await
++                    .map_err(|_| error(ErrorCode::ModelInspectionUnavailable, "models_body"))?
++                {
++                    if bytes.len().saturating_add(chunk.len())
++                        > 65_536.min(self.connection.0.options.max_transport_bytes)
++                    {
++                        return Err(error(ErrorCode::ModelInspectionUnavailable, "models_limit"));
++                    }
++                    bytes.extend_from_slice(&chunk);
++                }
++                let body =
++                    parse_json(std::str::from_utf8(&bytes).map_err(|_| {
++                        error(ErrorCode::ModelInspectionUnavailable, "models_json")
++                    })?)
++                    .map_err(|_| error(ErrorCode::ModelInspectionUnavailable, "models_json"))?;
++                if body.get("object").and_then(Value::as_str) != Some("model") {
++                    return Err(error(
++                        ErrorCode::ModelInspectionUnavailable,
++                        "models_object",
++                    ));
++                }
++                let model_id = body
++                    .get("id")
++                    .and_then(Value::as_str)
++                    .ok_or_else(|| error(ErrorCode::ModelInspectionUnavailable, "models_id"))?;
++                if model_id != route.model_id.as_str() {
++                    return Err(error(ErrorCode::ModelVersionDrift, "models_id"));
++                }
++                let snapshot = self.snapshots.get(&route.model_id);
++                Ok(ModelRouteObservation {
++                    route_digest: route.digest(),
++                    availability: ModelRouteAvailability::Available,
++                    model_id: Some(Id::new(model_id)?),
++                    model_version: snapshot.map(|value| value.model_version.clone()),
++                    deployment_revision: None,
++                    version_semantics: if snapshot.is_some() {
++                        VersionSemantics::Pinned
++                    } else {
++                        VersionSemantics::Unverified
++                    },
++                    evidence_ref: snapshot.map_or_else(
++                        || Id::new("xai.models.retrieve"),
++                        |value| Ok(value.evidence_ref.clone()),
++                    )?,
++                })
++            };
++            tokio::select! { biased;
++                _ = context.cancellation.cancelled() => Err(error(ErrorCode::Cancelled, "inspection")),
++                _ = tokio::time::sleep_until(context.deadline) => Err(error(ErrorCode::DeadlineExceeded, "inspection")),
++                result = operation => result,
++            }
++        })
++    }
++}
+diff --git a/crates/wickle-model-xai/src/lib.rs b/crates/wickle-model-xai/src/lib.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..9733ceab524edda155ea8d975dcc35241959daef
+--- /dev/null
++++ b/crates/wickle-model-xai/src/lib.rs
+@@ -0,0 +1,12 @@
++//! xAI Grok Responses with explicit scoped credentials and bounded replay.
++#![forbid(unsafe_code)]
++mod connection;
++mod inspection;
++mod model;
++pub use connection::{XaiConnection, XaiOptions};
++pub use inspection::{XaiInspector, XaiSnapshot};
++pub use model::XaiModel;
++use wickle::{ContractError, ErrorCode};
++fn error(code: ErrorCode, location: &str) -> ContractError {
++    ContractError::new(code, format!("xai.{location}"))
++}
+diff --git a/crates/wickle-model-xai/src/model.rs b/crates/wickle-model-xai/src/model.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..38a51b21649158975f6ee0764f197d2a23a64ecf
+--- /dev/null
++++ b/crates/wickle-model-xai/src/model.rs
+@@ -0,0 +1,232 @@
++use crate::{XaiConnection, error};
++use futures_util::stream;
++use reqwest::Response;
++use std::collections::VecDeque;
++use wickle::*;
++use wickle_model_responses::{ResponsesDecoder, SseDecoder, encode_xai_request};
++
++/// One xAI Responses POST per invocation, streamed into Wickle model events.
++/// The adapter does not retry, run Tool handlers, or load environment variables.
++#[derive(Debug, Clone)]
++pub struct XaiModel {
++    connection: XaiConnection,
++}
++impl XaiModel {
++    /// Bind an already configured connection without making a network request.
++    pub fn new(connection: XaiConnection) -> Self {
++        Self { connection }
++    }
++}
++impl ModelPort for XaiModel {
++    fn binding(&self) -> ModelPortBinding {
++        self.connection.binding()
++    }
++    fn generate<'a>(
++        &'a self,
++        request: &'a ModelRequest,
++        context: &'a ModelCallContext,
++    ) -> PortStream<'a, ModelEvent> {
++        let state = State {
++            connection: &self.connection,
++            request,
++            context,
++            response: None,
++            decoder: ResponsesDecoder::for_xai(request, None),
++            framing: SseDecoder::new(
++                self.connection.0.options.max_transport_bytes,
++                self.connection.0.options.max_event_bytes,
++                self.connection.0.options.max_protocol_events,
++            ),
++            queue: VecDeque::new(),
++            started: false,
++            finished: false,
++        };
++        Box::pin(stream::unfold(state, |mut state| async move {
++            loop {
++                if !state.finished && state.context.cancellation.is_cancelled() {
++                    state.queue.clear();
++                    state.fail(error(ErrorCode::Cancelled, "stream"));
++                }
++                if !state.finished && tokio::time::Instant::now() >= state.context.deadline {
++                    state.queue.clear();
++                    state.fail(error(ErrorCode::DeadlineExceeded, "stream"));
++                }
++                if let Some(event) = state.queue.pop_front() {
++                    return Some((event, state));
++                }
++                if state.finished {
++                    return None;
++                }
++                if !state.started {
++                    state.started = true;
++                    if let Err(failure) = state.start().await {
++                        state.fail(failure);
++                    }
++                    continue;
++                }
++                let result = {
++                    let response = state
++                        .response
++                        .as_mut()
++                        .expect("started response or finished state");
++                    tokio::select! { biased;
++                        _ = state.context.cancellation.cancelled() => Err(error(ErrorCode::Cancelled, "stream")),
++                        _ = tokio::time::sleep_until(state.context.deadline) => Err(error(ErrorCode::DeadlineExceeded, "stream")),
++                        chunk = response.chunk() => chunk.map_err(transport_error),
++                    }
++                };
++                match result {
++                    Ok(Some(bytes)) => match state.framing.push(&bytes) {
++                        Ok(events) => {
++                            for event in events {
++                                match state.decoder.event(event) {
++                                    Ok(events) => state.queue.extend(events.into_iter().map(Ok)),
++                                    Err(error) => {
++                                        state.fail(error);
++                                        break;
++                                    }
++                                }
++                            }
++                        }
++                        Err(error) => state.fail(error),
++                    },
++                    Ok(None) => match state.framing.finish().and_then(|_| state.decoder.finish()) {
++                        Ok(event) => {
++                            state.queue.push_back(Ok(event));
++                            state.finished = true;
++                            state.response = None;
++                        }
++                        Err(error) => state.fail(error),
++                    },
++                    Err(error) => state.fail(error),
++                }
++            }
++        }))
++    }
++}
++struct State<'a> {
++    connection: &'a XaiConnection,
++    request: &'a ModelRequest,
++    context: &'a ModelCallContext,
++    response: Option<Response>,
++    decoder: ResponsesDecoder<'a>,
++    framing: SseDecoder,
++    queue: VecDeque<Result<ModelEvent, ContractError>>,
++    started: bool,
++    finished: bool,
++}
++impl State<'_> {
++    async fn start(&mut self) -> Result<(), ContractError> {
++        self.connection
++            .validate(&self.request.route, &self.context.scope)?;
++        if self.context.attempt_id != self.request.request_id {
++            return Err(error(ErrorCode::RequestConflict, "attempt"));
++        }
++        self.request.validate()?;
++        let value = encode_xai_request(self.request)?;
++        let body =
++            serde_json::to_vec(&value).map_err(|_| error(ErrorCode::InvalidJson, "request"))?;
++        if body.len() > self.request.limits.max_input_bytes {
++            return Err(error(ErrorCode::ModelCapabilityUnsupported, "request_size"));
++        }
++        let url = self
++            .connection
++            .0
++            .base
++            .join("responses")
++            .map_err(|_| error(ErrorCode::InvalidConfiguration, "responses_url"))?;
++        let operation = self
++            .connection
++            .0
++            .client
++            .post(url)
++            .header("accept", "text/event-stream")
++            .header("accept-encoding", "identity")
++            .body(body)
++            .send();
++        let response = tokio::select! { biased;
++            _ = self.context.cancellation.cancelled() => return Err(error(ErrorCode::Cancelled, "request")),
++            _ = tokio::time::sleep_until(self.context.deadline) => return Err(error(ErrorCode::DeadlineExceeded, "request")),
++            result = operation => result.map_err(transport_error)?,
++        };
++        self.decoder.metadata.provider_request_id = response
++            .headers()
++            .get("x-request-id")
++            .map(|value| {
++                value
++                    .to_str()
++                    .map_err(|_| error(ErrorCode::InvalidContract, "request_id"))
++                    .and_then(Id::new)
++            })
++            .transpose()?;
++        if !response.status().is_success() {
++            let status = response.status().as_u16();
++            let kind = match status {
++                401 | 403 => ModelFailureKind::Authentication,
++                404 => ModelFailureKind::Unavailable,
++                408 | 504 => ModelFailureKind::Timeout,
++                429 => ModelFailureKind::RateLimited,
++                500..=599 => ModelFailureKind::Transport,
++                _ => ModelFailureKind::Unsupported,
++            };
++            self.queue.push_back(Ok(ModelEvent::ResponseError {
++                kind,
++                metadata: self.decoder.metadata.clone(),
++            }));
++            self.finished = true;
++            return Ok(());
++        }
++        let content_type = response
++            .headers()
++            .get("content-type")
++            .and_then(|value| value.to_str().ok())
++            .and_then(|value| value.split(';').next())
++            .map(str::trim);
++        if !content_type.is_some_and(|value| value.eq_ignore_ascii_case("text/event-stream")) {
++            return Err(error(ErrorCode::InvalidContract, "content_type"));
++        }
++        if response
++            .content_length()
++            .is_some_and(|bytes| bytes > self.connection.0.options.max_transport_bytes as u64)
++        {
++            return Err(error(ErrorCode::InvalidContract, "response_size"));
++        }
++        self.response = Some(response);
++        Ok(())
++    }
++    fn fail(&mut self, failure: ContractError) {
++        self.finished = true;
++        self.response = None;
++        if matches!(
++            failure.code,
++            ErrorCode::Cancelled | ErrorCode::AccessDenied | ErrorCode::RequestConflict
++        ) {
++            self.queue.push_back(Err(failure));
++            return;
++        }
++        let kind = match failure.code {
++            ErrorCode::DeadlineExceeded => ModelFailureKind::Timeout,
++            ErrorCode::ModelUnavailable => ModelFailureKind::Transport,
++            ErrorCode::ModelOptionUnsupported
++            | ErrorCode::ModelCapabilityUnsupported
++            | ErrorCode::CapabilityUnsupported
++            | ErrorCode::ModelBindingInvalid
++            | ErrorCode::InvalidConfiguration => ModelFailureKind::Unsupported,
++            _ => ModelFailureKind::Protocol,
++        };
++        self.queue.push_back(Ok(ModelEvent::ResponseError {
++            kind,
++            metadata: self.decoder.metadata.clone(),
++        }));
++    }
++}
++fn transport_error(error_value: reqwest::Error) -> ContractError {
++    error(
++        if error_value.is_timeout() {
++            ErrorCode::DeadlineExceeded
++        } else {
++            ErrorCode::ModelUnavailable
++        },
++        "transport",
++    )
++}
+diff --git a/crates/wickle-model-xai/tests/responses.rs b/crates/wickle-model-xai/tests/responses.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..c89f9f3a1bd7256f696e229990a56f3d5f283ad3
+--- /dev/null
++++ b/crates/wickle-model-xai/tests/responses.rs
+@@ -0,0 +1,553 @@
++//! xAI-specific Responses contracts and shared-dialect isolation.
++mod support;
++use futures_util::StreamExt;
++use serde_json::{Value, json};
++use std::time::Duration;
++use support::*;
++use wickle::*;
++use wickle_model_responses::{ResponsesDecoder, SseEvent};
++use wickle_model_xai::*;
++
++fn function_events() -> Vec<Value> {
++    let reasoning =
++        json!({"id":"","type":"reasoning","summary":[],"encrypted_content":"ciphertext-fixture"});
++    let call = json!({"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":"{\"query\":\"figures\"}","status":"completed"});
++    vec![
++        json!({"type":"response.created","response":{"id":"resp_1","model":MODEL,"status":"in_progress"}}),
++        json!({"type":"response.output_item.added","output_index":0,"item":{"id":"","type":"reasoning","summary":[]}}),
++        json!({"type":"response.output_item.done","output_index":0,"item":reasoning}),
++        json!({"type":"response.output_item.added","output_index":1,"item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":""}}),
++        json!({"type":"response.function_call_arguments.delta","output_index":1,"item_id":"fc_1","delta":"{\"query\":"}),
++        json!({"type":"response.function_call_arguments.delta","output_index":1,"item_id":"fc_1","delta":"\"figures\"}"}),
++        json!({"type":"response.function_call_arguments.done","output_index":1,"item_id":"fc_1","arguments":"{\"query\":\"figures\"}"}),
++        json!({"type":"response.output_item.done","output_index":1,"item":call}),
++        json!({"type":"response.completed","response":{"id":"resp_1","model":MODEL,"status":"completed","output":[reasoning,call]}}),
++    ]
++}
++fn with_tool(request: &mut ModelRequest) {
++    request.tools = vec![ModelTool {
++        name: id("lookup"),
++        description: "Read figures".into(),
++        model_input_schema: json!({"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"}},"required":["query"],"additionalProperties":false}),
++    }];
++}
++#[tokio::test]
++async fn explicit_stateless_contract_and_effort_do_not_leak_host_context() {
++    let server = Server::new(vec![
++        Reply::sse(&events(MODEL, "answer")),
++        Reply::sse(&events(MODEL, "answer")),
++    ])
++    .await;
++    let connection = connection(&server);
++    let model = XaiModel::new(connection.clone());
++    for effort in ["high", "xhigh"] {
++        let mut request = request(&connection, MODEL);
++        request
++            .options
++            .insert("reasoning_effort".into(), json!(effort));
++        let response =
++            collect_model_response(&request, model.generate(&request, &context(&request)))
++                .await
++                .unwrap();
++        assert_eq!(response.text, "answer");
++        assert_eq!(response.metadata.reported_model_id, Some(id(MODEL)));
++        assert!(response.metadata.reported_model_version.is_none());
++        assert_eq!(response.metadata.usage.unwrap().output_tokens, Some(7));
++    }
++    let calls = server.requests.lock().unwrap();
++    assert_eq!(calls.len(), 2);
++    for (call, effort) in calls.iter().zip(["high", "xhigh"]) {
++        assert_eq!(call.method, "POST");
++        assert_eq!(call.path, "/v1/responses");
++        assert!(
++            call.headers
++                .to_ascii_lowercase()
++                .contains("authorization: bearer fixture-key-not-a-secret")
++        );
++        assert_eq!(call.body["store"], false);
++        assert_eq!(call.body["include"], json!(["reasoning.encrypted_content"]));
++        assert_eq!(call.body["reasoning"]["effort"], effort);
++        assert!(!call.body.to_string().contains("hidden-workspace"));
++        assert!(call.body.get("previous_response_id").is_none());
++    }
++}
++#[tokio::test]
++async fn empty_or_missing_reasoning_ids_are_replayed_without_relaxing_other_dialects() {
++    for missing in [false, true] {
++        let mut data = function_events();
++        if missing {
++            data[1]["item"].as_object_mut().unwrap().remove("id");
++            data[2]["item"].as_object_mut().unwrap().remove("id");
++            data[8]["response"]["output"][0]
++                .as_object_mut()
++                .unwrap()
++                .remove("id");
++        }
++        let server = Server::new(vec![
++            Reply::sse(&data),
++            Reply::sse(&events(MODEL, "received")),
++        ])
++        .await;
++        let connection = connection(&server);
++        let model = XaiModel::new(connection.clone());
++        let mut request = request(&connection, MODEL);
++        with_tool(&mut request);
++        let mut strict = ResponsesDecoder::new(&request, None);
++        assert!(data.iter().any(|value| {
++            strict
++                .event(SseEvent {
++                    name: None,
++                    data: value.to_string(),
++                })
++                .is_err()
++        }));
++        let first = collect_model_response(&request, model.generate(&request, &context(&request)))
++            .await
++            .unwrap();
++        assert_eq!(first.finish, ModelFinish::ToolCalls);
++        assert_eq!(first.tool_calls[0].provider_call_id, id("call_1"));
++        request.messages.push(ModelMessage {
++            role: ModelRole::Assistant,
++            content: vec![
++                ModelContent::ToolCall {
++                    provider_call_id: id("call_1"),
++                    name: id("lookup"),
++                    arguments: JsonObject::from([("query".into(), json!("figures"))]),
++                },
++                ModelContent::Opaque {
++                    continuation: first.continuation[0].clone(),
++                },
++            ],
++        });
++        request.messages.push(ModelMessage {
++            role: ModelRole::Tool,
++            content: vec![ModelContent::ToolResult {
++                provider_call_id: id("call_1"),
++                content: json!({"result":73}),
++            }],
++        });
++        request.request_id = id("second-attempt");
++        assert!(wickle_model_responses::encode_request(&request).is_err());
++        let response =
++            collect_model_response(&request, model.generate(&request, &context(&request)))
++                .await
++                .unwrap();
++        assert_eq!(response.text, "received");
++        {
++            let calls = server.requests.lock().unwrap();
++            let input = calls[1].body["input"].as_array().unwrap();
++            assert_eq!(input[1], data[8]["response"]["output"][0]);
++            assert_eq!(input[2]["call_id"], "call_1");
++            assert_eq!(input[3]["type"], "function_call_output");
++            assert_eq!(
++                parse_json(input[3]["output"].as_str().unwrap()).unwrap(),
++                json!({"result":73})
++            );
++            assert_eq!(
++                input
++                    .iter()
++                    .filter(|i| i["type"] == "function_call")
++                    .count(),
++                1
++            );
++        }
++        if let ModelContent::ToolCall { arguments, .. } = &mut request.messages[1].content[0] {
++            arguments.insert("query".into(), json!("changed"));
++        }
++        assert!(
++            collect_model_response(&request, model.generate(&request, &context(&request)))
++                .await
++                .is_err()
++        );
++        assert_eq!(server.requests.lock().unwrap().len(), 2);
++    }
++}
++#[tokio::test]
++async fn legacy_usage_includes_reasoning_without_fabricating_missing_counts() {
++    for (usage, input, output, valid) in [
++        (
++            json!({"prompt_tokens":32,"completion_tokens":9,"completion_tokens_details":{"reasoning_tokens":110},"total_tokens":151}),
++            Some(32),
++            Some(119),
++            true,
++        ),
++        (
++            json!({"input_tokens":32,"output_tokens":119,"total_tokens":151}),
++            Some(32),
++            Some(119),
++            true,
++        ),
++        (
++            json!({"prompt_tokens":32,"completion_tokens":9,"completion_tokens_details":{"reasoning_tokens":110}}),
++            Some(32),
++            None,
++            true,
++        ),
++        (json!({}), None, None, true),
++        (
++            json!({"input_tokens":32,"prompt_tokens":33,"output_tokens":9}),
++            None,
++            None,
++            false,
++        ),
++        (
++            json!({"input_tokens":32,"output_tokens":9,"total_tokens":151}),
++            None,
++            None,
++            false,
++        ),
++        (
++            json!({"prompt_tokens":32,"completion_tokens":999,"total_tokens":151}),
++            None,
++            None,
++            false,
++        ),
++    ] {
++        let mut data = events(MODEL, "answer");
++        data[5]["response"]["usage"] = usage;
++        let server = Server::new(vec![Reply::sse(&data)]).await;
++        let connection = connection(&server);
++        let request = request(&connection, MODEL);
++        let model = XaiModel::new(connection);
++        let response =
++            collect_model_response(&request, model.generate(&request, &context(&request))).await;
++        if valid {
++            let usage = response.unwrap().metadata.usage.unwrap();
++            assert_eq!(usage.input_tokens, input);
++            assert_eq!(usage.output_tokens, output);
++        } else {
++            assert!(response.is_err());
++        }
++    }
++}
++#[tokio::test]
++async fn unsupported_options_scope_schema_and_service_tool_limit_fail_before_http() {
++    for case in [
++        "none",
++        "minimal",
++        "max",
++        "verbosity",
++        "scope",
++        "api",
++        "target",
++        "tools",
++        "schema",
++    ] {
++        let server = Server::new(vec![]).await;
++        let connection = connection(&server);
++        let mut request = request(&connection, MODEL);
++        let mut context = context(&request);
++        let model = XaiModel::new(connection);
++        match case {
++            "none" | "minimal" | "max" => {
++                request
++                    .options
++                    .insert("reasoning_effort".into(), json!(case));
++            }
++            "verbosity" => {
++                request.options.insert("verbosity".into(), json!("low"));
++            }
++            "scope" => context.scope.workspace_id = id("foreign"),
++            "api" => request.route.api_contract.version = id("v2"),
++            "target" => {
++                request
++                    .route
++                    .target
++                    .insert("base_url".into(), json!("https://other.example/v1/"));
++            }
++            "tools" => {
++                request.limits.max_input_bytes = 1_000_000;
++                request.tools=(0..351).map(|n|ModelTool{name:id(&format!("tool-{n}")),description:"Read".into(),model_input_schema:json!({"type":"object","properties":{},"additionalProperties":false})}).collect();
++                request.validate().unwrap();
++            }
++            _ => {
++                request.output = ModelOutput::JsonSchema {
++                    schema: json!({"type":"object","properties":{"optional":{"type":"string"}},"additionalProperties":false}),
++                }
++            }
++        }
++        assert!(
++            collect_model_response(&request, model.generate(&request, &context))
++                .await
++                .is_err(),
++            "{case}"
++        );
++        assert!(server.requests.lock().unwrap().is_empty());
++    }
++}
++#[tokio::test]
++async fn absent_executable_ids_ciphertext_or_terminals_never_produce_calls() {
++    for case in [
++        "item-id",
++        "call-id",
++        "ciphertext",
++        "eof",
++        "native",
++        "conflict",
++    ] {
++        let mut data = function_events();
++        match case {
++            "item-id" => data[3]["item"]["id"] = json!(""),
++            "call-id" => data[3]["item"]["call_id"] = json!(""),
++            "ciphertext" => {
++                data[8]["response"]["output"][0]
++                    .as_object_mut()
++                    .unwrap()
++                    .remove("encrypted_content");
++            }
++            "eof" => {
++                data.pop();
++            }
++            "native" => data[3]["item"]["type"] = json!("web_search_call"),
++            _ => data[8]["response"]["output"][1]["arguments"] = json!("{}"),
++        }
++        let server = Server::new(vec![Reply::sse(&data)]).await;
++        let connection = connection(&server);
++        let mut request = request(&connection, MODEL);
++        with_tool(&mut request);
++        let model = XaiModel::new(connection);
++        assert!(
++            collect_model_response(&request, model.generate(&request, &context(&request)))
++                .await
++                .is_err(),
++            "{case}"
++        );
++    }
++}
++#[tokio::test]
++async fn native_json_output_and_actual_model_reporting_remain_explicit() {
++    let server = Server::new(vec![Reply::sse(&events(
++        "replacement-model",
++        "{\"answer\":42}",
++    ))])
++    .await;
++    let connection = connection(&server);
++    let mut request = request(&connection, MODEL);
++    let schema = json!({"type":"object","properties":{"answer":{"type":"integer"}},"required":["answer"],"additionalProperties":false});
++    request.output = ModelOutput::JsonSchema {
++        schema: schema.clone(),
++    };
++    let model = XaiModel::new(connection);
++    let response = collect_model_response(&request, model.generate(&request, &context(&request)))
++        .await
++        .unwrap();
++    assert_eq!(
++        response.metadata.reported_model_id,
++        Some(id("replacement-model"))
++    );
++    assert_eq!(request.route.model_id, id(MODEL));
++    assert!(response.metadata.reported_model_version.is_none());
++    let calls = server.requests.lock().unwrap();
++    assert_eq!(calls[0].body["text"]["format"]["schema"], schema);
++    assert_eq!(calls[0].body["text"]["format"]["strict"], true);
++}
++#[tokio::test]
++async fn cancellation_deadline_errors_and_redirects_close_without_retry() {
++    for cancel in [true, false] {
++        let mut data = events(MODEL, "partial");
++        data.truncate(3);
++        let mut reply = Reply::sse(&data);
++        reply.stall = true;
++        let server = Server::new(vec![reply]).await;
++        let connection = connection(&server);
++        let request = request(&connection, MODEL);
++        let model = XaiModel::new(connection);
++        let mut context = context(&request);
++        context.deadline = tokio::time::Instant::now() + Duration::from_secs(1);
++        let mut stream = model.generate(&request, &context);
++        assert!(matches!(
++            stream.next().await.unwrap().unwrap(),
++            ModelEvent::TextDelta { .. }
++        ));
++        server.entered.notified().await;
++        if cancel {
++            context.cancellation.cancel();
++        }
++        let next = stream.next().await.unwrap();
++        if cancel {
++            assert_eq!(next.unwrap_err().code, ErrorCode::Cancelled);
++        } else {
++            assert!(matches!(
++                next.unwrap(),
++                ModelEvent::ResponseError {
++                    kind: ModelFailureKind::Timeout,
++                    ..
++                }
++            ));
++        }
++        assert!(stream.next().await.is_none());
++        tokio::time::timeout(Duration::from_secs(1), server.closed.notified())
++            .await
++            .unwrap();
++        assert_eq!(server.requests.lock().unwrap().len(), 1);
++    }
++    let destination = Server::new(vec![]).await;
++    for (status, kind) in [
++        (307, ModelFailureKind::Unsupported),
++        (401, ModelFailureKind::Authentication),
++        (429, ModelFailureKind::RateLimited),
++        (503, ModelFailureKind::Transport),
++    ] {
++        let mut reply = Reply::json(status, json!({"error":{"message":"private detail"}}));
++        reply.headers.push(("location", destination.base.clone()));
++        let server = Server::new(vec![reply]).await;
++        let connection = connection(&server);
++        let request = request(&connection, MODEL);
++        let model = XaiModel::new(connection);
++        let failure =
++            collect_model_response(&request, model.generate(&request, &context(&request)))
++                .await
++                .unwrap_err();
++        assert_eq!(failure.kind, kind);
++        assert!(!format!("{failure:?}").contains("private detail"));
++        assert_eq!(server.requests.lock().unwrap().len(), 1);
++    }
++    assert!(destination.requests.lock().unwrap().is_empty());
++}
++fn inspection_context() -> ModelInspectionContext {
++    ModelInspectionContext {
++        scope: scope(),
++        principal_ref: id("user"),
++        capability_grant_ref: id("grant"),
++        cancellation: Default::default(),
++        deadline: tokio::time::Instant::now() + Duration::from_secs(3),
++    }
++}
++#[tokio::test]
++async fn models_metadata_does_not_infer_immutable_versions_from_names() {
++    let metadata = json!({"object":"model","id":MODEL,"created":12345});
++    let server = Server::new(vec![
++        Reply::json(200, metadata.clone()),
++        Reply::json(200, metadata),
++        Reply::json(200, json!({"object":"model","id":"replacement"})),
++        Reply::json(404, json!({})),
++    ])
++    .await;
++    let connection = connection(&server);
++    let request = request(&connection, MODEL);
++    let unknown = XaiInspector::new(connection.clone(), vec![])
++        .unwrap()
++        .inspect(&request.route, &inspection_context())
++        .await
++        .unwrap();
++    assert_eq!(unknown.version_semantics, VersionSemantics::Unverified);
++    assert!(unknown.model_version.is_none());
++    let inspector = XaiInspector::new(
++        connection,
++        vec![XaiSnapshot {
++            model_id: id(MODEL),
++            model_version: id("release"),
++            evidence_ref: id("explicit-immutable-evidence"),
++        }],
++    )
++    .unwrap();
++    inspector
++        .inspect(&request.route, &inspection_context())
++        .await
++        .unwrap()
++        .validate(&request.route, VersionPolicy::RequirePinned)
++        .unwrap();
++    assert_eq!(
++        inspector
++            .inspect(&request.route, &inspection_context())
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::ModelVersionDrift
++    );
++    assert_eq!(
++        inspector
++            .inspect(&request.route, &inspection_context())
++            .await
++            .unwrap()
++            .availability,
++        ModelRouteAvailability::Unavailable
++    );
++    let calls = server.requests.lock().unwrap();
++    assert_eq!(calls[0].method, "GET");
++    assert_eq!(calls[0].path, format!("/v1/models/{MODEL}"));
++}
++
++#[tokio::test]
++async fn metadata_cancellation_scope_and_size_limits_are_independent_of_inference() {
++    for case in ["cancel", "deadline", "scope", "large"] {
++        let mut response = Reply::json(200, json!({"object":"model","id":MODEL}));
++        response.stall = matches!(case, "cancel" | "deadline");
++        if case == "large" {
++            response = Reply::json(
++                200,
++                json!({"object":"model","id":MODEL,"padding":"x".repeat(70_000)}),
++            );
++        }
++        let server = Server::new(vec![response]).await;
++        let connection = connection(&server);
++        let request = request(&connection, MODEL);
++        let inspector = XaiInspector::new(connection, vec![]).unwrap();
++        let mut context = inspection_context();
++        context.deadline = tokio::time::Instant::now() + Duration::from_secs(1);
++        if case == "scope" {
++            context.scope.workspace_id = id("foreign");
++        }
++        let trigger = async {
++            if case == "cancel" {
++                server.entered.notified().await;
++                context.cancellation.cancel();
++            }
++        };
++        let (result, _) = tokio::join!(inspector.inspect(&request.route, &context), trigger);
++        assert_eq!(
++            result.unwrap_err().code,
++            match case {
++                "cancel" => ErrorCode::Cancelled,
++                "deadline" => ErrorCode::DeadlineExceeded,
++                "scope" => ErrorCode::AccessDenied,
++                _ => ErrorCode::ModelInspectionUnavailable,
++            }
++        );
++        if case == "scope" {
++            assert!(server.requests.lock().unwrap().is_empty());
++        } else if matches!(case, "cancel" | "deadline") {
++            tokio::time::timeout(Duration::from_secs(1), server.closed.notified())
++                .await
++                .unwrap();
++        }
++    }
++}
++
++#[tokio::test]
++async fn reasoning_exceptions_never_allow_invalid_executable_identities() {
++    let mut cases = vec![(None, None, true)];
++    for field in ["id", "call_id"] {
++        for value in [None, Some(Value::Null), Some(json!(42)), Some(json!(""))] {
++            cases.push((Some(field), value, false));
++        }
++    }
++    for (field, value, valid) in cases {
++        let mut call = json!({"type":"function_call","id":"fc_1","call_id":"call_1","name":"lookup","arguments":"{\"query\":\"figures\"}","status":"completed"});
++        if let Some(field) = field {
++            if let Some(value) = value {
++                call[field] = value;
++            } else {
++                call.as_object_mut().unwrap().remove(field);
++            }
++        }
++        let data = vec![
++            json!({"type":"response.created","response":{"id":"r","model":MODEL,"status":"in_progress"}}),
++            json!({"type":"response.output_item.added","output_index":0,"item":call}),
++            json!({"type":"response.output_item.done","output_index":0,"item":call}),
++            json!({"type":"response.completed","response":{"id":"r","model":MODEL,"status":"completed","output":[call]}}),
++        ];
++        let server = Server::new(vec![Reply::sse(&data)]).await;
++        let connection = connection(&server);
++        let mut request = request(&connection, MODEL);
++        with_tool(&mut request);
++        let model = XaiModel::new(connection);
++        let result =
++            collect_model_response(&request, model.generate(&request, &context(&request))).await;
++        if valid {
++            assert_eq!(result.unwrap().finish, ModelFinish::ToolCalls);
++        } else {
++            assert!(result.is_err(), "{field:?}");
++        }
++    }
++}
+diff --git a/crates/wickle-model-xai/tests/support/mod.rs b/crates/wickle-model-xai/tests/support/mod.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..2ce96e25b0693f469dad25189ada003d2786371c
+--- /dev/null
++++ b/crates/wickle-model-xai/tests/support/mod.rs
+@@ -0,0 +1,101 @@
++use serde_json::{Value, json};
++use wickle::*;
++use wickle_model_xai::*;
++
++pub fn id(value: &str) -> Id {
++    Id::new(value).unwrap()
++}
++pub fn reference(value: &str) -> VersionedRef {
++    VersionedRef {
++        id: id(value),
++        version: id("1"),
++    }
++}
++pub fn scope() -> Scope {
++    Scope {
++        tenant_id: id("tenant"),
++        workspace_id: id("hidden-workspace"),
++        user_id: None,
++    }
++}
++pub fn connection(server: &Server) -> XaiConnection {
++    XaiConnection::new(
++        scope(),
++        reference("account"),
++        "fixture-key-not-a-secret",
++        XaiOptions {
++            base_url: server.base.clone(),
++            ..Default::default()
++        },
++    )
++    .unwrap()
++}
++pub fn request(connection: &XaiConnection, model: &str) -> ModelRequest {
++    let binding = connection.binding();
++    ModelRequest {
++        request_id: id("attempt"),
++        purpose: ModelPurpose::Agent,
++        route: ResolvedModelRoute {
++            binding: reference("primary"),
++            catalog_revision: id("catalog"),
++            routing_policy_revision: id("policy"),
++            requested_model: id(model),
++            model_id: id(model),
++            model_version: id("release"),
++            version_semantics: VersionSemantics::Pinned,
++            provider: binding.provider,
++            target: connection.target().clone(),
++            deployment_revision: None,
++            api_contract: connection.api_contract(),
++            adapter: binding.adapter,
++            capability_revision: id("capabilities"),
++            connection_ref: binding.connection_ref,
++        },
++        messages: vec![ModelMessage {
++            role: ModelRole::User,
++            content: vec![ModelContent::Text {
++                text: "Find the requested figures".into(),
++            }],
++        }],
++        tools: vec![],
++        output: ModelOutput::Text {},
++        max_output_tokens: 128.try_into().unwrap(),
++        options: JsonObject::from([("reasoning_effort".into(), json!("medium"))]),
++        limits: ModelResponseLimits {
++            max_input_bytes: 32_768,
++            max_response_bytes: 32_768,
++            max_delta_bytes: 128,
++            max_events: 256,
++            max_tool_calls: 4,
++        },
++    }
++}
++pub fn context(request: &ModelRequest) -> ModelCallContext {
++    ModelCallContext {
++        attempt_id: request.request_id.clone(),
++        run_id: id("run"),
++        scope: scope(),
++        cancellation: Default::default(),
++        deadline: tokio::time::Instant::now() + std::time::Duration::from_secs(5),
++    }
++}
++pub fn text_item(text: &str) -> Value {
++    json!({"id":"msg_1","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":text,"annotations":[]}]})
++}
++pub fn events(model: &str, text: &str) -> Vec<Value> {
++    let item = text_item(text);
++    vec![
++        json!({"type":"response.created","response":{"id":"resp_1","model":model,"status":"in_progress","usage":null}}),
++        json!({"type":"response.output_item.added","output_index":0,"item":{"id":"msg_1","type":"message","role":"assistant","status":"in_progress","content":[]}}),
++        json!({"type":"response.output_text.delta","output_index":0,"item_id":"msg_1","content_index":0,"delta":text}),
++        json!({"type":"response.output_text.done","output_index":0,"item_id":"msg_1","content_index":0,"text":text}),
++        json!({"type":"response.output_item.done","output_index":0,"item":item}),
++        json!({"type":"response.completed","response":{"id":"resp_1","model":model,"status":"completed","output":[item],"usage":{"input_tokens":11,"output_tokens":7}}}),
++    ]
++}
++
++#[path = "../../../../tests/support/model_http.rs"]
++mod http;
++pub use http::*;
++
++pub const MODEL: &str = "grok-4.6";
+diff --git a/docs/azure-openai.md b/docs/azure-openai.md
+index 39460a8a879fe9c3fe655e4292d7c2c9bdf16fa4..909f5519512ae8fa68ed8026d2286eb3a0f2ca56 100644
+--- a/docs/azure-openai.md
++++ b/docs/azure-openai.md
+@@ -79,8 +79,11 @@ counts are recorded as returned; an unreported separate version remains absent.
+ The OpenAI and Azure adapters share `wickle-model-responses` for text/JSON,
+ function calls/results, strict-schema output, bounded SSE parsing, and route-bound
+ opaque replay. Azure retains its own resource validation, credentials, transport,
+-and metadata inspection. The shared codec does not imply identical model features;
+-model and binding option schemas must describe each deployment's supported options.
++and metadata inspection. The [xAI adapter](xai.md) also uses this codec, with
++separate reasoning-item validation, replay identity, and usage decoding. OpenAI
++and Azure retain their original validation mode. The shared codec does not imply
++identical model features; model and binding option schemas must describe each
++deployment's supported options.
+ The adapter explicitly maps `reasoning_effort`, `temperature`, `top_p` and
+ `verbosity`, and rejects arbitrary option/body overrides. Native provider tools,
+ stored conversation state, automatic truncation and incomplete executable Tool
+diff --git a/docs/env/xai.md b/docs/env/xai.md
+index 483231a153f9bb024ee751db0527d0102897ab69..047f7bf6f26b561575f52f6a70a0eb5d107a60f8 100644
+--- a/docs/env/xai.md
++++ b/docs/env/xai.md
+@@ -40,7 +40,7 @@ XAI_MODEL_2_MAX_OUTPUT_TOKENS=4096
+ 
+ `XAI_MODEL_1_REASONING_EFFORT`는 논리 옵션 `reasoning_effort`입니다. 현재 공식 Responses API 예제에서는 `reasoning.effort`에 대응합니다. 지원 여부와 허용 수준은 모델·API별로 다르므로 선택한 조합의 schema를 확인합니다. 구형 모델의 제한을 모든 Grok 모델에 적용하지 않습니다. [xAI reasoning](https://docs.x.ai/developers/model-capabilities/text/reasoning).
+ 
+-빈 effort는 전송하지 않습니다. 지원하지 않는 값이 공급자에서 무시·대체될 수 있더라도 테스트에서는 명시적으로 거부하며 조용히 낮은 수준으로 바꾸지 않습니다. 논리 옵션을 실제 요청 필드로 변환하는 어댑터의 SDK 연결은 아직 구현 전입니다.
++빈 effort는 전송하지 않습니다. 지원하지 않는 값이 공급자에서 무시·대체될 수 있더라도 테스트에서는 명시적으로 거부하며 조용히 낮은 수준으로 바꾸지 않습니다. [xAI 어댑터](../xai.md)가 논리 옵션을 명시적 Responses 요청으로 변환합니다. 실제 계정 연결 검증은 별도로 진행합니다.
+ 
+ `MAX_OUTPUT_TOKENS=4096`은 응답 한 번의 출력 예산 예시입니다. 모델의 요건과 reasoning·도구 호출에 필요한 토큰에 맞춰 조정합니다. 긴 tool loop 전체에 충분한 예산이라는 뜻은 아닙니다.
+ 
+@@ -53,3 +53,5 @@ ID가 채워진 슬롯마다 독립적인 모델·옵션 테스트 대상이 됩
+ ## 확인한 현재 모델 계약
+ 
+ `grok-4.6`은 Responses의 `reasoning.effort`에 `low`, `medium`, `high`, `xhigh`를 지원하며 기본은 `high`입니다. Thinking 비활성화는 지원하지 않습니다. `xhigh`를 지원하지 않는 구형 모델에 동일 옵션을 보내 조용히 강등시키지 않습니다. [Grok 4.6](https://docs.x.ai/developers/models/grok-4.6), [reasoning](https://docs.x.ai/developers/model-capabilities/text/reasoning).
++
++일부 retired slug는 공급자 정책에 따라 다른 모델로 자동 대체됩니다. 이름이나 날짜만으로 immutable release라고 판정하지 않고, 실제 응답 모델과 별도 release 증거를 확인합니다. [공식 이전 정책](https://docs.x.ai/developers/migration/may-15-retirement).
+diff --git a/docs/model-providers.md b/docs/model-providers.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..f311c30fd93d33669203f1d66529c062bbad96ec
+--- /dev/null
++++ b/docs/model-providers.md
+@@ -0,0 +1,37 @@
++# Model provider adapters
++
++Wickle's core consumes `ModelPort` events and owns the agent loop, Tool execution, budgets and retry policy. Provider crates own credentials, endpoint contracts and wire encoding. Install the adapters your Host needs; provider SDK/HTTP dependencies stay outside the core crate.
++
++| Provider | Crate and guide | Implemented inference contract |
++| --- | --- | --- |
++| OpenAI | [wickle-model-openai](openai.md) | Responses |
++| Azure OpenAI | [wickle-model-azure-openai](azure-openai.md) | Azure Responses v1, explicit deployment |
++| Anthropic | [wickle-model-anthropic](anthropic.md) | Messages, API 2023-06-01 |
++| AWS Bedrock Claude | [wickle-model-bedrock](bedrock.md) | Runtime/Mantle Messages or Runtime InvokeStream |
++| Gemini API | [wickle-model-gemini](gemini.md) | v1/v1beta streamGenerateContent |
++| Vertex AI Gemini | [wickle-model-vertex](vertex.md) | v1 streamGenerateContent |
++| xAI Grok | [wickle-model-xai](xai.md) | Responses v1 |
++
++## Connect an adapter
++
++1. Construct its connection with explicit Host credentials, scope and target settings. Constructors do not invoke models or load `.env`.
++2. Register `connection.binding()`, `connection.target()` and the adapter's API contract in the [model catalog](model-catalog.md). Keep model release, deployment/profile selector, API version and credential revision separate.
++3. Create the corresponding model adapter and register it as a scoped `ModelDispatcherEntry` in `RegistryModelDispatcher`. A provider, adapter version, connection revision or scope mismatch cannot select a different account automatically.
++4. Register the appropriate metadata inspector and configure the [router's version/capability policy](model-routing.md). Metadata availability alone is not proof of an immutable release or inference permission.
++5. Supply that router/dispatcher through the [Agent runtime configuration](agents.md). The core validates complete model output before creating Tool execution plans.
++
++The Host controls configuration and credential refresh. [Environment examples](provider-setup.md) belong to the live-test Host only; production applications can use their own secret/configuration systems.
++
++## Contracts are provider-specific
++
++Shared encoding does not imply identical service features. OpenAI/Azure use the original Responses mode; xAI adds separate reasoning identity and usage handling. Anthropic/Bedrock share Messages content while authentication, framing and metadata differ. Gemini/Vertex share content and SSE handling while their function schemas and output formats differ.
++
++For example, direct Gemini API v1 cannot represent closed Tool input objects in OpenAPI parameters; its v1beta JSON Schema path can. Vertex v1 supports JSON Schema function declarations. Mantle Messages rejects native JSON-schema output. Bedrock inference profile identity is distinct from the underlying model release and request origin region.
++
++All adapters enforce scope/target/API matching, finite deadlines, bounded streams and no hidden transport retries. Provider-native tools, implicit server conversation state and automatic truncation are not substitutes for the core loop. Consult each guide for supported options and explicit limitations.
++
++## Verification boundaries
++
++The independent package check runs each provider's HTTP/SSE consumer and a common dispatcher conformance consumer across all seven concrete adapters. The latter checks binding isolation and rejects foreign scopes, unknown credential revisions and incompatible API contracts before network access. Provider fixtures separately exercise successful encoding, streaming, Tool replay, usage and failures.
++
++These checks establish library and transport-contract behavior. They do not establish every model version's live availability, account permissions or production support. Actual model/account verification and support promotion require separate evidence; missing metadata remains unknown.
+diff --git a/docs/provider-setup.md b/docs/provider-setup.md
+index 1e38f339d45e4e3018890438a93634ada3eb9a72..c8dcec66d1fa3a8ca458bfe3318b3bfcf8ab5633 100644
+--- a/docs/provider-setup.md
++++ b/docs/provider-setup.md
+@@ -8,7 +8,8 @@ Azure OpenAI, Anthropic, Bedrock, Gemini API, Vertex AI, and xAI.
+ and the first numbered model slot for each provider. Add further slots for more
+ models or versions. No provider enable-list variable is required.
+ 
+-Provider adapters and model-specific live tests are still being implemented.
++[Provider adapters](model-providers.md) implement the seven documented inference paths.
++Model-specific live verification is separate from local transport-contract checks.
+ These files and numbered model variables are test-harness conventions only.
+ Wickle core accepts configured adapters and does not load `.env` or depend on
+ these variables. The `.env` files and template are excluded from its `.crate`
+diff --git a/docs/xai.md b/docs/xai.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..be0792a9015431e5211673c43f4d4d7da3f1e9c9
+--- /dev/null
++++ b/docs/xai.md
+@@ -0,0 +1,41 @@
++# xAI Grok adapter
++
++`wickle-model-xai` implements `ModelPort` for the xAI `v1` Responses API. The Host supplies the API key, scope, connection revision and endpoint. The library does not load environment files or select a replacement model.
++
++```rust,ignore
++use std::sync::Arc;
++use wickle_model_xai::{XaiConnection, XaiModel, XaiOptions};
++
++let connection = XaiConnection::new(
++    scope, connection_ref, &api_key, XaiOptions::default(),
++)?;
++let model = Arc::new(XaiModel::new(connection.clone()));
++```
++
++Register `connection.binding()`, `connection.target()` and `connection.api_contract()` in the catalog. The default base URL is `https://api.x.ai/v1/`; only the `v1` contract is implemented. Credentials use Bearer authentication and are not placed in model input or URL queries. Changed endpoints, credentials or scopes require the corresponding binding.
++
++## Stateless Responses and options
++
++Every call sends `store: false`, `stream: true`, `truncation: disabled`, and `include: ["reasoning.encrypted_content"]`. The core owns history and compaction; the adapter does not use previous_response_id, server-native tools or provider-controlled automatic compaction. Redirects and hidden HTTP retries are disabled.
++
++Logical `reasoning_effort` maps to `reasoning.effort`. The service-level options supported here are none/low/medium/high/xhigh; the selected model's catalog must restrict them further. `grok-4.6` and `grok-4.5` reject none because reasoning cannot be disabled. Minimal, max and verbosity are rejected by this adapter. Temperature and top_p are available only when the selected model's catalog permits them. Omitted options remain omitted.
++
++Function declarations contain only model-visible parameters. More than 350 declarations fail before HTTP. Native JSON output uses the shared Responses JSON-schema subset and strict output format. Unsupported constraints fail explicitly. The core still validates proposed arguments and final output before accepting them.
++
++## xAI-specific replay and usage
++
++The shared Responses codec exposes `encode_xai_request` and `ResponsesDecoder::for_xai`. These use a separate replay kind. OpenAI and Azure continue to use their original validation mode.
++
++xAI reasoning items may have a missing or empty ID. The decoder tracks them by output position and preserves the original item for replay, without manufacturing an ID. Executable function-call IDs and message identities retain strict validation. Encrypted reasoning is required for the stateless continuation; missing encrypted state is rejected rather than silently dropping it or exposing reasoning as answer text. Visible text and Tool calls must match the protected original items before replay.
++
++Modern input_tokens/output_tokens are read directly. For legacy usage, prompt_tokens and total_tokens can establish total output as total minus prompt, including reasoning. Legacy completion_tokens alone does not establish whether all reasoning was counted, so ambiguous output usage remains unknown. Conflicting modern/legacy input counts, inconsistent reported totals and impossible component counts are rejected. Missing values are not filled from reservations or requested limits.
++
++A validated terminal and clean SSE EOF are required. Incomplete, conflicting, refused or malformed output cannot become a successful executable continuation. HTTP errors are classified without leaking provider error text; unclassified HTTP 400 responses remain Unsupported.
++
++## Model identity and verification
++
++`XaiInspector` checks Models API availability and requires explicit `XaiSnapshot` evidence to establish an immutable release. A created timestamp, base name, date-looking name or requested version does not create that evidence. Some retired slugs are automatically served by newer models under xAI's published migration policy. The adapter reports the actual response model without replacing the selected route; the core can then detect drift.
++
++Local HTTP/SSE tests and an extracted-package consumer cover the protocol and usage variants. Account/model connectivity and immutable-release promotion require separate live evidence. See the [test environment guide](env/xai.md).
++
++Official contracts: [Responses reference](https://docs.x.ai/developers/rest-api-reference/inference/responses), [text generation and encrypted state](https://docs.x.ai/developers/model-capabilities/text/generate-text), [reasoning](https://docs.x.ai/developers/model-capabilities/text/reasoning), [retired slug migration](https://docs.x.ai/developers/migration/may-15-retirement).
+diff --git a/scripts/check-package.py b/scripts/check-package.py
+index 5a09c65a535eea7f0ab4ec2e306350b95c53204d..f1d2b9b26c3ff85e6287d03158564068046f6dbc 100644
+--- a/scripts/check-package.py
++++ b/scripts/check-package.py
+@@ -46,7 +46,8 @@ def main():
+     bedrock = next(p for p in workspace["packages"] if p["name"] == "wickle-model-bedrock")
+     gemini = next(p for p in workspace["packages"] if p["name"] == "wickle-model-gemini")
+     vertex = next(p for p in workspace["packages"] if p["name"] == "wickle-model-vertex")
+-    libraries = [core, catalog, sqlite, adapters, responses, openai, azure, anthropic, bedrock, gemini, vertex]
++    xai = next(p for p in workspace["packages"] if p["name"] == "wickle-model-xai")
++    libraries = [core, catalog, sqlite, adapters, responses, openai, azure, anthropic, bedrock, gemini, vertex, xai]
+     versions = {d["name"]: d["req"] for d in core["dependencies"] if d["kind"] is None}
+     for dep in core["dependencies"]:
+         if dep["kind"] != "dev":
+@@ -145,7 +146,7 @@ def main():
+         for example in examples:
+             subprocess.run(["cargo", "run", "--locked", "--offline", "--bin", example.stem],
+                            cwd=consumer, env=env, check=True)
+-    print("Independent package consumers: passed (core, model catalog, SQLite store, adapter runtime, Responses codec, OpenAI, Azure, Anthropic, Bedrock, Gemini and Vertex adapters)", flush=True)
++    print("Independent package consumers: passed (core, model catalog, SQLite store, adapter runtime, Responses codec, OpenAI, Azure, Anthropic, Bedrock, Gemini, Vertex and xAI adapters)", flush=True)
+ 
+ 
+ if __name__ == "__main__":
+diff --git a/tests/support/model_adapters_consumer.rs b/tests/support/model_adapters_consumer.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..db1a0a3f93d00a98f22f776c5123620bc452db4b
+--- /dev/null
++++ b/tests/support/model_adapters_consumer.rs
+@@ -0,0 +1,245 @@
++// Cross-provider dispatcher/authorization conformance using extracted adapter packages.
++use futures_util::StreamExt;
++use std::{net::TcpListener, sync::Arc, time::Duration};
++use wickle::*;
++use wickle_model_router::{ModelDispatcherEntry, RegistryModelDispatcher};
++fn id(value: &str) -> Id {
++    Id::new(value).expect("fixture identifier")
++}
++fn reference(value: &str) -> VersionedRef {
++    VersionedRef {
++        id: id(value),
++        version: id("1"),
++    }
++}
++fn request(
++    binding: ModelPortBinding,
++    target: JsonObject,
++    api_contract: ApiContract,
++) -> ModelRequest {
++    ModelRequest {
++        request_id: id("attempt"),
++        purpose: ModelPurpose::Agent,
++        route: ResolvedModelRoute {
++            binding: reference("selected"),
++            catalog_revision: id("catalog"),
++            routing_policy_revision: id("policy"),
++            requested_model: id("fixture-model"),
++            model_id: id("fixture-model"),
++            model_version: id("fixture-release"),
++            version_semantics: VersionSemantics::Unverified,
++            provider: binding.provider,
++            target,
++            deployment_revision: None,
++            api_contract,
++            adapter: binding.adapter,
++            capability_revision: id("caps"),
++            connection_ref: binding.connection_ref,
++        },
++        messages: vec![ModelMessage {
++            role: ModelRole::User,
++            content: vec![ModelContent::Text {
++                text: "Read the authorized fixture".into(),
++            }],
++        }],
++        tools: vec![],
++        output: ModelOutput::Text {},
++        max_output_tokens: 128.try_into().unwrap(),
++        options: JsonObject::new(),
++        limits: ModelResponseLimits {
++            max_input_bytes: 32768,
++            max_response_bytes: 32768,
++            max_delta_bytes: 128,
++            max_events: 64,
++            max_tool_calls: 0,
++        },
++    }
++}
++#[tokio::main(flavor = "current_thread")]
++async fn main() -> Result<(), Box<dyn std::error::Error>> {
++    let listener = TcpListener::bind("127.0.0.1:0")?;
++    listener.set_nonblocking(true)?;
++    let origin = format!("http://{}/", listener.local_addr()?);
++    let v1 = format!("{origin}v1/");
++    let scope = Scope {
++        tenant_id: id("tenant"),
++        workspace_id: id("workspace"),
++        user_id: None,
++    };
++    let mut providers: Vec<(Arc<dyn ModelPort>, ModelRequest)> = vec![];
++    macro_rules! add {
++        ($connection:expr,$model:path,$api:expr) => {{
++            let connection = $connection?;
++            let request = request(
++                connection.binding(),
++                connection.target().clone(),
++                ($api)(&connection),
++            );
++            request.validate()?;
++            let port: Arc<dyn ModelPort> = Arc::new(<$model>::new(connection));
++            providers.push((port, request));
++        }};
++    }
++    add!(
++        wickle_model_openai::OpenAiConnection::new(
++            scope.clone(),
++            reference("shared"),
++            "fixture-key",
++            wickle_model_openai::OpenAiOptions {
++                base_url: v1.clone(),
++                ..Default::default()
++            }
++        ),
++        wickle_model_openai::OpenAiModel,
++        |_: &wickle_model_openai::OpenAiConnection| {
++            wickle_model_openai::OpenAiConnection::api_contract()
++        }
++    );
++    add!(
++        wickle_model_azure_openai::AzureOpenAiConnection::new(
++            scope.clone(),
++            reference("shared"),
++            Arc::new(wickle_model_azure_openai::AzureCredential::ApiKey(
++                "fixture-key".into()
++            )),
++            wickle_model_azure_openai::AzureOpenAiOptions::new(&origin, "fixture-deployment")
++        ),
++        wickle_model_azure_openai::AzureOpenAiModel,
++        |_: &wickle_model_azure_openai::AzureOpenAiConnection| {
++            wickle_model_azure_openai::AzureOpenAiConnection::api_contract()
++        }
++    );
++    add!(
++        wickle_model_anthropic::AnthropicConnection::new(
++            scope.clone(),
++            reference("shared"),
++            "fixture-key",
++            wickle_model_anthropic::AnthropicOptions {
++                base_url: origin.clone(),
++                ..Default::default()
++            }
++        ),
++        wickle_model_anthropic::AnthropicModel,
++        |_: &wickle_model_anthropic::AnthropicConnection| {
++            wickle_model_anthropic::AnthropicConnection::api_contract()
++        }
++    );
++    let mut bedrock = wickle_model_bedrock::BedrockOptions::new(
++        "us-east-1",
++        wickle_model_bedrock::BedrockSelector::Foundation("fixture-model".into()),
++    );
++    bedrock.endpoint_url = Some(origin.clone());
++    bedrock.metadata_url = Some(origin.clone());
++    add!(
++        wickle_model_bedrock::BedrockConnection::new(
++            scope.clone(),
++            reference("shared"),
++            Arc::new(wickle_model_bedrock::BedrockCredential::Bearer(
++                "fixture-key".into()
++            )),
++            bedrock
++        ),
++        wickle_model_bedrock::BedrockModel,
++        |c: &wickle_model_bedrock::BedrockConnection| c.api_contract()
++    );
++    add!(
++        wickle_model_gemini::GeminiConnection::new(
++            scope.clone(),
++            reference("shared"),
++            "fixture-key",
++            wickle_model_gemini::GeminiOptions {
++                base_url: origin.clone(),
++                api_version: "v1beta".into(),
++                ..Default::default()
++            }
++        ),
++        wickle_model_gemini::GeminiModel,
++        |c: &wickle_model_gemini::GeminiConnection| c.api_contract()
++    );
++    let mut vertex = wickle_model_vertex::VertexOptions::new("fixture-project");
++    vertex.endpoint_url = Some(origin.clone());
++    vertex.metadata_url = Some(origin.clone());
++    add!(
++        wickle_model_vertex::VertexConnection::new(
++            scope.clone(),
++            reference("shared"),
++            Arc::new(wickle_model_vertex::VertexToken::new(
++                "fixture-token",
++                None
++            )?),
++            vertex
++        ),
++        wickle_model_vertex::VertexModel,
++        |c: &wickle_model_vertex::VertexConnection| c.api_contract()
++    );
++    add!(
++        wickle_model_xai::XaiConnection::new(
++            scope.clone(),
++            reference("shared"),
++            "fixture-key",
++            wickle_model_xai::XaiOptions {
++                base_url: v1,
++                ..Default::default()
++            }
++        ),
++        wickle_model_xai::XaiModel,
++        |c: &wickle_model_xai::XaiConnection| c.api_contract()
++    );
++    let dispatcher = RegistryModelDispatcher::new(
++        providers
++            .iter()
++            .map(|(port, _)| ModelDispatcherEntry {
++                scope: scope.clone(),
++                port: port.clone(),
++            })
++            .collect(),
++    )?;
++    for (expected, request) in &providers {
++        let port = dispatcher.resolve(&scope, &request.route)?;
++        assert!(Arc::ptr_eq(&port, expected));
++        let mut foreign = scope.clone();
++        foreign.workspace_id = id("foreign");
++        assert_eq!(
++            dispatcher
++                .resolve(&foreign, &request.route)
++                .err()
++                .unwrap()
++                .code,
++            ErrorCode::ModelBindingInvalid
++        );
++        let mut missing = request.route.clone();
++        missing.connection_ref.version = id("missing");
++        assert_eq!(
++            dispatcher.resolve(&scope, &missing).err().unwrap().code,
++            ErrorCode::ModelBindingInvalid
++        );
++        let context = ModelCallContext {
++            attempt_id: request.request_id.clone(),
++            run_id: id("run"),
++            scope: foreign,
++            cancellation: Default::default(),
++            deadline: tokio::time::Instant::now() + Duration::from_secs(2),
++        };
++        let result = port.generate(request, &context).next().await.unwrap();
++        assert_eq!(result.unwrap_err().code, ErrorCode::AccessDenied);
++        let mut wrong = request.clone();
++        wrong.route.api_contract.version = id("unsupported");
++        let context = ModelCallContext {
++            scope: scope.clone(),
++            ..context
++        };
++        let result = port.generate(&wrong, &context).next().await.unwrap()?;
++        assert!(matches!(
++            result,
++            ModelEvent::ResponseError {
++                kind: ModelFailureKind::Unsupported,
++                ..
++            }
++        ));
++    }
++    assert!(matches!(listener.accept(),Err(error) if error.kind()==std::io::ErrorKind::WouldBlock));
++    println!(
++        "Model adapter conformance: all seven concrete providers share one dispatcher without binding collisions; foreign scopes, missing revisions and incompatible API contracts fail before network I/O (extracted packages, no provider calls)"
++    );
++    Ok(())
++}
+diff --git a/tests/support/xai_consumer.rs b/tests/support/xai_consumer.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..14ac048b8e575f047fa37dfc23bbd7b5ac18878e
+--- /dev/null
++++ b/tests/support/xai_consumer.rs
+@@ -0,0 +1,174 @@
++// Real loopback HTTP/SSE against the extracted xAI adapter package; no provider call.
++use serde_json::json;
++use std::time::Duration;
++use tokio::{
++    io::{AsyncReadExt, AsyncWriteExt},
++    net::TcpListener,
++};
++use wickle::*;
++use wickle_model_xai::*;
++fn id(value: &str) -> Id {
++    Id::new(value).expect("example identifier")
++}
++fn reference(value: &str) -> VersionedRef {
++    VersionedRef {
++        id: id(value),
++        version: id("1"),
++    }
++}
++#[tokio::main(flavor = "current_thread")]
++async fn main() -> Result<(), Box<dyn std::error::Error>> {
++    let listener = TcpListener::bind("127.0.0.1:0").await?;
++    let base = format!("http://{}/v1/", listener.local_addr()?);
++    let server = tokio::spawn(async move {
++        let (mut socket, _) = listener.accept().await.unwrap();
++        let mut bytes = vec![];
++        let (header_end, length) = loop {
++            let mut chunk = [0; 4096];
++            let size = socket.read(&mut chunk).await.unwrap();
++            assert!(size > 0);
++            bytes.extend_from_slice(&chunk[..size]);
++            assert!(bytes.len() < 65536);
++            if let Some(end) = bytes.windows(4).position(|s| s == b"\r\n\r\n") {
++                let headers = std::str::from_utf8(&bytes[..end])
++                    .unwrap()
++                    .to_ascii_lowercase();
++                let length = headers
++                    .lines()
++                    .find_map(|s| s.strip_prefix("content-length:"))
++                    .unwrap()
++                    .trim()
++                    .parse::<usize>()
++                    .unwrap();
++                break (end + 4, length);
++            }
++        };
++        while bytes.len() < header_end + length {
++            let mut chunk = [0; 4096];
++            let size = socket.read(&mut chunk).await.unwrap();
++            assert!(size > 0);
++            bytes.extend_from_slice(&chunk[..size]);
++        }
++        let headers = std::str::from_utf8(&bytes[..header_end])
++            .unwrap()
++            .to_ascii_lowercase();
++        assert!(headers.starts_with("post /v1/responses "));
++        assert!(headers.contains("authorization: bearer fixture-key"));
++        let body =
++            parse_json(std::str::from_utf8(&bytes[header_end..header_end + length]).unwrap())
++                .unwrap();
++        assert_eq!(body["model"], "fixture-model");
++        assert_eq!(body["stream"], true);
++        assert_eq!(body["store"], false);
++        assert_eq!(body["reasoning"]["effort"], "medium");
++        assert_eq!(body["text"]["format"]["strict"], true);
++        assert!(!body.to_string().contains("private-workspace"));
++        assert!(!body.to_string().contains("fixture-key"));
++        let item = json!({"id":"message","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"{\"answer\":42}","annotations":[]}]});
++        let reasoning = json!({"id":"","type":"reasoning","summary":[],"encrypted_content":"ciphertext-fixture"});
++        let events = vec![
++            json!({"type":"response.created","response":{"id":"response","model":"fixture-model","status":"in_progress"}}),
++            json!({"type":"response.output_item.added","output_index":0,"item":{"id":"message","type":"message","role":"assistant","content":[]}}),
++            json!({"type":"response.output_text.delta","output_index":0,"content_index":0,"item_id":"message","delta":"{\"answer\":42}"}),
++            json!({"type":"response.output_item.done","output_index":0,"item":item}),
++            json!({"type":"response.output_item.added","output_index":1,"item":{"id":"","type":"reasoning","summary":[]}}),
++            json!({"type":"response.output_item.done","output_index":1,"item":reasoning}),
++            json!({"type":"response.completed","response":{"id":"response","model":"fixture-model","status":"completed","output":[item,reasoning],"usage":{"prompt_tokens":12,"completion_tokens":5,"completion_tokens_details":{"reasoning_tokens":3},"total_tokens":20}}}),
++        ];
++        let wire: String = events
++            .into_iter()
++            .map(|value| format!("data: {value}\n\n"))
++            .collect();
++        socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",wire.len()).as_bytes()).await.unwrap();
++        for chunk in wire.as_bytes().chunks(5) {
++            socket.write_all(chunk).await.unwrap();
++            tokio::task::yield_now().await;
++        }
++        socket.shutdown().await.unwrap();
++    });
++    let scope = Scope {
++        tenant_id: id("tenant"),
++        workspace_id: id("private-workspace"),
++        user_id: None,
++    };
++    let connection = XaiConnection::new(
++        scope.clone(),
++        reference("account"),
++        "fixture-key",
++        XaiOptions {
++            base_url: base,
++            ..Default::default()
++        },
++    )?;
++    let binding = connection.binding();
++    let model = XaiModel::new(connection.clone());
++    let request = ModelRequest {
++        request_id: id("attempt"),
++        purpose: ModelPurpose::Agent,
++        route: ResolvedModelRoute {
++            binding: reference("model"),
++            catalog_revision: id("catalog"),
++            routing_policy_revision: id("policy"),
++            requested_model: id("fixture-model"),
++            model_id: id("fixture-model"),
++            model_version: id("release"),
++            version_semantics: VersionSemantics::Unverified,
++            provider: binding.provider,
++            target: connection.target().clone(),
++            deployment_revision: None,
++            api_contract: connection.api_contract(),
++            adapter: binding.adapter,
++            capability_revision: id("caps"),
++            connection_ref: binding.connection_ref,
++        },
++        messages: vec![ModelMessage {
++            role: ModelRole::User,
++            content: vec![ModelContent::Text {
++                text: "Return the fixture answer.".into(),
++            }],
++        }],
++        tools: vec![],
++        output: ModelOutput::JsonSchema {
++            schema: json!({"type":"object","properties":{"answer":{"type":"integer"}},"required":["answer"],"additionalProperties":false}),
++        },
++        max_output_tokens: 128.try_into()?,
++        options: JsonObject::from([("reasoning_effort".into(), json!("medium"))]),
++        limits: ModelResponseLimits {
++            max_input_bytes: 32768,
++            max_response_bytes: 32768,
++            max_delta_bytes: 128,
++            max_events: 64,
++            max_tool_calls: 0,
++        },
++    };
++    let context = ModelCallContext {
++        attempt_id: request.request_id.clone(),
++        run_id: id("run"),
++        scope,
++        cancellation: Default::default(),
++        deadline: tokio::time::Instant::now() + Duration::from_secs(10),
++    };
++    let response = collect_model_response(&request, model.generate(&request, &context)).await?;
++    assert_eq!(parse_json(&response.text)?, json!({"answer":42}));
++    assert_eq!(response.finish, ModelFinish::Stop);
++    assert_eq!(
++        response.metadata.reported_model_id,
++        Some(id("fixture-model"))
++    );
++    assert!(response.metadata.reported_model_version.is_none());
++    assert_eq!(
++        response
++            .metadata
++            .usage
++            .as_ref()
++            .and_then(|u| u.output_tokens),
++        Some(8)
++    );
++    assert_eq!(response.continuation[0].data()["items"][1]["id"], "");
++    assert_eq!(response.continuation[0].data()["items"][1]["encrypted_content"], "ciphertext-fixture");
++    server.await?;
++    println!(
++        "xAI consumer: extracted adapter performs one HTTP/SSE request, preserves scoped endpoint identity and options, decodes JSON and reasoning-inclusive legacy usage, and excludes Host context from the wire (local fixture, no provider network)"
++    );
++    Ok(())
++}

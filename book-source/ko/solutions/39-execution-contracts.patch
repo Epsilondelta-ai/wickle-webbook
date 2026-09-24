@@ -1,0 +1,1073 @@
+diff --git a/crates/wickle-mcp/tests/support/binding.rs b/crates/wickle-mcp/tests/support/binding.rs
+index 2b106f81f1ec16fef9998ea8d60b0c62348468b4..fcf7cd236f1437874d7413809db3e2efcacb6ff4 100644
+--- a/crates/wickle-mcp/tests/support/binding.rs
++++ b/crates/wickle-mcp/tests/support/binding.rs
+@@ -119,6 +119,7 @@ pub async fn bound_arguments(
+         }],
+         trigger: RunTrigger::User {},
+         model_options: JsonObject::new(),
++        max_output_tokens: None,
+         output_contract: None,
+     };
+     let request_record =
+diff --git a/crates/wickle/src/agent/admission.rs b/crates/wickle/src/agent/admission.rs
+index f375faf8e91595a43c6c0d25fdf29197428b3cd9..388ad42bede6512ab68dc5eef94a9c1430005558 100644
+--- a/crates/wickle/src/agent/admission.rs
++++ b/crates/wickle/src/agent/admission.rs
+@@ -8,6 +8,14 @@ impl Agent {
+         context: ExecutionContext,
+     ) -> Result<Guarded<RunHandle>, ContractError> {
+         self.check_scope(&context)?;
++        // The request contract exists before its purpose-specific routing integration.
++        // Never silently accept an output cap that this driver cannot yet enforce.
++        if request.max_output_tokens.is_some() {
++            return Err(fail(
++                ErrorCode::CapabilityUnsupported,
++                "agent.request_output_cap",
++            ));
++        }
+         let bindings = &self.inner.bindings;
+         if serde_json::to_vec(&request)
+             .map_err(|_| fail(ErrorCode::InvalidJson, "agent.request"))?
+diff --git a/crates/wickle/src/execution_contracts.rs b/crates/wickle/src/execution_contracts.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..3c66c15c2a42d771c5cf160ee3fe7a2a017e543e
+--- /dev/null
++++ b/crates/wickle/src/execution_contracts.rs
+@@ -0,0 +1,436 @@
++//! Persistable execution contracts. Transaction implementations and driver
++//! integration use these records; declarations alone do not enable recovery.
++use crate::{
++    CanonicalizationVersion, ContractError, ErrorCode, Id, JsonDigest, JsonObject, JsonTextLimits,
++    PortFuture, RecordRef, ResumeCommand, RunLease, RunOutcome, Scope, StoredRun, VersionedRef,
++    canonicalize_json_text, versioned_digest_json,
++};
++use serde::{Deserialize, Serialize};
++use std::{fmt, num::NonZeroU64};
++
++/// Version of protected segment and prepared-step records.
++#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
++pub enum ExecutionRecordVersion {
++    /// First execution-record contract; stored independently of legacy Run checkpoints.
++    #[serde(rename = "wickle.execution-record.v1")]
++    V1,
++}
++
++/// Original submitted data, kept separate from resolved defaults and runtime handles.
++#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct RequestSnapshot {
++    schema_version: RequestSnapshotVersion,
++    canonicalization: CanonicalizationVersion,
++    /// Original submitted profile identity, not a newly resolved definition.
++    pub profile_ref: VersionedRef,
++    request_json: String,
++    system_inputs_json: String,
++    system_inputs_provided: bool,
++    digest: JsonDigest,
++}
++#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
++enum RequestSnapshotVersion {
++    #[serde(rename = "wickle.request-snapshot.v1")]
++    V1,
++}
++impl fmt::Debug for RequestSnapshot {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_struct("RequestSnapshot")
++            .field("canonicalization", &self.canonicalization)
++            .field("digest", &self.digest)
++            .finish_non_exhaustive()
++    }
++}
++impl RequestSnapshot {
++    /// Capture validated caller JSON without resolving a catalog or binding.
++    /// Start's absent system inputs become an empty object. Empty/omitted model options are normalized identically; other submitted
++    /// fields retain their explicit presence. Request schema/authorization are the
++    /// admission boundary's responsibility; capture alone does not admit a Run.
++    pub fn capture(
++        profile_ref: VersionedRef,
++        request_json: &str,
++        system_inputs_json: Option<&str>,
++        limits: JsonTextLimits,
++    ) -> Result<Self, ContractError> {
++        let system_inputs_provided = system_inputs_json.is_some();
++        let request = canonicalize_json_text(request_json, limits)?;
++        let system = canonicalize_json_text(system_inputs_json.unwrap_or("{}"), limits)?;
++        if request.first() != Some(&b'{') || system.first() != Some(&b'{') {
++            return Err(ContractError::new(
++                ErrorCode::InvalidContract,
++                "request_snapshot.object",
++            ));
++        }
++        let request_json = String::from_utf8(request)
++            .map_err(|_| ContractError::new(ErrorCode::InvalidJson, "request_snapshot"))?;
++        let system_inputs_json = String::from_utf8(system)
++            .map_err(|_| ContractError::new(ErrorCode::InvalidJson, "request_snapshot"))?;
++        let canonicalization = CanonicalizationVersion::WickleCanonicalJsonV1;
++        let digest = Self::compute(
++            &profile_ref,
++            &request_json,
++            &system_inputs_json,
++            canonicalization,
++            limits,
++        )?;
++        Ok(Self {
++            schema_version: RequestSnapshotVersion::V1,
++            canonicalization,
++            profile_ref,
++            request_json,
++            system_inputs_json,
++            system_inputs_provided,
++            digest,
++        })
++    }
++    fn compute(
++        profile: &VersionedRef,
++        request: &str,
++        system: &str,
++        version: CanonicalizationVersion,
++        limits: JsonTextLimits,
++    ) -> Result<JsonDigest, ContractError> {
++        // Omitted and empty model option maps are the same submitted override.
++        // RawValue keeps nested numeric tokens intact while removing only that key.
++        let mut fields: std::collections::BTreeMap<String, Box<serde_json::value::RawValue>> =
++            serde_json::from_str(request).map_err(|_| {
++                ContractError::new(ErrorCode::InvalidJson, "request_snapshot.request")
++            })?;
++        if let Some(options) = fields.get("model_options") {
++            if !options.get().starts_with('{') {
++                return Err(ContractError::new(
++                    ErrorCode::InvalidContract,
++                    "request_snapshot.model_options",
++                ));
++            }
++            if options.get() == "{}" {
++                fields.remove("model_options");
++            }
++        }
++        let request = serde_json::to_string(&fields)
++            .map_err(|_| ContractError::new(ErrorCode::InvalidJson, "request_snapshot.request"))?;
++        let profile = serde_json::to_string(profile)
++            .map_err(|_| ContractError::new(ErrorCode::InvalidJson, "request_snapshot.profile"))?;
++        let envelope = format!(
++            "{{\"profile_ref\":{profile},\"request\":{request},\"system_inputs\":{system}}}"
++        );
++        versioned_digest_json(&envelope, version, limits)
++    }
++    /// Validate a stored record before comparison. Never trust a supplied digest.
++    pub fn validate(&self, limits: JsonTextLimits) -> Result<(), ContractError> {
++        let request = canonicalize_json_text(&self.request_json, limits)?;
++        let system = canonicalize_json_text(&self.system_inputs_json, limits)?;
++        if request.first() != Some(&b'{')
++            || system.first() != Some(&b'{')
++            || (!self.system_inputs_provided && system != b"{}")
++            || Self::compute(
++                &self.profile_ref,
++                &self.request_json,
++                &self.system_inputs_json,
++                self.canonicalization,
++                limits,
++            )? != self.digest
++        {
++            return Err(ContractError::new(
++                ErrorCode::InvalidSnapshot,
++                "request_snapshot",
++            ));
++        }
++        Ok(())
++    }
++    /// Version that must be used when comparing a resubmission.
++    pub fn canonicalization(&self) -> CanonicalizationVersion {
++        self.canonicalization
++    }
++    /// Digest of the submitted profile, request and system input envelope.
++    pub fn digest(&self) -> &JsonDigest {
++        &self.digest
++    }
++    /// Privileged access to the submitted request JSON, retaining number lexemes.
++    pub fn request_json(&self) -> &str {
++        &self.request_json
++    }
++    /// Whether Start explicitly supplied system inputs. Omission still hashes as {}.
++    pub fn system_inputs_provided(&self) -> bool {
++        self.system_inputs_provided
++    }
++    /// Privileged access to protected system inputs. Never include in model context.
++    pub fn system_inputs_json(&self) -> &str {
++        &self.system_inputs_json
++    }
++}
++
++/// Application-defined state, distinct from core execution status.
++#[derive(Clone, PartialEq, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct AppState {
++    /// Registered Host schema namespace.
++    pub namespace: Id,
++    /// Host-defined business status.
++    pub status: Id,
++    /// Validated against the registered Host schema before persistence.
++    pub metadata: JsonObject,
++}
++impl fmt::Debug for AppState {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_struct("AppState")
++            .field("namespace", &self.namespace)
++            .field("status", &self.status)
++            .finish_non_exhaustive()
++    }
++}
++/// Why a segment stopped; protected causes cannot be overridden by app policy.
++#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(rename_all = "snake_case")]
++pub enum InterruptionCause {
++    /// Host is shutting down or handing ownership off.
++    HostShutdown,
++    /// Segment stop without a durable user cancellation.
++    SegmentStopped,
++    /// Explicit user cancellation.
++    UserCancel,
++    /// Run budget or deadline exhausted.
++    BudgetExhausted,
++    /// Ownership/fencing no longer valid.
++    OwnershipLost,
++    /// Snapshot cannot safely be recovered.
++    RecoveryUnavailable,
++}
++/// Persisted evidence of a stopped execution segment.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct InterruptionRecord {
++    /// Segment whose execution stopped.
++    pub segment_id: Id,
++    /// Classified cause, not inferred from observer disconnection.
++    pub cause: InterruptionCause,
++    /// Last confirmed checkpoint revision.
++    pub checkpoint_revision: u64,
++    /// Whether a valid saved recovery path exists.
++    pub recoverable: bool,
++    /// Existing uncertain effects; policy must not remove these.
++    pub unresolved_effects: Vec<RecordRef>,
++}
++/// Outcome for a particular segment. Resuming creates a different record.
++#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
++#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
++pub enum SegmentOutcome {
++    /// Existing waiting or terminal outcome.
++    Settled {
++        /// Saved authoritative outcome.
++        outcome: Box<RunOutcome>,
++    },
++    /// Recoverable stop, not a terminal Run outcome.
++    Interrupted {
++        /// Stop/recovery evidence.
++        interruption: InterruptionRecord,
++    },
++}
++/// Immutable identity and result of one accepted execution interval.
++#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct ExecutionSegment {
++    /// Explicit protected-record schema version.
++    pub schema_version: ExecutionRecordVersion,
++    /// Original execution principal; a reviewer/control submitter cannot replace it.
++    pub execution_principal_ref: Id,
++    /// Run that owns this segment.
++    pub run_id: Id,
++    /// Never reused when the Run is resumed.
++    pub segment_id: Id,
++    /// Revision at acceptance.
++    pub accepted_revision: u64,
++    /// Present after waiting, interruption or terminal settlement.
++    pub outcome: Option<SegmentOutcome>,
++    /// App state snapshot at settlement; never defines core status.
++    pub app_state: Option<AppState>,
++}
++/// Frozen prepared-model inputs. References belong to the same authorized scope.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct PreparedStepRecord {
++    /// Explicit protected-record schema version.
++    pub schema_version: ExecutionRecordVersion,
++    /// Agent, verification or compaction invocation budget/policy purpose.
++    pub purpose: crate::ModelPurpose,
++    /// Protected compiled-provider contract records for this exact projection.
++    pub compiled_tools: Vec<RecordRef>,
++    /// Logical model step identity.
++    pub model_step_id: Id,
++    /// Changes when the model input changes, not on identical transport retries.
++    pub projection_revision: NonZeroU64,
++    /// Pinned route, effective options and their provenance.
++    pub model_configuration: RecordRef,
++    /// Pinned canonical tool set and compiled provider contracts.
++    pub tool_set: RecordRef,
++    /// Persisted assembled prompt/input projection.
++    pub context_projection: RecordRef,
++    /// Compiler and assembler contract identity.
++    pub assembler: VersionedRef,
++}
++/// A durable control request. Submission is not a completed state transition.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
++pub enum ControlAction {
++    /// Permanently cancel a Run, preserving known/unknown effects.
++    Cancel {
++        /// Auditable reason identifier.
++        reason: Id,
++    },
++    /// Stop the active segment without declaring Run success.
++    Stop {
++        /// Why the Host stopped execution.
++        cause: InterruptionCause,
++    },
++    /// Explicitly process a Run deadline that has elapsed.
++    Expire,
++}
++/// Deduplicated control command, authenticated by the Host before submission.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct ControlCommand {
++    /// Stable command identity within a Run.
++    pub command_id: Id,
++    /// Requesting principal, distinct from the original execution principal.
++    pub principal_ref: Id,
++    /// Authorized action.
++    pub action: ControlAction,
++}
++/// Why a transaction creates or claims a segment.
++#[derive(Debug, Clone)]
++pub enum SegmentStart {
++    /// Claim the segment already identified by admission.
++    Initial,
++    /// Consume a matching approval/input/recovery command.
++    Resume(ResumeCommand),
++    /// Consume an already persisted control command, without model/tool execution.
++    Control(Id),
++}
++/// Inputs for atomic command consumption, lease acquisition and segment creation.
++#[derive(Debug, Clone)]
++pub struct BeginSegmentRequest {
++    /// Owning Run.
++    pub run_id: Id,
++    /// CAS revision before this transaction.
++    pub expected_revision: u64,
++    /// Proposed new segment ID (initial claims use admission's ID).
++    pub segment_id: Id,
++    /// New execution owner.
++    pub owner: Id,
++    /// Trusted clock value.
++    pub now_ms: i64,
++    /// Bounded positive ownership TTL.
++    pub lease_ttl_ms: NonZeroU64,
++    /// Command or initial admission claim.
++    pub start: SegmentStart,
++}
++/// Result of atomic segment acceptance; replay must not launch another driver.
++#[derive(Clone)]
++pub struct BeginSegmentResult {
++    /// Saved execution state.
++    pub state: StoredRun,
++    /// Accepted or previously accepted segment.
++    pub segment: ExecutionSegment,
++    /// Only a new owner receives a lease. Replays have None.
++    pub lease: Option<RunLease>,
++}
++/// Acknowledgment of durable command acceptance, not execution completion.
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub struct ControlReceipt {
++    /// Owning Run.
++    pub run_id: Id,
++    /// Deduplicated command.
++    pub command_id: Id,
++    /// Segment that processed it, if already consumed.
++    pub processed_segment_id: Option<Id>,
++}
++/// Atomic operations that storage implementations must supply before the new
++/// segment driver can be enabled. No default read/then/write emulation is safe.
++/// StateStore integration requires the same transaction as its snapshot/events.
++pub trait ExecutionTransactions: Send + Sync {
++    /// Atomically deduplicate/consume the command, check CAS and allocate ownership.
++    fn begin_segment<'a>(
++        &'a self,
++        scope: &'a Scope,
++        request: BeginSegmentRequest,
++    ) -> PortFuture<'a, BeginSegmentResult>;
++    /// Atomically persist a command ID and payload; conflicting reuse is rejected.
++    fn submit_control_command<'a>(
++        &'a self,
++        scope: &'a Scope,
++        run_id: &'a Id,
++        command: ControlCommand,
++    ) -> PortFuture<'a, ControlReceipt>;
++}
++
++/// Allowed callback proposals. None may declare success or overwrite effect evidence.
++#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(rename_all = "snake_case")]
++pub enum InterruptionAction {
++    /// Use the core's cause-specific default.
++    UseDefault,
++    /// Save a recoverable interrupted segment when the core permits it.
++    Pause,
++    /// Cancel when the cause permits this transition.
++    Cancel,
++    /// Fail when the cause permits this transition.
++    Fail,
++}
++/// Limited immutable data exposed to the application interruption policy.
++#[derive(Debug, Clone)]
++pub struct InterruptionInfo {
++    /// Resource scope; this does not grant authorization.
++    pub scope: Scope,
++    /// Stopped Run identity.
++    pub run_id: Id,
++    /// Fixed interruption evidence.
++    pub interruption: InterruptionRecord,
++    /// Current app state without mutable access to the Run.
++    pub app_state: Option<AppState>,
++}
++/// Policy result; core validation and persistence remain mandatory.
++#[derive(Debug, Clone)]
++pub struct InterruptionDecision {
++    /// Suggested transition.
++    pub action: InterruptionAction,
++    /// Optional Host-schema-validated business state.
++    pub app_state: Option<AppState>,
++}
++/// A versioned application policy with no state-store or tool execution handle.
++pub trait InterruptionPolicy: Send + Sync {
++    /// Immutable identity pinned at admission.
++    fn identity(&self) -> VersionedRef;
++    /// Cooperatively compute a proposal. The driver owns timeout and fallback.
++    fn decide<'a>(&'a self, info: &'a InterruptionInfo) -> PortFuture<'a, InterruptionDecision>;
++}
++
++impl ExecutionSegment {
++    /// Check structural settlement invariants before persistence; authorization,
++    /// Host app-state schema and atomic ledger transitions remain store/driver checks.
++    pub fn validate(&self) -> Result<(), ContractError> {
++        let invalid = || ContractError::new(ErrorCode::InvalidSnapshot, "execution_segment");
++        match &self.outcome {
++            Some(SegmentOutcome::Settled { outcome }) => {
++                outcome.validate()?;
++                if outcome.checkpoint_revision < self.accepted_revision {
++                    return Err(invalid());
++                }
++            }
++            Some(SegmentOutcome::Interrupted { interruption })
++                if interruption.segment_id != self.segment_id
++                    || interruption.checkpoint_revision < self.accepted_revision
++                    || !interruption.recoverable
++                    || !matches!(
++                        interruption.cause,
++                        InterruptionCause::HostShutdown | InterruptionCause::SegmentStopped
++                    ) =>
++            {
++                return Err(invalid());
++            }
++            Some(SegmentOutcome::Interrupted { .. }) => {}
++            None => {}
++        }
++        Ok(())
++    }
++}
+diff --git a/crates/wickle/src/lib.rs b/crates/wickle/src/lib.rs
+index ca124c90d02650d27455f535e6057f321e7d02da..673b62c86e276d325ea7200fb4d474cd2b7d08c9 100644
+--- a/crates/wickle/src/lib.rs
++++ b/crates/wickle/src/lib.rs
+@@ -16,6 +16,14 @@ mod agent;
+ mod artifacts;
+ mod budget;
+ mod canonical;
++mod execution_contracts;
++pub use execution_contracts::{
++    AppState, BeginSegmentRequest, BeginSegmentResult, ControlAction, ControlCommand,
++    ControlReceipt, ExecutionRecordVersion, ExecutionSegment, ExecutionTransactions,
++    InterruptionAction, InterruptionCause, InterruptionDecision, InterruptionInfo,
++    InterruptionPolicy, InterruptionRecord, PreparedStepRecord, RequestSnapshot, SegmentOutcome,
++    SegmentStart,
++};
+ mod clock;
+ mod component_runtime;
+ mod context;
+diff --git a/crates/wickle/src/run.rs b/crates/wickle/src/run.rs
+index ea8e958a5df52675fe27a39362fe9d933788a731..404ce6333cf6e02511032e9144ec5cedc914f704 100644
+--- a/crates/wickle/src/run.rs
++++ b/crates/wickle/src/run.rs
+@@ -79,6 +79,13 @@ pub struct RunRequest {
+     /// Catalog schemas define supported keys; credentials and raw provider bodies do not belong here.
+     #[serde(default, skip_serializing_if = "JsonObject::is_empty")]
+     pub model_options: JsonObject,
++    /// Requested per-model output cap; positive, authorized and bounded by Host/profile/model limits.
++    #[serde(
++        default,
++        deserialize_with = "optional",
++        skip_serializing_if = "Option::is_none"
++    )]
++    pub max_output_tokens: Option<NonZeroU64>,
+     /// Optional output override; Host policy must authorize its use.
+     #[serde(
+         default,
+@@ -271,6 +278,8 @@ pub enum RunStatus {
+     Running,
+     /// Persisted wait.
+     Waiting,
++    /// Saved nonterminal segment interruption; requires the new execution contract.
++    Interrupted,
+     /// Completion policy satisfied.
+     Succeeded,
+     /// Unrecoverable failure.
+@@ -284,7 +293,7 @@ pub enum RunStatus {
+ impl RunStatus {
+     /// Whether this status cannot be resumed as the same run.
+     pub fn is_terminal(self) -> bool {
+-        !matches!(self, Self::Running | Self::Waiting)
++        !matches!(self, Self::Running | Self::Waiting | Self::Interrupted)
+     }
+ }
+ 
+@@ -772,6 +781,11 @@ impl RunSnapshot {
+     /// Check static checkpoint invariants without performing recovery or authorization.
+     pub fn validate(&self) -> Result<(), ContractError> {
+         let invalid = |path| ContractError::new(ErrorCode::InvalidSnapshot, path);
++        // Version-one checkpoints lack the required interruption/segment record.
++        // Never accept a fabricated interrupted state via the legacy decoder.
++        if self.status == RunStatus::Interrupted {
++            return Err(invalid("interrupted.requires_execution_checkpoint"));
++        }
+         crate::budget::validate_budget(self)?;
+         if &self.scope != self.profile.scope()
+             || self.request_digest
+diff --git a/crates/wickle/tests/context_projection.rs b/crates/wickle/tests/context_projection.rs
+index 3a62a67a754ac84cebbcde7269f3856c0be14c98..ba9fdc9f68be51142598e10493ab430a4e4f91d9 100644
+--- a/crates/wickle/tests/context_projection.rs
++++ b/crates/wickle/tests/context_projection.rs
+@@ -172,6 +172,7 @@ impl Fixture {
+                 }],
+                 trigger: RunTrigger::User {},
+                 model_options: JsonObject::new(),
++                max_output_tokens: None,
+                 output_contract: None,
+             },
+             run_id: id("current-run"),
+diff --git a/crates/wickle/tests/contracts.rs b/crates/wickle/tests/contracts.rs
+index aacd86aea9a77675d0b8269e5093dab024887d32..580819b486cb081b0d7cdd6220fdebaebdcd0079 100644
+--- a/crates/wickle/tests/contracts.rs
++++ b/crates/wickle/tests/contracts.rs
+@@ -692,6 +692,7 @@ fn request() -> RunRequest {
+         }],
+         trigger: RunTrigger::User {},
+         model_options: JsonObject::new(),
++        max_output_tokens: None,
+         output_contract: None,
+     }
+ }
+@@ -1192,3 +1193,14 @@ fn route_roundtrip_keeps_model_api_deployment_and_adapter_versions_distinct() {
+     assert_eq!(restored.reported_model_version, None);
+     assert_eq!(restored.usage, None);
+ }
++
++#[tokio::test]
++async fn legacy_checkpoint_cannot_claim_interrupted_without_execution_evidence() {
++    let mut saved = checkpoint().await;
++    saved.validate().unwrap();
++    saved.status = RunStatus::Interrupted;
++    assert_eq!(
++        saved.validate().unwrap_err().code,
++        ErrorCode::InvalidSnapshot
++    );
++}
+diff --git a/crates/wickle/tests/execution_contracts.rs b/crates/wickle/tests/execution_contracts.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..7e8dc1a60d2f1d334d1fc21ddc93623a44419130
+--- /dev/null
++++ b/crates/wickle/tests/execution_contracts.rs
+@@ -0,0 +1,138 @@
++//! Execution-record invariants at the persistence boundary.
++use serde_json::json;
++use wickle::*;
++fn id(s: &str) -> Id {
++    Id::new(s).unwrap()
++}
++fn profile() -> VersionedRef {
++    VersionedRef {
++        id: id("agent"),
++        version: id("1"),
++    }
++}
++#[test]
++fn submitted_snapshot_preserves_exact_numbers_and_normalizes_only_empty_overrides() {
++    let a = RequestSnapshot::capture(
++        profile(),
++        r#"{"model_options":{},"input":184467440737095516160001}"#,
++        None,
++        JsonTextLimits::default(),
++    )
++    .unwrap();
++    let b = RequestSnapshot::capture(
++        profile(),
++        r#"{"input":184467440737095516160001}"#,
++        Some("{}"),
++        JsonTextLimits::default(),
++    )
++    .unwrap();
++    assert_eq!(a.digest(), b.digest());
++    assert!(!a.system_inputs_provided());
++    assert!(b.system_inputs_provided());
++    let restored: RequestSnapshot =
++        serde_json::from_str(&serde_json::to_string(&a).unwrap()).unwrap();
++    restored.validate(JsonTextLimits::default()).unwrap();
++    assert_eq!(
++        restored.request_json(),
++        r#"{"input":184467440737095516160001,"model_options":{}}"#
++    );
++    let other = RequestSnapshot::capture(
++        profile(),
++        r#"{"input":184467440737095516160002}"#,
++        None,
++        JsonTextLimits::default(),
++    )
++    .unwrap();
++    assert_ne!(a.digest(), other.digest());
++    assert!(
++        RequestSnapshot::capture(
++            profile(),
++            r#"{"model_options":null}"#,
++            None,
++            JsonTextLimits::default()
++        )
++        .is_err()
++    );
++    assert!(
++        RequestSnapshot::capture(profile(), "{}", Some("null"), JsonTextLimits::default()).is_err()
++    );
++}
++#[test]
++fn snapshots_reject_tampering_and_debug_omits_protected_values() {
++    let a = RequestSnapshot::capture(
++        profile(),
++        "{}",
++        Some(r#"{"workspace_id":"private-workspace-uuid"}"#),
++        JsonTextLimits::default(),
++    )
++    .unwrap();
++    assert!(!format!("{a:?}").contains("private-workspace-uuid"));
++    let mut changed = serde_json::to_value(a).unwrap();
++    changed["system_inputs_json"] = json!("{}");
++    let b: RequestSnapshot = serde_json::from_value(changed.clone()).unwrap();
++    assert!(b.validate(JsonTextLimits::default()).is_err());
++    changed["schema_version"] = json!("future");
++    assert!(serde_json::from_value::<RequestSnapshot>(changed).is_err());
++}
++#[test]
++fn interrupted_segments_require_matching_recoverable_evidence() {
++    let mut segment = ExecutionSegment {
++        schema_version: ExecutionRecordVersion::V1,
++        execution_principal_ref: id("original-user"),
++        run_id: id("run"),
++        segment_id: id("segment"),
++        accepted_revision: 4,
++        app_state: None,
++        outcome: Some(SegmentOutcome::Interrupted {
++            interruption: InterruptionRecord {
++                segment_id: id("segment"),
++                cause: InterruptionCause::HostShutdown,
++                checkpoint_revision: 5,
++                recoverable: true,
++                unresolved_effects: vec![],
++            },
++        }),
++    };
++    segment.validate().unwrap();
++    let saved = serde_json::to_string(&segment).unwrap();
++    let replay: ExecutionSegment = serde_json::from_str(&saved).unwrap();
++    replay.validate().unwrap();
++    assert_eq!(segment, replay);
++    if let Some(SegmentOutcome::Interrupted { interruption }) = &mut segment.outcome {
++        interruption.cause = InterruptionCause::UserCancel;
++    }
++    assert!(segment.validate().is_err());
++    if let Some(SegmentOutcome::Interrupted { interruption }) = &mut segment.outcome {
++        interruption.cause = InterruptionCause::HostShutdown;
++        interruption.segment_id = id("other");
++    }
++    assert!(segment.validate().is_err());
++    assert!(!RunStatus::Interrupted.is_terminal());
++}
++#[test]
++fn output_cap_preserves_omission_and_rejects_null_zero_or_fraction() {
++    let base = json!({"request_id":"r","session_id":"s","input":[],"trigger":{"kind":"user"}});
++    let original = RunRequest::from_json(&base.to_string()).unwrap();
++    assert!(original.max_output_tokens.is_none());
++    assert!(
++        serde_json::to_value(original)
++            .unwrap()
++            .get("max_output_tokens")
++            .is_none()
++    );
++    for cap in [json!(null), json!(0), json!(-1), json!(1.5)] {
++        let mut input = base.clone();
++        input["max_output_tokens"] = cap;
++        assert!(RunRequest::from_json(&input.to_string()).is_err());
++    }
++    let mut input = base;
++    input["max_output_tokens"] = json!(42);
++    assert_eq!(
++        RunRequest::from_json(&input.to_string())
++            .unwrap()
++            .max_output_tokens
++            .unwrap()
++            .get(),
++        42
++    );
++}
+diff --git a/crates/wickle/tests/policy.rs b/crates/wickle/tests/policy.rs
+index 1284d63aef6e5696d930711dca7e671a2499c1a5..4255ba40ebb1f6af90af2c49c51b9253fa1e6e86 100644
+--- a/crates/wickle/tests/policy.rs
++++ b/crates/wickle/tests/policy.rs
+@@ -685,6 +685,7 @@ async fn snapshot() -> RunSnapshot {
+         }],
+         trigger: RunTrigger::User {},
+         model_options: JsonObject::new(),
++        max_output_tokens: None,
+         output_contract: None,
+     };
+     let system_inputs = Some(SystemInputSnapshotRef {
+diff --git a/crates/wickle/tests/support/agent.rs b/crates/wickle/tests/support/agent.rs
+index 07c242750f83859999f05b09c88182bdc7d9e66a..9e282ca3db73daeff2dfd71e2937ada0730fc81d 100644
+--- a/crates/wickle/tests/support/agent.rs
++++ b/crates/wickle/tests/support/agent.rs
+@@ -47,6 +47,7 @@ pub fn request(name: &str) -> RunRequest {
+         }],
+         trigger: RunTrigger::User {},
+         model_options: JsonObject::new(),
++        max_output_tokens: None,
+         output_contract: None,
+     }
+ }
+diff --git a/crates/wickle/tests/support/mod.rs b/crates/wickle/tests/support/mod.rs
+index 462a691960eb64e6c59720172754483eeacf2673..d9fb36803c0a84202708bccfebe795869e63960e 100644
+--- a/crates/wickle/tests/support/mod.rs
++++ b/crates/wickle/tests/support/mod.rs
+@@ -88,6 +88,7 @@ pub async fn admission(
+         input: vec![InputContent::Text { text: text.into() }],
+         trigger: RunTrigger::User {},
+         model_options: JsonObject::new(),
++        max_output_tokens: None,
+         output_contract: None,
+     };
+     let request_record = ProtectedRecord::new(
+diff --git a/docs/contracts.md b/docs/contracts.md
+index 306bbcacdb2b0d7bd2d2095aad3002314ed94459..afc5d4651bb568db2e008820352dc8f7d4e9edbb 100644
+--- a/docs/contracts.md
++++ b/docs/contracts.md
+@@ -205,3 +205,5 @@ These text-boundary functions do not change existing profile or checkpoint
+ encodings. Runtime adoption and stored-data migration require an explicit
+ versioned contract. They also cannot detect whether a caller previously converted
+ a nonfinite native float into JSON null: validate native values before encoding.
++
++See [execution record contracts](execution-records.md) for submitted snapshots, segment outcomes and atomic storage Port contracts.
+diff --git a/docs/execution-records.md b/docs/execution-records.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..ee0431d833ca6e6d69ec086853746729ab06a5a4
+--- /dev/null
++++ b/docs/execution-records.md
+@@ -0,0 +1,46 @@
++# Execution record contracts
++
++The execution-record types separate submitted input, resolved model preparation,
++execution ownership, and application business state. They are contracts for the
++next storage/driver integration; their presence does not enable interruption or
++new resume behavior in the existing driver.
++
++`RequestSnapshot::capture` stores JSON text without rounding its number tokens.
++The profile reference and protected system inputs participate in its digest.
++Explicit empty model options and omitted model options compare equally, as do
++absent and empty system inputs on Start. Original field presence and an explicit
++system-input presence flag remain available in the snapshot. Null model options
++or null system inputs are not empty objects. All other submitted fields retain
++their explicit presence. The request-snapshot schema version fixes these
++normalization rules; the canonicalization version selects the JSON encoding.
++
++Call `validate` on decoded records before comparison. Request schema validation
++and current authorization are still required at admission; capture is not a Run
++start operation. `Debug` omits the request and system input payloads. Only trusted
++storage/Host code should read their accessors.
++
++`ExecutionSegment` identifies an accepted interval and its saved outcome.
++`SegmentOutcome::Interrupted` requires matching, recoverable interruption evidence;
++user cancellation and ownership loss cannot be represented as a recoverable pause.
++`AppState` carries a Host namespace, business status and metadata; it cannot replace
++core status. Validate metadata with the pinned Host schema before persistence.
++`InterruptionPolicy` receives immutable evidence and returns a proposal. It has no
++storage, Tool or model handles, and the driver must enforce protected causes,
++timeouts and default behavior before committing a decision.
++
++`PreparedStepRecord` references the exact model configuration, compiled Tool
++contracts and context projection for a model purpose. Runtime clients and
++credentials do not belong in these records. Protected record references must be
++resolved in the same authorized scope.
++
++`ExecutionTransactions` specifies atomic segment acceptance and durable control
++command submission. It intentionally has no default implementation that simulates
++a transaction with separate reads and writes. Storage integration must implement
++these operations in the same transaction boundary as StateStore checkpoints and
++events before the new segment driver can use them.
++
++The legacy Run checkpoint validator rejects `Interrupted`, because that format
++cannot carry the required execution record. `RunRequest.max_output_tokens` is a
++positive optional contract field. Until purpose-specific routing integration is
++available, the driver explicitly rejects a supplied override rather than silently
++ignoring it. Omitted values retain existing request encoding.
+diff --git a/tests/support/adapter_consumer.rs b/tests/support/adapter_consumer.rs
+index 7b31c75600373e2f441c9fbfedd02611a7058ed6..b78036f459fff3d1e4507fffab25aa0300a9a58f 100644
+--- a/tests/support/adapter_consumer.rs
++++ b/tests/support/adapter_consumer.rs
+@@ -716,6 +716,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+         }],
+         trigger: RunTrigger::User {},
+         model_options: JsonObject::new(),
++        max_output_tokens: None,
+         output_contract: None,
+     };
+     let original = completed(initial.start(request.clone(), caller.clone()).await?)?;
+diff --git a/tests/support/agent_consumer.rs b/tests/support/agent_consumer.rs
+index 1fc60bccb60f4d1445228225bf0e50d9f267d5f0..e49f547e712e7a426786e0f201129534b49af924 100644
+--- a/tests/support/agent_consumer.rs
++++ b/tests/support/agent_consumer.rs
+@@ -346,6 +346,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+         }],
+         trigger: RunTrigger::User {},
+         model_options: JsonObject::from([("reasoning_effort".into(), json!("high"))]),
++        max_output_tokens: None,
+         output_contract: None,
+     };
+     let handle = completed(agent.start(request.clone(), context.clone()).await?)?;
+diff --git a/tests/support/budget_consumer.rs b/tests/support/budget_consumer.rs
+index e49abd1adc61d86646e00ac2c9ea0f3e10fb5022..1f8e49a4e8e17f0686d630c237078e808272f26f 100644
+--- a/tests/support/budget_consumer.rs
++++ b/tests/support/budget_consumer.rs
+@@ -75,6 +75,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+         }],
+         trigger: RunTrigger::User {},
+         model_options: JsonObject::new(),
++        max_output_tokens: None,
+         output_contract: None,
+     };
+     let request_record =
+diff --git a/tests/support/compaction_consumer.rs b/tests/support/compaction_consumer.rs
+index 3862aafca51a0de95b5ff4e8f8f313a5da00efde..77742fcd55d40c29542879b64bc6264e8e260dae 100644
+--- a/tests/support/compaction_consumer.rs
++++ b/tests/support/compaction_consumer.rs
+@@ -375,6 +375,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+         }],
+         trigger: RunTrigger::User {},
+         model_options: Default::default(),
++        max_output_tokens: None,
+         output_contract: None,
+     };
+     let handle = completed(agent.start(request.clone(), context.clone()).await?)?;
+diff --git a/tests/support/context_consumer.rs b/tests/support/context_consumer.rs
+index a094d78d9d9b1fd99ce2f4f334ce4bec6189f5eb..56ec71edac0b5f7e92c57c288cdf2f5d5dee6ce6 100644
+--- a/tests/support/context_consumer.rs
++++ b/tests/support/context_consumer.rs
+@@ -79,6 +79,7 @@ fn request(run: &str, text: &str) -> RunRequest {
+         input: vec![InputContent::Text { text: text.into() }],
+         trigger: RunTrigger::User {},
+         model_options: JsonObject::from([("reasoning_effort".into(), json!("high"))]),
++        max_output_tokens: None,
+         output_contract: None,
+     }
+ }
+diff --git a/tests/support/event_consumer.rs b/tests/support/event_consumer.rs
+index 2f8125aebdb3ea56cb489055df51412db140ef0f..a296329c2af5a348993d8640b7fc22ccf54c3416 100644
+--- a/tests/support/event_consumer.rs
++++ b/tests/support/event_consumer.rs
+@@ -397,6 +397,7 @@ fn request(name: &str) -> RunRequest {
+         }],
+         trigger: RunTrigger::User {},
+         model_options: JsonObject::new(),
++        max_output_tokens: None,
+         output_contract: None,
+     }
+ }
+diff --git a/tests/support/execution_contract_consumer.rs b/tests/support/execution_contract_consumer.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..f894bc60664c03cfcc1a905015d9d67fd8d07e3e
+--- /dev/null
++++ b/tests/support/execution_contract_consumer.rs
+@@ -0,0 +1,16 @@
++use wickle::{Id, JsonTextLimits, RequestSnapshot, VersionedRef};
++fn main() {
++    let profile=VersionedRef{id:Id::new("report-agent").unwrap(),version:Id::new("1").unwrap()};
++    let submitted=RequestSnapshot::capture(profile.clone(),r#"{"model_options":{},"input":184467440737095516160001}"#,None,JsonTextLimits::default()).unwrap();
++    let persisted=serde_json::to_string(&submitted).unwrap();
++    let restored:RequestSnapshot=serde_json::from_str(&persisted).unwrap();
++    restored.validate(JsonTextLimits::default()).unwrap();
++    let replay=RequestSnapshot::capture(profile,r#"{"input":184467440737095516160001}"#,Some("{}"),JsonTextLimits::default()).unwrap();
++    assert_eq!(restored.digest(),replay.digest());
++    assert!(restored.request_json().contains("184467440737095516160001"));
++    let mut tampered:serde_json::Value=serde_json::from_str(&persisted).unwrap();
++    tampered["request_json"]=serde_json::json!("{}");
++    let changed:RequestSnapshot=serde_json::from_value(tampered).unwrap();
++    assert!(changed.validate(JsonTextLimits::default()).is_err());
++    println!("execution contract consumer: exact submitted values survive persistence; omission/empty overrides compare equally; changed payload rejected");
++}
+diff --git a/tests/support/hooks_consumer.rs b/tests/support/hooks_consumer.rs
+index 46faba620b9e243c545e159f3c1bd47dce62b336..65aecac7cf903d0f03fcdf7c1791053ae36da1bd 100644
+--- a/tests/support/hooks_consumer.rs
++++ b/tests/support/hooks_consumer.rs
+@@ -569,6 +569,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+         }],
+         trigger: RunTrigger::User {},
+         model_options: JsonObject::new(),
++        max_output_tokens: None,
+         output_contract: None,
+     };
+     let store = Arc::new(SqliteStateStore::open(&database)?);
+diff --git a/tests/support/input_binding_consumer.rs b/tests/support/input_binding_consumer.rs
+index 972c1461301b90a6b87b6d0cd241fcc658a61271..dc035f1bc079c290502b573994e828474c418dc9 100644
+--- a/tests/support/input_binding_consumer.rs
++++ b/tests/support/input_binding_consumer.rs
+@@ -227,6 +227,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+         }],
+         trigger: RunTrigger::User {},
+         model_options: JsonObject::new(),
++        max_output_tokens: None,
+         output_contract: None,
+     };
+     let request_record =
+diff --git a/tests/support/lifecycle_consumer.rs b/tests/support/lifecycle_consumer.rs
+index 5c9dd2c10a714aed1329cde30e12b3e3095ea340..55c263efe14cf8f29eb7f1b323ad88a6a3b578a7 100644
+--- a/tests/support/lifecycle_consumer.rs
++++ b/tests/support/lifecycle_consumer.rs
+@@ -284,6 +284,7 @@ mod host {
+                     }],
+                     trigger: RunTrigger::User {},
+                     model_options: JsonObject::new(),
++                    max_output_tokens: None,
+                     output_contract: None,
+                 };
+                 let handle = completed(agent.start(request, caller.clone()).await?)?;
+diff --git a/tests/support/recovery_consumer.rs b/tests/support/recovery_consumer.rs
+index 65b22847124a5b5341393bd51bb487609efae03e..cd70415fc2c540af5d4b52e929bc8f67a9fcf6eb 100644
+--- a/tests/support/recovery_consumer.rs
++++ b/tests/support/recovery_consumer.rs
+@@ -87,7 +87,7 @@ mod host {
+         })?;
+         let context = ExecutionContext::new(ExecutionContextData { scope: scope.clone(), principal_ref: id("actor"), capability_grant_ref: id("grant"), trace_context: None, system_inputs: None }, Default::default());
+         if interrupt {
+-            let request = RunRequest { request_id: id("request"), session_id: id("session"), input: vec![InputContent::Text { text: "Retrieve the available result".into() }], trigger: RunTrigger::User {}, model_options: JsonObject::from([("reasoning_effort".into(), json!("high"))]), output_contract: None };
++            let request = RunRequest { request_id: id("request"), session_id: id("session"), input: vec![InputContent::Text { text: "Retrieve the available result".into() }], trigger: RunTrigger::User {}, model_options: JsonObject::from([("reasoning_effort".into(), json!("high"))]), max_output_tokens:None,output_contract: None };
+             let handle = completed(agent.start(request, context.clone()).await?)?;
+             // Regression: wall-time delay exceeds the fixture's short lease.
+             std::thread::sleep(Duration::from_millis(1200));
+diff --git a/tests/support/report_process_consumer.rs b/tests/support/report_process_consumer.rs
+index 253fa64ce50d9ef637250485d69e69403d34a283..43999e61069c003561f7cb5ad4cc57c35549e403 100644
+--- a/tests/support/report_process_consumer.rs
++++ b/tests/support/report_process_consumer.rs
+@@ -351,6 +351,7 @@ mod host {
+                 }],
+                 trigger: RunTrigger::User {},
+                 model_options: JsonObject::new(),
++                max_output_tokens: None,
+                 output_contract: None,
+             };
+             let handle = completed(agent.start(request, caller.clone()).await?)?;
+diff --git a/tests/support/resume_consumer.rs b/tests/support/resume_consumer.rs
+index 7866ce3e634b2575272b5d7583572fde6225dc8e..cd520ecc5c6a5f9d05d90d72ca7102efe80f4b18 100644
+--- a/tests/support/resume_consumer.rs
++++ b/tests/support/resume_consumer.rs
+@@ -510,6 +510,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+         }],
+         trigger: RunTrigger::User {},
+         model_options: JsonObject::new(),
++        max_output_tokens: None,
+         output_contract: None,
+     };
+     let handle = completed(initial_agent.start(request, caller.clone()).await?)?;
+diff --git a/tests/support/routing_consumer.rs b/tests/support/routing_consumer.rs
+index 71362402df55bda30ede2dd1da5c9bf7669d1e55..9635a6dda83171e3d16e507f9460e391d9f35eb4 100644
+--- a/tests/support/routing_consumer.rs
++++ b/tests/support/routing_consumer.rs
+@@ -292,6 +292,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+         }],
+         trigger: RunTrigger::User {},
+         model_options: JsonObject::from([("reasoning_effort".into(), json!("high"))]),
++        max_output_tokens: None,
+         output_contract: None,
+     };
+     let request_record =
+diff --git a/tests/support/skills_consumer.rs b/tests/support/skills_consumer.rs
+index 03205023a2e53542950238b5905b449dcad17268..aa9d38a00af32070948939bfa1b51a7134832f05 100644
+--- a/tests/support/skills_consumer.rs
++++ b/tests/support/skills_consumer.rs
+@@ -228,7 +228,7 @@ async fn main()->Result<(),Box<dyn std::error::Error>> {
+  profile.tools.push(SkillRuntime::catalog_loader());profile.skills.push(SkillRef {skill_id:id("calculation"),version:id("1"),config:None});
+  let model=Arc::new(Model(AtomicUsize::new(0)));
+  let agent=make_agent(profile.clone(),&context,store.clone(),skills.clone(),artifacts.clone(),model.clone(),policy.clone())?;
+- let request=RunRequest {request_id:id("request"),session_id:id("session"),input:vec![InputContent::Text {text:"Apply the calculation procedure to 6.".into()}],trigger:RunTrigger::User{},model_options:Default::default(),output_contract:None};
++ let request=RunRequest {request_id:id("request"),session_id:id("session"),input:vec![InputContent::Text {text:"Apply the calculation procedure to 6.".into()}],trigger:RunTrigger::User{},model_options:Default::default(),max_output_tokens:None,output_contract:None};
+  let handle=completed(agent.start(request.clone(),context.clone()).await?)?;
+  let outcome=completed(handle.outcome(&context).await?)?;
+  assert_eq!(outcome.output,vec![InputContent::Text{text:"42".into()}]);assert_eq!(resolver.loads.load(Ordering::SeqCst),1);assert_eq!(model.0.load(Ordering::SeqCst),2);
+diff --git a/tests/support/source_consumer.rs b/tests/support/source_consumer.rs
+index 0145076260aeebf4cd625f1f070dff18677e14d7..dc048d89a849bd5e92360bf3f0770233dd2ab801 100644
+--- a/tests/support/source_consumer.rs
++++ b/tests/support/source_consumer.rs
+@@ -401,6 +401,7 @@ fn request(name: &str) -> RunRequest {
+         }],
+         trigger: RunTrigger::User {},
+         model_options: JsonObject::new(),
++        max_output_tokens: None,
+         output_contract: None,
+     }
+ }
+diff --git a/tests/support/sqlite_consumer.rs b/tests/support/sqlite_consumer.rs
+index e5ecb724580ab8bd224cff711c4415fbc085b8eb..7c0d75a5c01743acecd5f40e5208328604664e3a 100644
+--- a/tests/support/sqlite_consumer.rs
++++ b/tests/support/sqlite_consumer.rs
+@@ -127,6 +127,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+         model_options: std::collections::BTreeMap::from([
+             ("reasoning_effort".into(), json!("high")),
+         ]),
++        max_output_tokens: None,
+         output_contract: None,
+     };
+     let request_record =
+diff --git a/tests/support/state_consumer.rs b/tests/support/state_consumer.rs
+index 0b359f8434b75025b4be0a7eddc5b8a51ddd10fe..f5a18e0915f58795bb8e84f343693e9a821e9124 100644
+--- a/tests/support/state_consumer.rs
++++ b/tests/support/state_consumer.rs
+@@ -59,6 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+         }],
+         trigger: RunTrigger::User {},
+         model_options: JsonObject::new(),
++        max_output_tokens: None,
+         output_contract: None,
+     };
+     let request_record =
+diff --git a/tests/support/tool_loop_consumer.rs b/tests/support/tool_loop_consumer.rs
+index c65499c41b230387f625631c5a9bb644d8f89105..945f0adc9f5ca840ac5223f576daf98ac9fbee87 100644
+--- a/tests/support/tool_loop_consumer.rs
++++ b/tests/support/tool_loop_consumer.rs
+@@ -451,6 +451,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+         }],
+         trigger: RunTrigger::User {},
+         model_options: JsonObject::new(),
++        max_output_tokens: None,
+         output_contract: None,
+     };
+     let store = Arc::new(SqliteStateStore::open(&database)?);
+diff --git a/tests/support/verification_consumer.rs b/tests/support/verification_consumer.rs
+index cfceccb967aa3d44aef9f29caa7661aa0f5e472e..b5bcb278cd8ac5cd07270f6c6a18a9cc29f488f1 100644
+--- a/tests/support/verification_consumer.rs
++++ b/tests/support/verification_consumer.rs
+@@ -293,6 +293,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+         }],
+         trigger: RunTrigger::User {},
+         model_options: Default::default(),
++        max_output_tokens: None,
+         output_contract: None,
+     };
+     let agent = make_agent(

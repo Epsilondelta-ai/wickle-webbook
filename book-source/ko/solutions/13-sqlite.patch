@@ -1,0 +1,3709 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 8763d7b84aeebdd58a97d1b1d7faed5790de02e6..c627a6b5a2e10f4ff0faca7ae15269af5641b447 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -91,6 +91,16 @@ version = "1.12.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
+ 
++[[package]]
++name = "cc"
++version = "1.4.5"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "005ec2760ca554fae18df7a11195552ec576cd665632a881bc011d5bb2fd4d80"
++dependencies = [
++ "find-msvc-tools",
++ "shlex",
++]
++
+ [[package]]
+ name = "cfg-if"
+ version = "1.0.4"
+@@ -146,6 +156,18 @@ version = "1.0.2"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
+ 
++[[package]]
++name = "fallible-iterator"
++version = "0.3.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "2acce4a10f12dc2fb14a218589d4f1f62ef011b2d0cc4b3cb1bba8e94da14649"
++
++[[package]]
++name = "fallible-streaming-iterator"
++version = "0.1.9"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a"
++
+ [[package]]
+ name = "fancy-regex"
+ version = "0.19.1"
+@@ -157,6 +179,12 @@ dependencies = [
+  "regex-syntax",
+ ]
+ 
++[[package]]
++name = "find-msvc-tools"
++version = "0.1.12"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "3e0f1c7c3a72c66fd80abe965175f7523475c0489a87d3ff9d6e8c87d87a9d2d"
++
+ [[package]]
+ name = "fluent-uri"
+ version = "0.4.1"
+@@ -351,6 +379,17 @@ version = "0.2.189"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
+ 
++[[package]]
++name = "libsqlite3-sys"
++version = "0.38.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "f1d20bef17f513b9b3004532233187769cd072d790971f4e4da0e346eb6401e8"
++dependencies = [
++ "cc",
++ "pkg-config",
++ "vcpkg",
++]
++
+ [[package]]
+ name = "lock_api"
+ version = "0.4.14"
+@@ -497,6 +536,12 @@ version = "0.2.17"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
+ 
++[[package]]
++name = "pkg-config"
++version = "0.3.34"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
++
+ [[package]]
+ name = "proc-macro2"
+ version = "1.0.107"
+@@ -596,6 +641,19 @@ version = "0.8.11"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
+ 
++[[package]]
++name = "rusqlite"
++version = "0.40.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "23f2a97da3e3873c73cb2a2e71b35c40ff95e0b1eefa8d72d8499a6928c3b5b3"
++dependencies = [
++ "bitflags",
++ "fallible-iterator",
++ "fallible-streaming-iterator",
++ "libsqlite3-sys",
++ "smallvec",
++]
++
+ [[package]]
+ name = "rustversion"
+ version = "1.0.23"
+@@ -663,6 +721,12 @@ dependencies = [
+  "digest",
+ ]
+ 
++[[package]]
++name = "shlex"
++version = "2.0.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
++
+ [[package]]
+ name = "slab"
+ version = "0.4.12"
+@@ -801,6 +865,12 @@ dependencies = [
+  "vsimd",
+ ]
+ 
++[[package]]
++name = "vcpkg"
++version = "0.2.15"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
++
+ [[package]]
+ name = "version_check"
+ version = "0.9.5"
+@@ -892,6 +962,18 @@ dependencies = [
+  "wickle",
+ ]
+ 
++[[package]]
++name = "wickle-state-sqlite"
++version = "0.1.0"
++dependencies = [
++ "futures-util",
++ "rusqlite",
++ "serde_json",
++ "tokio",
++ "tokio-util",
++ "wickle",
++]
++
+ [[package]]
+ name = "windows-link"
+ version = "0.2.1"
+diff --git a/Cargo.toml b/Cargo.toml
+index 3da48fac74378d4587f1d694b61cc4bcadf05f7a..f0b26af816013fd27a5d3d71c93cc8c95ffed5d0 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -1,5 +1,5 @@
+ [workspace]
+-members = ["crates/wickle", "crates/wickle-model-router"]
++members = ["crates/wickle", "crates/wickle-model-router", "crates/wickle-state-sqlite"]
+ default-members = ["crates/wickle"]
+ resolver = "3"
+ 
+@@ -13,6 +13,7 @@ repository = "https://github.com/Epsilondelta-ai/wickle"
+ getrandom = { version = "=0.3.4", default-features = false }
+ futures-util = { version = "=0.3.34", default-features = false, features = ["std", "async-await"] }
+ jsonschema = { version = "=0.56.0", default-features = false }
++rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
+ serde = { version = "=1.0.229", features = ["derive"] }
+ serde_json = "=1.0.151"
+ sha2 = { version = "=0.11.0", default-features = false }
+diff --git a/crates/wickle-state-sqlite/Cargo.toml b/crates/wickle-state-sqlite/Cargo.toml
+new file mode 100644
+index 0000000000000000000000000000000000000000..6e68de78b5b38aed3ed7e3e0a130daa9936a4de9
+--- /dev/null
++++ b/crates/wickle-state-sqlite/Cargo.toml
+@@ -0,0 +1,23 @@
++[package]
++name = "wickle-state-sqlite"
++version.workspace = true
++edition.workspace = true
++rust-version.workspace = true
++repository.workspace = true
++description = "A durable SQLite state store for Wickle"
++publish = false
++include = ["Cargo.toml", "src/**"]
++
++[dependencies]
++wickle = { path = "../wickle", version = "=0.1.0" }
++rusqlite.workspace = true
++serde_json.workspace = true
++tokio.workspace = true
++
++[dev-dependencies]
++futures-util.workspace = true
++tokio-util.workspace = true
++tokio = { workspace = true, features = ["rt-multi-thread", "test-util"] }
++
++[lints]
++workspace = true
+diff --git a/crates/wickle-state-sqlite/src/lib.rs b/crates/wickle-state-sqlite/src/lib.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..ff93a5a56ccce10e87fa3bcc6254571bbd92ec1a
+--- /dev/null
++++ b/crates/wickle-state-sqlite/src/lib.rs
+@@ -0,0 +1,547 @@
++//! Durable SQLite storage for Wickle's validated state-store checkpoints.
++//!
++//! Each operation uses a database transaction and delegates state transitions to
++//! the core memory store. Asynchronous operations run on Tokio's blocking pool.
++//! Dropping a waiting future does not roll back an already running transaction.
++
++#![forbid(unsafe_code)]
++
++use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, params};
++use std::{
++    collections::BTreeMap,
++    fmt,
++    fs::OpenOptions,
++    path::{Path, PathBuf},
++    time::{Duration, Instant},
++};
++use tokio::runtime::Handle;
++use wickle::{
++    AdmissionInput, AdmissionResult, CommitInput, ContractError, ErrorCode, EventPage, Id,
++    IdSource, JsonDigest, MemoryStateStore, PortFuture, ProtectedRecord, RandomIdSource, RecordRef,
++    RunLease, Scope, SessionSnapshot, StateStore, StateStoreCapabilities, StateStoreCheckpoint,
++    StoredRun,
++};
++
++const APPLICATION_ID: i64 = 0x574B4C45;
++const SCHEMA_VERSION: i64 = 1;
++const DEFAULT_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
++const MAX_BUSY_TIMEOUT: Duration = Duration::from_secs(30);
++const MIN_SQLITE_VERSION: i32 = 3_053_002;
++const METADATA_SCHEMA: &str = "CREATE TABLE wickle_metadata (
++    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
++    schema_version INTEGER NOT NULL,
++    store_id TEXT NOT NULL
++) STRICT";
++const CHECKPOINT_SCHEMA: &str = "CREATE TABLE wickle_scope_checkpoints (
++    scope_key TEXT PRIMARY KEY NOT NULL,
++    checkpoint_json TEXT NOT NULL,
++    checksum TEXT NOT NULL
++) STRICT";
++
++/// SQLite-backed checkpoints for an explicitly selected disk file.
++///
++/// Every connection uses WAL and synchronous=FULL. Writes serialize through
++/// BEGIN IMMEDIATE, then reuse the core's admission, revision and fencing checks.
++/// Reads use a consistent deferred transaction. A successful write is returned
++/// only after SQLite commits. The Host must provide a filesystem suitable for
++/// SQLite WAL and retain the database file and its related WAL state.
++/// Lease operations advance the supplied logical time by monotonic time spent
++/// waiting for the blocking pool, database lock and checkpoint reconstruction.
++///
++/// Operations use Tokio's blocking pool. Cancelling or dropping their waiting
++/// future can lose the acknowledgement of a committed operation; it does not
++/// guarantee rollback. Recover by reading state or replaying the same request.
++#[derive(Clone)]
++pub struct SqliteStateStore {
++    path: PathBuf,
++    busy_timeout: Duration,
++    store_id: String,
++}
++
++impl fmt::Debug for SqliteStateStore {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_struct("SqliteStateStore")
++            .field("busy_timeout", &self.busy_timeout)
++            .finish_non_exhaustive()
++    }
++}
++
++impl SqliteStateStore {
++    /// Open or initialize a dedicated disk database with a five-second busy timeout.
++    ///
++    /// This is synchronous initialization; call it before starting asynchronous
++    /// work, or place it in the Host's blocking task. No runtime is created.
++    /// New files use owner-only permissions on Unix. Existing permissions are
++    /// retained. Empty paths, SQLite URI paths and :memory: are rejected.
++    pub fn open(path: impl AsRef<Path>) -> Result<Self, ContractError> {
++        Self::open_with_busy_timeout(path, DEFAULT_BUSY_TIMEOUT)
++    }
++
++    /// Open with an explicit bounded SQLite lock wait, from zero to thirty seconds.
++    /// Zero requests immediate failure on lock contention. SQLite measures this
++    /// setting in milliseconds. Other database and filesystem work is not timed by
++    /// this option, and queued/running blocking tasks can outlive their waiter.
++    pub fn open_with_busy_timeout(
++        path: impl AsRef<Path>,
++        busy_timeout: Duration,
++    ) -> Result<Self, ContractError> {
++        if busy_timeout > MAX_BUSY_TIMEOUT {
++            return Err(error(ErrorCode::InvalidContract, "sqlite.busy_timeout"));
++        }
++        check_engine()?;
++        let path = prepare_file(path.as_ref())?;
++        let mut connection = connect(&path, busy_timeout)?;
++        // Inspect before changing journal settings in an unrelated database.
++        let transaction = connection
++            .transaction_with_behavior(TransactionBehavior::Deferred)
++            .map_err(storage_error)?;
++        database_identity(&transaction)?;
++        transaction.commit().map_err(storage_error)?;
++        let mode: String = connection
++            .query_row("PRAGMA journal_mode=WAL", [], |row| row.get(0))
++            .map_err(storage_error)?;
++        if !mode.eq_ignore_ascii_case("wal") {
++            return Err(error(
++                ErrorCode::PersistenceUnavailable,
++                "sqlite.journal_mode",
++            ));
++        }
++        connection
++            .pragma_update(None, "synchronous", "FULL")
++            .map_err(storage_error)?;
++        check_durability(&connection)?;
++        let transaction = connection
++            .transaction_with_behavior(TransactionBehavior::Immediate)
++            .map_err(storage_error)?;
++        let store_id = match database_identity(&transaction)? {
++            Some(identity) => identity,
++            None => {
++                let store_id = RandomIdSource.next_id()?.to_string();
++                transaction
++                    .execute_batch(&format!("{METADATA_SCHEMA}; {CHECKPOINT_SCHEMA};"))
++                    .map_err(storage_error)?;
++                transaction.execute("INSERT INTO wickle_metadata(singleton,schema_version,store_id) VALUES (1,?1,?2)",params![SCHEMA_VERSION,store_id]).map_err(storage_error)?;
++                transaction
++                    .pragma_update(None, "application_id", APPLICATION_ID)
++                    .map_err(storage_error)?;
++                transaction
++                    .pragma_update(None, "user_version", SCHEMA_VERSION)
++                    .map_err(storage_error)?;
++                store_id
++            }
++        };
++        transaction.commit().map_err(storage_error)?;
++        check_durability(&connection)?;
++        Ok(Self {
++            path,
++            busy_timeout,
++            store_id,
++        })
++    }
++
++    fn transact<'a, T, F>(
++        &'a self,
++        scope: &'a Scope,
++        write: bool,
++        operation: F,
++    ) -> PortFuture<'a, T>
++    where
++        T: Send + 'static,
++        F: FnOnce(&MemoryStateStore, &Scope, &Handle) -> Result<T, ContractError> + Send + 'static,
++    {
++        let store = self.clone();
++        let scope = scope.clone();
++        Box::pin(async move {
++            let runtime = Handle::try_current()
++                .map_err(|_| error(ErrorCode::RuntimeUnavailable, "sqlite.runtime"))?;
++            tokio::task::spawn_blocking(move || {
++                store.transaction(&scope, write, &runtime, operation)
++            })
++            .await
++            .map_err(|_| error(ErrorCode::PersistenceUnavailable, "sqlite.worker"))?
++        })
++    }
++
++    fn transaction<T, F>(
++        &self,
++        scope: &Scope,
++        write: bool,
++        runtime: &Handle,
++        operation: F,
++    ) -> Result<T, ContractError>
++    where
++        F: FnOnce(&MemoryStateStore, &Scope, &Handle) -> Result<T, ContractError>,
++    {
++        // No CREATE flag and no initializer here: a missing/replaced file is not
++        // silently converted into a new store during an operation.
++        let mut connection = connect(&self.path, self.busy_timeout)?;
++        connection
++            .pragma_update(None, "synchronous", "FULL")
++            .map_err(storage_error)?;
++        check_durability(&connection)?;
++        let behavior = if write {
++            TransactionBehavior::Immediate
++        } else {
++            TransactionBehavior::Deferred
++        };
++        let transaction = connection
++            .transaction_with_behavior(behavior)
++            .map_err(storage_error)?;
++        if database_identity(&transaction)?.as_deref() != Some(self.store_id.as_str()) {
++            return Err(error(ErrorCode::InvalidSnapshot, "sqlite.store_identity"));
++        }
++        let key = scope_key(scope)?;
++        let row: Option<(String, String)> = transaction
++            .query_row(
++                "SELECT checkpoint_json,checksum FROM wickle_scope_checkpoints WHERE scope_key=?1",
++                params![key],
++                |row| Ok((row.get(0)?, row.get(1)?)),
++            )
++            .optional()
++            .map_err(storage_error)?;
++        let state = match row {
++            None => MemoryStateStore::new(),
++            Some((json, checksum)) => {
++                let digest = JsonDigest::try_from(checksum)
++                    .map_err(|_| error(ErrorCode::InvalidSnapshot, "sqlite.checksum"))?;
++                let checkpoint = StateStoreCheckpoint::from_json(&json, scope, &digest)?;
++                MemoryStateStore::from_checkpoint(checkpoint)
++            }
++        };
++        let result = operation(&state, scope, runtime)?;
++        if write {
++            let checkpoint = state.export_checkpoint(scope)?;
++            let json = serde_json::to_string(&checkpoint).map_err(storage_error)?;
++            let digest = checkpoint.digest();
++            transaction.execute(
++                "INSERT INTO wickle_scope_checkpoints(scope_key,checkpoint_json,checksum) VALUES (?1,?2,?3)
++                 ON CONFLICT(scope_key) DO UPDATE SET checkpoint_json=excluded.checkpoint_json,checksum=excluded.checksum",
++                params![key,json,digest.as_str()],
++            ).map_err(storage_error)?;
++        }
++        transaction.commit().map_err(storage_error)?;
++        Ok(result)
++    }
++}
++
++impl StateStore for SqliteStateStore {
++    fn capabilities(&self) -> StateStoreCapabilities {
++        StateStoreCapabilities {
++            durable: true,
++            cross_process_leases: true,
++            event_replay: true,
++        }
++    }
++    fn admit<'a>(
++        &'a self,
++        scope: &'a Scope,
++        mut input: AdmissionInput,
++    ) -> PortFuture<'a, AdmissionResult> {
++        // The outer SQLite transaction supplies durability. The core memory
++        // implementation still enforces every other admission invariant.
++        input.require_durable = false;
++        self.transact(scope, true, move |state, scope, runtime| {
++            runtime.block_on(state.admit(scope, input))
++        })
++    }
++    fn load<'a>(&'a self, scope: &'a Scope, run_id: &'a Id) -> PortFuture<'a, StoredRun> {
++        let run_id = run_id.clone();
++        self.transact(scope, false, move |state, scope, runtime| {
++            runtime.block_on(state.load(scope, &run_id))
++        })
++    }
++    fn load_session<'a>(
++        &'a self,
++        scope: &'a Scope,
++        session_id: &'a Id,
++    ) -> PortFuture<'a, SessionSnapshot> {
++        let session_id = session_id.clone();
++        self.transact(scope, false, move |state, scope, runtime| {
++            runtime.block_on(state.load_session(scope, &session_id))
++        })
++    }
++    fn check_lease<'a>(
++        &'a self,
++        scope: &'a Scope,
++        run_id: &'a Id,
++        lease: &'a RunLease,
++        now_ms: i64,
++    ) -> PortFuture<'a, RunLease> {
++        let entered = Instant::now();
++        let run_id = run_id.clone();
++        let lease = lease.clone();
++        self.transact(scope, false, move |state, scope, runtime| {
++            runtime.block_on(state.check_lease(
++                scope,
++                &run_id,
++                &lease,
++                effective_now(now_ms, entered)?,
++            ))
++        })
++    }
++    fn acquire_lease<'a>(
++        &'a self,
++        scope: &'a Scope,
++        run_id: &'a Id,
++        owner: &'a Id,
++        now_ms: i64,
++        ttl_ms: u64,
++    ) -> PortFuture<'a, RunLease> {
++        let entered = Instant::now();
++        let run_id = run_id.clone();
++        let owner = owner.clone();
++        self.transact(scope, true, move |state, scope, runtime| {
++            runtime.block_on(state.acquire_lease(
++                scope,
++                &run_id,
++                &owner,
++                effective_now(now_ms, entered)?,
++                ttl_ms,
++            ))
++        })
++    }
++    fn renew_lease<'a>(
++        &'a self,
++        scope: &'a Scope,
++        run_id: &'a Id,
++        lease: &'a RunLease,
++        now_ms: i64,
++        ttl_ms: u64,
++    ) -> PortFuture<'a, RunLease> {
++        let entered = Instant::now();
++        let run_id = run_id.clone();
++        let lease = lease.clone();
++        self.transact(scope, true, move |state, scope, runtime| {
++            runtime.block_on(state.renew_lease(
++                scope,
++                &run_id,
++                &lease,
++                effective_now(now_ms, entered)?,
++                ttl_ms,
++            ))
++        })
++    }
++    fn release_lease<'a>(
++        &'a self,
++        scope: &'a Scope,
++        run_id: &'a Id,
++        lease: &'a RunLease,
++        now_ms: i64,
++    ) -> PortFuture<'a, ()> {
++        let entered = Instant::now();
++        let run_id = run_id.clone();
++        let lease = lease.clone();
++        self.transact(scope, true, move |state, scope, runtime| {
++            runtime.block_on(state.release_lease(
++                scope,
++                &run_id,
++                &lease,
++                effective_now(now_ms, entered)?,
++            ))
++        })
++    }
++    fn commit<'a>(
++        &'a self,
++        scope: &'a Scope,
++        run_id: &'a Id,
++        mut input: CommitInput,
++    ) -> PortFuture<'a, StoredRun> {
++        let entered = Instant::now();
++        let run_id = run_id.clone();
++        self.transact(scope, true, move |state, scope, runtime| {
++            input.now_ms = effective_now(input.now_ms, entered)?;
++            runtime.block_on(state.commit(scope, &run_id, input))
++        })
++    }
++    fn read_events<'a>(
++        &'a self,
++        scope: &'a Scope,
++        run_id: &'a Id,
++        after_seq: u64,
++        limit: usize,
++    ) -> PortFuture<'a, EventPage> {
++        let run_id = run_id.clone();
++        self.transact(scope, false, move |state, scope, runtime| {
++            runtime.block_on(state.read_events(scope, &run_id, after_seq, limit))
++        })
++    }
++    fn read_record<'a>(
++        &'a self,
++        scope: &'a Scope,
++        reference: &'a RecordRef,
++    ) -> PortFuture<'a, ProtectedRecord> {
++        let reference = reference.clone();
++        self.transact(scope, false, move |state, scope, runtime| {
++            runtime.block_on(state.read_record(scope, &reference))
++        })
++    }
++}
++
++fn check_engine() -> Result<(), ContractError> {
++    if rusqlite::version_number() < MIN_SQLITE_VERSION {
++        return Err(error(
++            ErrorCode::UnsupportedContractVersion,
++            "sqlite.engine_version",
++        ));
++    }
++    Ok(())
++}
++
++fn prepare_file(path: &Path) -> Result<PathBuf, ContractError> {
++    if path.as_os_str().is_empty()
++        || path == Path::new(":memory:")
++        || path.to_string_lossy().starts_with("file:")
++    {
++        return Err(error(ErrorCode::InvalidContract, "sqlite.path"));
++    }
++    let mut options = OpenOptions::new();
++    options.read(true).write(true).create_new(true);
++    #[cfg(unix)]
++    {
++        use std::os::unix::fs::OpenOptionsExt;
++        options.mode(0o600);
++    }
++    match options.open(path) {
++        Ok(file) => drop(file),
++        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
++        Err(error) => return Err(storage_error(error)),
++    }
++    let path = std::fs::canonicalize(path).map_err(storage_error)?;
++    if !std::fs::metadata(&path).map_err(storage_error)?.is_file() {
++        return Err(error(ErrorCode::InvalidContract, "sqlite.path"));
++    }
++    Ok(path)
++}
++
++fn connect(path: &Path, busy_timeout: Duration) -> Result<Connection, ContractError> {
++    let connection = Connection::open_with_flags(
++        path,
++        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
++    )
++    .map_err(storage_error)?;
++    connection
++        .busy_timeout(busy_timeout)
++        .map_err(storage_error)?;
++    Ok(connection)
++}
++
++fn check_durability(connection: &Connection) -> Result<(), ContractError> {
++    let mode: String = connection
++        .pragma_query_value(None, "journal_mode", |row| row.get(0))
++        .map_err(storage_error)?;
++    let synchronous: i64 = connection
++        .pragma_query_value(None, "synchronous", |row| row.get(0))
++        .map_err(storage_error)?;
++    if !mode.eq_ignore_ascii_case("wal") || synchronous != 2 {
++        return Err(error(
++            ErrorCode::PersistenceUnavailable,
++            "sqlite.durability",
++        ));
++    }
++    Ok(())
++}
++
++fn database_identity(connection: &Connection) -> Result<Option<String>, ContractError> {
++    let application: i64 = connection
++        .pragma_query_value(None, "application_id", |row| row.get(0))
++        .map_err(storage_error)?;
++    let version: i64 = connection
++        .pragma_query_value(None, "user_version", |row| row.get(0))
++        .map_err(storage_error)?;
++    let mut statement = connection
++        .prepare(
++            "SELECT type,name,sql FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*' ORDER BY type,name",
++        )
++        .map_err(storage_error)?;
++    let objects = statement
++        .query_map([], |row| {
++            Ok((
++                row.get::<_, String>(0)?,
++                row.get::<_, String>(1)?,
++                normalized_schema(&row.get::<_, String>(2)?),
++            ))
++        })
++        .map_err(storage_error)?
++        .collect::<Result<Vec<_>, _>>()
++        .map_err(storage_error)?;
++    if application == 0 && version == 0 && objects.is_empty() {
++        return Ok(None);
++    }
++    if application != APPLICATION_ID {
++        return Err(error(ErrorCode::InvalidContract, "sqlite.application_id"));
++    }
++    if version != SCHEMA_VERSION {
++        return Err(error(
++            ErrorCode::UnsupportedSchemaVersion,
++            "sqlite.schema_version",
++        ));
++    }
++    let expected = vec![
++        (
++            "table".to_owned(),
++            "wickle_metadata".to_owned(),
++            normalized_schema(METADATA_SCHEMA),
++        ),
++        (
++            "table".to_owned(),
++            "wickle_scope_checkpoints".to_owned(),
++            normalized_schema(CHECKPOINT_SCHEMA),
++        ),
++    ];
++    if objects != expected {
++        return Err(error(ErrorCode::UnsupportedSchemaVersion, "sqlite.schema"));
++    }
++    let mut statement = connection
++        .prepare("SELECT singleton,schema_version,store_id FROM wickle_metadata")
++        .map_err(storage_error)?;
++    let metadata = statement
++        .query_map([], |row| {
++            Ok((
++                row.get::<_, i64>(0)?,
++                row.get::<_, i64>(1)?,
++                row.get::<_, String>(2)?,
++            ))
++        })
++        .map_err(storage_error)?
++        .collect::<Result<Vec<_>, _>>()
++        .map_err(storage_error)?;
++    if metadata.len() != 1 || metadata[0].0 != 1 {
++        return Err(error(ErrorCode::InvalidSnapshot, "sqlite.metadata"));
++    }
++    if metadata[0].1 != SCHEMA_VERSION {
++        return Err(error(
++            ErrorCode::UnsupportedSchemaVersion,
++            "sqlite.schema_version",
++        ));
++    }
++    let store_id = &metadata[0].2;
++    if store_id.len() != 32 || !store_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
++        return Err(error(ErrorCode::InvalidSnapshot, "sqlite.store_identity"));
++    }
++    Ok(Some(store_id.clone()))
++}
++
++fn scope_key(scope: &Scope) -> Result<String, ContractError> {
++    let ordered: BTreeMap<String, serde_json::Value> =
++        serde_json::from_value(serde_json::to_value(scope).map_err(storage_error)?)
++            .map_err(storage_error)?;
++    serde_json::to_string(&ordered).map_err(storage_error)
++}
++fn normalized_schema(sql: &str) -> String {
++    sql.chars()
++        .filter(|character| !character.is_ascii_whitespace())
++        .map(|character| character.to_ascii_lowercase())
++        .collect()
++}
++fn effective_now(now_ms: i64, entered: Instant) -> Result<i64, ContractError> {
++    i64::try_from(entered.elapsed().as_millis())
++        .ok()
++        .and_then(|elapsed| now_ms.checked_add(elapsed))
++        .ok_or_else(|| error(ErrorCode::ClockUnavailable, "sqlite.monotonic_time"))
++}
++fn error(code: ErrorCode, path: &str) -> ContractError {
++    ContractError::new(code, path)
++}
++fn storage_error<E>(_: E) -> ContractError {
++    error(ErrorCode::PersistenceUnavailable, "sqlite.storage")
++}
+diff --git a/crates/wickle-state-sqlite/tests/state_store.rs b/crates/wickle-state-sqlite/tests/state_store.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..ada68a7fc3223a4f8f021867d246ca5b95fbf0f9
+--- /dev/null
++++ b/crates/wickle-state-sqlite/tests/state_store.rs
+@@ -0,0 +1,921 @@
++//! Real-file transactions, process isolation, and restoration of protected execution state.
++
++use std::{
++    sync::Arc,
++    time::{Duration, Instant},
++};
++
++use rusqlite::Connection;
++use serde_json::{Value, json};
++use wickle::*;
++use wickle_state_sqlite::SqliteStateStore;
++
++#[allow(dead_code)]
++#[path = "../../wickle/tests/support/mod.rs"]
++mod core;
++mod support;
++#[path = "support/workers.rs"]
++mod workers;
++
++use core::{event, finished, id, prepared, scope};
++use support::{Database, durable_admission};
++
++#[tokio::test]
++async fn durable_admission_replays_the_original_run_and_releases_a_finished_session_after_reopen() {
++    let database = Database::new();
++    let store = SqliteStateStore::open(database.path()).unwrap();
++    assert!(store.capabilities().durable);
++    let first = store
++        .admit(
++            &scope(),
++            durable_admission("run", "request", "session").await,
++        )
++        .await
++        .unwrap();
++    assert!(first.created);
++    drop(store);
++    let store = SqliteStateStore::open(database.path()).unwrap();
++    let replay = store
++        .admit(
++            &scope(),
++            durable_admission("replacement", "request", "session").await,
++        )
++        .await
++        .unwrap();
++    assert!(!replay.created);
++    assert_eq!(replay.state, first.state);
++    let mut changed = durable_admission("changed", "request", "session").await;
++    changed.snapshot.request.input = vec![InputContent::Text {
++        text: "Different input".into(),
++    }];
++    changed.snapshot.request_digest =
++        admission_digest(&changed.snapshot.request, &changed.snapshot.profile, None);
++    assert_eq!(
++        store.admit(&scope(), changed).await.unwrap_err().code,
++        ErrorCode::RequestConflict
++    );
++    assert_eq!(
++        store
++            .admit(
++                &scope(),
++                durable_admission("other", "other", "session").await
++            )
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::SessionBusy
++    );
++    let lease = store
++        .acquire_lease(&scope(), &id("run"), &id("owner"), 0, 10_000)
++        .await
++        .unwrap();
++    store
++        .commit(
++            &scope(),
++            &id("run"),
++            finished(&first.state.snapshot, lease, 1),
++        )
++        .await
++        .unwrap();
++    drop(store);
++    let store = SqliteStateStore::open(database.path()).unwrap();
++    let mut second = durable_admission("second", "second", "session").await;
++    second.messages[0].sequence = 2.try_into().unwrap();
++    assert!(store.admit(&scope(), second).await.unwrap().created);
++    assert_eq!(
++        store
++            .load(&scope(), &id("run"))
++            .await
++            .unwrap()
++            .snapshot
++            .status,
++        RunStatus::Succeeded
++    );
++    let replay = store
++        .admit(
++            &scope(),
++            durable_admission("another", "request", "session").await,
++        )
++        .await
++        .unwrap();
++    assert!(!replay.created);
++    assert_eq!(replay.state.snapshot.run_id, id("run"));
++}
++
++#[tokio::test]
++async fn failed_transactions_leave_no_records_or_events_and_stale_revisions_cannot_commit() {
++    let database = Database::new();
++    let store = SqliteStateStore::open(database.path()).unwrap();
++    let initial = store
++        .admit(
++            &scope(),
++            durable_admission("run", "request", "session").await,
++        )
++        .await
++        .unwrap()
++        .state;
++    let lease = store
++        .acquire_lease(&scope(), &id("run"), &id("owner"), 0, 10_000)
++        .await
++        .unwrap();
++    let mut invalid = finished(&initial.snapshot, lease.clone(), 1);
++    let unpublished = ProtectedRecord::new(id("unpublished"), 1, json!({"value":"candidate"}));
++    invalid.records.push(unpublished.clone());
++    invalid.events[0].seq = 9.try_into().unwrap();
++    assert!(store.commit(&scope(), &id("run"), invalid).await.is_err());
++    assert_eq!(store.load(&scope(), &id("run")).await.unwrap(), initial);
++    assert!(
++        store
++            .read_record(&scope(), unpublished.reference())
++            .await
++            .is_err()
++    );
++    assert_eq!(
++        store
++            .read_events(&scope(), &id("run"), 0, 10)
++            .await
++            .unwrap()
++            .events
++            .len(),
++        1
++    );
++    let update = prepared(&initial.snapshot, lease.clone(), 2);
++    let saved = store
++        .commit(&scope(), &id("run"), update.clone())
++        .await
++        .unwrap();
++    assert_eq!(
++        store
++            .commit(&scope(), &id("run"), update)
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::RevisionConflict
++    );
++    let mut final_update = finished(&saved.snapshot, lease, 3);
++    final_update.records.push(unpublished.clone());
++    store
++        .commit(&scope(), &id("run"), final_update)
++        .await
++        .unwrap();
++    drop(store);
++    let store = SqliteStateStore::open(database.path()).unwrap();
++    assert_eq!(
++        store
++            .read_record(&scope(), unpublished.reference())
++            .await
++            .unwrap(),
++        unpublished
++    );
++    let page = store.read_events(&scope(), &id("run"), 0, 1).await.unwrap();
++    assert!(page.has_more);
++    assert_eq!(page.next_after_seq, 1);
++    let next = store
++        .read_events(&scope(), &id("run"), page.next_after_seq, 1)
++        .await
++        .unwrap();
++    assert!(!next.has_more);
++    assert_eq!(next.next_after_seq, 2);
++    assert!(matches!(
++        next.events[0].payload,
++        RunEventPayload::RunFinished { .. }
++    ));
++    for foreign in [
++        Scope {
++            tenant_id: id("foreign"),
++            ..scope()
++        },
++        Scope {
++            workspace_id: id("foreign-workspace"),
++            ..scope()
++        },
++        Scope {
++            user_id: Some(id("foreign-user")),
++            ..scope()
++        },
++    ] {
++        assert!(store.load(&foreign, &id("run")).await.is_err());
++        assert!(store.load_session(&foreign, &id("session")).await.is_err());
++        assert!(
++            store
++                .read_record(&foreign, unpublished.reference())
++                .await
++                .is_err()
++        );
++        assert!(
++            store
++                .read_events(&foreign, &id("run"), 0, 10)
++                .await
++                .is_err()
++        );
++    }
++}
++
++#[tokio::test]
++async fn renewed_leases_and_released_fence_counters_survive_separate_connections_and_reopen() {
++    let database = Database::new();
++    let first = SqliteStateStore::open(database.path()).unwrap();
++    first
++        .admit(
++            &scope(),
++            durable_admission("run", "request", "session").await,
++        )
++        .await
++        .unwrap();
++    let lease = first
++        .acquire_lease(&scope(), &id("run"), &id("owner"), 100, 10_000)
++        .await
++        .unwrap();
++    let renewed = first
++        .renew_lease(&scope(), &id("run"), &lease, 105, 20_000)
++        .await
++        .unwrap();
++    drop(first);
++    let next = SqliteStateStore::open(database.path()).unwrap();
++    let after_original_expiry = lease.expires_at_ms + 100;
++    assert_eq!(
++        next.check_lease(&scope(), &id("run"), &lease, after_original_expiry)
++            .await
++            .unwrap()
++            .expires_at_ms,
++        renewed.expires_at_ms
++    );
++    assert_eq!(
++        next.acquire_lease(
++            &scope(),
++            &id("run"),
++            &id("new-owner"),
++            after_original_expiry + 1,
++            10_000
++        )
++        .await
++        .unwrap_err()
++        .code,
++        ErrorCode::LeaseBusy
++    );
++    let now = renewed.expires_at_ms + 1;
++    let takeover = next
++        .acquire_lease(&scope(), &id("run"), &id("owner"), now, 10_000)
++        .await
++        .unwrap();
++    assert!(takeover.fencing_token > lease.fencing_token);
++    assert_eq!(
++        next.check_lease(&scope(), &id("run"), &lease, now + 1)
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::LeaseLost
++    );
++    next.release_lease(&scope(), &id("run"), &takeover, now + 2)
++        .await
++        .unwrap();
++    drop(next);
++    let reopened = SqliteStateStore::open(database.path()).unwrap();
++    let after_release = reopened
++        .acquire_lease(&scope(), &id("run"), &id("owner"), now + 3, 10_000)
++        .await
++        .unwrap();
++    assert!(after_release.fencing_token > takeover.fencing_token);
++    assert_eq!(
++        reopened
++            .renew_lease(&scope(), &id("run"), &takeover, now + 4, 10_000)
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::LeaseLost
++    );
++}
++
++#[tokio::test]
++async fn historical_wait_and_resume_events_remain_valid_after_terminal_reopen() {
++    let database = Database::new();
++    let store = SqliteStateStore::open(database.path()).unwrap();
++    let saved = store
++        .admit(
++            &scope(),
++            durable_admission("run", "request", "session").await,
++        )
++        .await
++        .unwrap()
++        .state;
++    let lease = store
++        .acquire_lease(&scope(), &id("run"), &id("owner"), 0, 10_000)
++        .await
++        .unwrap();
++    let wait = WaitState {
++        wait_id: id("wait"),
++        target: WaitTarget::Input {
++            request: InputRequest {
++                input_request_id: id("question"),
++                call_id: id("input-call"),
++                question: "Choose input".into(),
++                schema_ref: None,
++            },
++        },
++        expires_at_ms: None,
++    };
++    let record = ProtectedRecord::new(id("wait-record"), 1, serde_json::to_value(&wait).unwrap());
++    let mut update = prepared(&saved.snapshot, lease.clone(), 1);
++    update.snapshot.status = RunStatus::Waiting;
++    update.snapshot.phase = RunPhase::Waiting;
++    update.snapshot.wait = Some(wait);
++    update.snapshot.last_event_seq += 1;
++    update.events.push(event(
++        &id("run"),
++        &id("session"),
++        &scope(),
++        2,
++        RunEventPayload::RunWaiting {
++            wait_ref: record.reference().clone(),
++        },
++    ));
++    update.records.push(record);
++    store.commit(&scope(), &id("run"), update).await.unwrap();
++    store
++        .release_lease(&scope(), &id("run"), &lease, 2)
++        .await
++        .unwrap();
++    drop(store);
++    let store = SqliteStateStore::open(database.path()).unwrap();
++    assert_eq!(
++        store
++            .admit(
++                &scope(),
++                durable_admission("other", "other", "session").await
++            )
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::SessionBusy
++    );
++    let saved = store.load(&scope(), &id("run")).await.unwrap();
++    assert_eq!(saved.snapshot.status, RunStatus::Waiting);
++    let lease = store
++        .acquire_lease(&scope(), &id("run"), &id("new-owner"), 3, 10_000)
++        .await
++        .unwrap();
++    let command = ResumeCommand {
++        run_id: id("run"),
++        expected_revision: saved.snapshot.revision,
++        command_id: id("resume"),
++        action: ResumeAction::Input {
++            wait_id: id("wait"),
++            answer: json!("selected"),
++        },
++    };
++    let record = ProtectedRecord::new(
++        id("resume-record"),
++        1,
++        serde_json::to_value(&command).unwrap(),
++    );
++    let mut update = prepared(&saved.snapshot, lease.clone(), 4);
++    update.snapshot.status = RunStatus::Running;
++    update.snapshot.wait = None;
++    update.snapshot.last_event_seq += 1;
++    update.events.push(event(
++        &id("run"),
++        &id("session"),
++        &scope(),
++        3,
++        RunEventPayload::RunResumed {
++            command_ref: record.reference().clone(),
++        },
++    ));
++    update.records.push(record);
++    let resumed = store.commit(&scope(), &id("run"), update).await.unwrap();
++    store
++        .commit(&scope(), &id("run"), finished(&resumed.snapshot, lease, 5))
++        .await
++        .unwrap();
++    drop(store);
++    let reopened = SqliteStateStore::open(database.path()).unwrap();
++    assert_eq!(
++        reopened
++            .load(&scope(), &id("run"))
++            .await
++            .unwrap()
++            .snapshot
++            .status,
++        RunStatus::Succeeded
++    );
++    assert_eq!(
++        reopened
++            .read_events(&scope(), &id("run"), 0, 10)
++            .await
++            .unwrap()
++            .events
++            .len(),
++        4
++    );
++}
++
++#[tokio::test]
++async fn independent_processes_deduplicate_admission_and_compete_for_an_active_session() {
++    for duplicate in [true, false] {
++        let database = Database::new();
++        drop(SqliteStateStore::open(database.path()).unwrap());
++        let mut first =
++            workers::Worker::spawn(&database, "first", "admit", json!({"request":"request"}));
++        let mut second = workers::Worker::spawn(
++            &database,
++            "second",
++            "admit",
++            json!({"request":if duplicate { "request" } else { "other-request" }}),
++        );
++        workers::wait(&first.ready);
++        workers::wait(&second.ready);
++        workers::signal(&database.file("gate"));
++        let results = [first.finish(), second.finish()];
++        assert_eq!(
++            results
++                .iter()
++                .filter(|result| result["created"] == true)
++                .count(),
++            1
++        );
++        if duplicate {
++            assert_eq!(results[0]["run"], results[1]["run"]);
++            assert_eq!(
++                results
++                    .iter()
++                    .filter(|result| result["created"] == false)
++                    .count(),
++                1
++            );
++        } else {
++            assert_eq!(
++                results
++                    .iter()
++                    .filter(|result| result["error"] == "SessionBusy")
++                    .count(),
++                1
++            );
++        }
++    }
++}
++
++#[tokio::test]
++async fn an_old_process_cannot_write_after_another_process_takes_over_its_lease() {
++    let database = Database::new();
++    let store = SqliteStateStore::open(database.path()).unwrap();
++    store
++        .admit(
++            &scope(),
++            durable_admission("run", "request", "session").await,
++        )
++        .await
++        .unwrap();
++    let mut first = workers::Worker::spawn(&database, "first", "lease_hold", json!({}));
++    let mut second = workers::Worker::spawn(&database, "second", "lease_hold", json!({}));
++    workers::wait(&first.ready);
++    workers::wait(&second.ready);
++    workers::signal(&database.file("gate"));
++    workers::wait(&first.result);
++    workers::wait(&second.result);
++    let initial = [workers::read(&first.result), workers::read(&second.result)];
++    assert_eq!(
++        initial
++            .iter()
++            .filter(|result| result["error"] == "LeaseBusy")
++            .count(),
++        1
++    );
++    let winner = initial
++        .iter()
++        .position(|result| result["fence"].is_u64())
++        .unwrap();
++    let acquired = &initial[winner];
++    let fence = acquired["fence"].as_u64().unwrap();
++    let mut replacement = workers::Worker::spawn(
++        &database,
++        "replacement",
++        "takeover",
++        json!({"now":acquired["expires_at_ms"].as_i64().unwrap() + 1,"owner":if winner == 0 {"first"} else {"second"}}),
++    );
++    let result = replacement.finish();
++    assert!(result["fence"].as_u64().unwrap() > fence);
++    assert_eq!(result["revision"], 1);
++    workers::signal(&database.file("resume"));
++    let completed = [first.finish(), second.finish()];
++    let rejected = completed
++        .iter()
++        .find(|result| result["stale_error"] == "LeaseLost")
++        .unwrap();
++    assert_eq!(rejected["observed_revision"], 1);
++    assert_eq!(
++        store
++            .load(&scope(), &id("run"))
++            .await
++            .unwrap()
++            .snapshot
++            .revision,
++        1
++    );
++}
++
++#[tokio::test]
++async fn committed_protected_state_recovers_after_process_exit_without_destructors() {
++    let database = Database::new();
++    let mut worker = workers::Worker::spawn(&database, "committer", "commit_exit", json!({}));
++    let expected = worker.finish();
++    let mut wal_path = database.path().into_os_string();
++    wal_path.push("-wal");
++    let wal = std::fs::metadata(std::path::PathBuf::from(wal_path))
++        .expect("the exited worker must leave its committed WAL for recovery");
++    assert!(wal.len() > 0, "the committed WAL must not be empty");
++    let reopened = SqliteStateStore::open(database.path()).unwrap();
++    let actual = reopened.load(&scope(), &id("run")).await.unwrap();
++    assert_eq!(
++        serde_json::to_value(&actual.snapshot).unwrap(),
++        expected["snapshot"]
++    );
++    assert_eq!(
++        serde_json::to_value(&actual.session).unwrap(),
++        expected["session"]
++    );
++    assert_eq!(
++        serde_json::to_value(&actual.messages).unwrap(),
++        expected["messages"]
++    );
++    assert_eq!(actual.snapshot.usage.model_calls, 1);
++    assert_eq!(actual.snapshot.usage.tool_attempts, 1);
++    assert_eq!(actual.snapshot.reservations.len(), 2);
++    assert_eq!(
++        actual
++            .snapshot
++            .system_inputs
++            .as_ref()
++            .unwrap()
++            .snapshot_ref
++            .revision,
++        7
++    );
++    assert!(
++        actual.snapshot.model_ledger[0]
++            .reported_model_version
++            .is_none()
++    );
++    for record in expected["records"].as_array().unwrap() {
++        let reference: RecordRef = serde_json::from_value(record["reference"].clone()).unwrap();
++        assert_eq!(
++            reopened
++                .read_record(&scope(), &reference)
++                .await
++                .unwrap()
++                .value(),
++            &record["value"]
++        );
++    }
++    let events = reopened
++        .read_events(&scope(), &id("run"), 0, 100)
++        .await
++        .unwrap();
++    assert_eq!(events.events.len(), 5);
++    assert_eq!(events.last_available_seq, 5);
++    assert!(actual.session.active_run_id.is_none());
++}
++
++#[tokio::test]
++async fn a_busy_writer_times_out_and_killing_an_uncommitted_writer_rolls_back_its_image() {
++    let database = Database::new();
++    let store =
++        SqliteStateStore::open_with_busy_timeout(database.path(), Duration::from_millis(20))
++            .unwrap();
++    let initial = store
++        .admit(
++            &scope(),
++            durable_admission("run", "request", "session").await,
++        )
++        .await
++        .unwrap()
++        .state;
++    let lock = Connection::open(database.path()).unwrap();
++    lock.execute_batch("BEGIN IMMEDIATE").unwrap();
++    let started = Instant::now();
++    assert_eq!(
++        store
++            .acquire_lease(&scope(), &id("run"), &id("owner"), 0, 100)
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::PersistenceUnavailable
++    );
++    assert!(
++        started.elapsed() < Duration::from_secs(2),
++        "busy timeout was not bounded"
++    );
++    lock.execute_batch("ROLLBACK").unwrap();
++    let mut worker = workers::Worker::spawn(&database, "uncommitted", "uncommitted", json!({}));
++    workers::wait(&worker.ready);
++    // A WAL reader sees the previous committed image while the writer is uncommitted.
++    assert_eq!(store.load(&scope(), &id("run")).await.unwrap(), initial);
++    worker.terminate();
++    let reopened = SqliteStateStore::open(database.path()).unwrap();
++    assert_eq!(reopened.load(&scope(), &id("run")).await.unwrap(), initial);
++    assert_eq!(
++        reopened
++            .read_events(&scope(), &id("run"), 0, 10)
++            .await
++            .unwrap()
++            .events
++            .len(),
++        1
++    );
++}
++
++#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++async fn time_waiting_for_a_write_lock_cannot_revive_a_lease() {
++    for renew in [false, true] {
++        let database = Database::new();
++        let store = Arc::new(
++            SqliteStateStore::open_with_busy_timeout(database.path(), Duration::from_secs(2))
++                .unwrap(),
++        );
++        let saved = store
++            .admit(
++                &scope(),
++                durable_admission("run", "request", "session").await,
++            )
++            .await
++            .unwrap()
++            .state;
++        let lease = store
++            .acquire_lease(&scope(), &id("run"), &id("owner"), 100, 40)
++            .await
++            .unwrap();
++        let request_time = lease.expires_at_ms - 40;
++        let connection = Connection::open(database.path()).unwrap();
++        connection.execute_batch("BEGIN IMMEDIATE").unwrap();
++        let entered = Arc::new(tokio::sync::Notify::new());
++        let task = {
++            let store = store.clone();
++            let entered = entered.clone();
++            tokio::spawn(async move {
++                entered.notify_one();
++                if renew {
++                    store
++                        .renew_lease(&scope(), &id("run"), &lease, request_time, 10_000)
++                        .await
++                        .map(|_| ())
++                } else {
++                    store
++                        .commit(
++                            &scope(),
++                            &id("run"),
++                            prepared(&saved.snapshot, lease, request_time),
++                        )
++                        .await
++                        .map(|_| ())
++                }
++            })
++        };
++        entered.notified().await;
++        tokio::time::sleep(Duration::from_millis(120)).await;
++        connection.execute_batch("ROLLBACK").unwrap();
++        assert_eq!(task.await.unwrap().unwrap_err().code, ErrorCode::LeaseLost);
++        assert_eq!(
++            store
++                .load(&scope(), &id("run"))
++                .await
++                .unwrap()
++                .snapshot
++                .revision,
++            0
++        );
++    }
++}
++
++fn rewrite_checkpoint(database: &Database, change: impl FnOnce(&mut Value)) {
++    let connection = Connection::open(database.path()).unwrap();
++    let encoded: String = connection
++        .query_row(
++            "SELECT checkpoint_json FROM wickle_scope_checkpoints",
++            [],
++            |row| row.get(0),
++        )
++        .unwrap();
++    let mut value: Value = serde_json::from_str(&encoded).unwrap();
++    change(&mut value);
++    let checksum = canonical_digest(&value);
++    assert_eq!(
++        connection
++            .execute(
++                "UPDATE wickle_scope_checkpoints SET checkpoint_json=?1,checksum=?2",
++                rusqlite::params![value.to_string(), checksum.as_str()]
++            )
++            .unwrap(),
++        1
++    );
++}
++
++#[tokio::test]
++async fn unknown_database_versions_and_corrupted_scope_images_are_rejected() {
++    // This is a user table, not one of SQLite's reserved sqlite_* internal objects.
++    let foreign = Database::new();
++    let connection = Connection::open(foreign.path()).unwrap();
++    connection
++        .execute_batch(
++            "CREATE TABLE sqliteuser(value INTEGER); INSERT INTO sqliteuser VALUES (42);",
++        )
++        .unwrap();
++    assert!(SqliteStateStore::open(foreign.path()).is_err());
++    assert_eq!(
++        connection
++            .query_row("SELECT value FROM sqliteuser", [], |row| row
++                .get::<_, i64>(0))
++            .unwrap(),
++        42
++    );
++
++    for (statement, expected) in [
++        (
++            "PRAGMA user_version=999",
++            ErrorCode::UnsupportedSchemaVersion,
++        ),
++        ("PRAGMA application_id=1", ErrorCode::InvalidContract),
++        (
++            "UPDATE wickle_metadata SET schema_version=999",
++            ErrorCode::UnsupportedSchemaVersion,
++        ),
++    ] {
++        let database = Database::new();
++        drop(SqliteStateStore::open(database.path()).unwrap());
++        Connection::open(database.path())
++            .unwrap()
++            .execute_batch(statement)
++            .unwrap();
++        assert_eq!(
++            SqliteStateStore::open(database.path()).unwrap_err().code,
++            expected
++        );
++    }
++    let changed_schema = Database::new();
++    let store = SqliteStateStore::open(changed_schema.path()).unwrap();
++    store
++        .admit(
++            &scope(),
++            durable_admission("run", "request", "session").await,
++        )
++        .await
++        .unwrap();
++    drop(store);
++    Connection::open(changed_schema.path())
++        .unwrap()
++        .execute_batch(
++            "BEGIN IMMEDIATE;
++         ALTER TABLE wickle_scope_checkpoints RENAME TO old_scope_checkpoints;
++         CREATE TABLE wickle_scope_checkpoints (
++             scope_key TEXT NOT NULL, checkpoint_json TEXT NOT NULL, checksum TEXT NOT NULL
++         ) STRICT;
++         INSERT INTO wickle_scope_checkpoints SELECT * FROM old_scope_checkpoints;
++         DROP TABLE old_scope_checkpoints;
++         COMMIT;",
++        )
++        .unwrap();
++    assert!(
++        SqliteStateStore::open(changed_schema.path()).is_err(),
++        "a schema without its uniqueness constraint was accepted"
++    );
++    for fault in [
++        "version",
++        "scope",
++        "duplicate_run",
++        "duplicate_record",
++        "duplicate_message",
++        "duplicate_event",
++        "record_body",
++        "missing_record",
++        "active_slot",
++        "fence",
++        "checksum",
++    ] {
++        let database = Database::new();
++        let store = SqliteStateStore::open(database.path()).unwrap();
++        store
++            .admit(
++                &scope(),
++                durable_admission("run", "request", "session").await,
++            )
++            .await
++            .unwrap();
++        store
++            .acquire_lease(&scope(), &id("run"), &id("owner"), 0, 10_000)
++            .await
++            .unwrap();
++        if fault == "duplicate_event" {
++            store
++                .admit(
++                    &scope(),
++                    durable_admission("other", "other-request", "other-session").await,
++                )
++                .await
++                .unwrap();
++        }
++        drop(store);
++        rewrite_checkpoint(&database, |image| match fault {
++            "version" => image["schema_version"] = json!("wickle.state-store.v999"),
++            "scope" => image["scope"]["tenant_id"] = json!("foreign"),
++            "duplicate_run" => {
++                let copy = image["runs"][0].clone();
++                image["runs"].as_array_mut().unwrap().push(copy);
++            }
++            "duplicate_record" => {
++                let copy = image["records"][0].clone();
++                image["records"].as_array_mut().unwrap().push(copy);
++            }
++            "duplicate_message" => {
++                let mut copy = image["sessions"][0]["messages"][0].clone();
++                copy["sequence"] = json!(2);
++                image["sessions"][0]["messages"]
++                    .as_array_mut()
++                    .unwrap()
++                    .push(copy);
++                image["sessions"][0]["snapshot"]["transcript_revision"] = json!(2);
++            }
++            "duplicate_event" => {
++                image["runs"][1]["events"][0]["event_id"] =
++                    image["runs"][0]["events"][0]["event_id"].clone()
++            }
++            "record_body" => {
++                let prompt = image["records"]
++                    .as_array_mut()
++                    .unwrap()
++                    .iter_mut()
++                    .find(|record| record["reference"]["record_id"] == "prompt-session")
++                    .unwrap();
++                prompt["value"]["instructions"] = json!("Changed instructions");
++            }
++            "missing_record" => image["records"]
++                .as_array_mut()
++                .unwrap()
++                .retain(|record| record["reference"]["record_id"] != "prompt-session"),
++            "active_slot" => {
++                image["sessions"][0]["snapshot"]
++                    .as_object_mut()
++                    .unwrap()
++                    .remove("active_run_id");
++            }
++            "fence" => image["runs"][0]["last_fencing_token"] = json!(0),
++            "checksum" => {}
++            _ => unreachable!(),
++        });
++        if fault == "checksum" {
++            let wrong = canonical_digest(&json!("different image"));
++            Connection::open(database.path())
++                .unwrap()
++                .execute(
++                    "UPDATE wickle_scope_checkpoints SET checksum=?1",
++                    [wrong.as_str()],
++                )
++                .unwrap();
++        }
++        let error = match SqliteStateStore::open(database.path()) {
++            Err(error) => error,
++            Ok(store) => store
++                .load(&scope(), &id("run"))
++                .await
++                .expect_err("corrupt checkpoint was accepted"),
++        };
++        if fault == "version" {
++            assert_eq!(error.code, ErrorCode::UnsupportedSchemaVersion);
++        }
++    }
++}
++
++#[tokio::test]
++async fn an_open_handle_does_not_silently_replace_a_deleted_or_different_database() {
++    let database = Database::new();
++    let store = SqliteStateStore::open(database.path()).unwrap();
++    store
++        .admit(
++            &scope(),
++            durable_admission("run", "request", "session").await,
++        )
++        .await
++        .unwrap();
++    std::fs::remove_file(database.path()).unwrap();
++    assert!(store.load(&scope(), &id("run")).await.is_err());
++    assert!(
++        !database.path().exists(),
++        "a read recreated the deleted database"
++    );
++    let replacement = SqliteStateStore::open(database.path()).unwrap();
++    replacement
++        .admit(
++            &scope(),
++            durable_admission("replacement", "replacement", "session").await,
++        )
++        .await
++        .unwrap();
++    assert!(
++        store.load(&scope(), &id("replacement")).await.is_err(),
++        "old handle accepted a different store identity"
++    );
++    assert!(replacement.load(&scope(), &id("replacement")).await.is_ok());
++}
++
++#[test]
++#[ignore = "Subprocess fixture; only parent process tests supply its required input"]
++fn process_worker() {
++    workers::run();
++}
+diff --git a/crates/wickle-state-sqlite/tests/support/mod.rs b/crates/wickle-state-sqlite/tests/support/mod.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..0b4d38fc4c6ab704f07db58deb7fc1b541c15ee2
+--- /dev/null
++++ b/crates/wickle-state-sqlite/tests/support/mod.rs
+@@ -0,0 +1,380 @@
++use std::{
++    path::PathBuf,
++    sync::{
++        Arc,
++        atomic::{AtomicUsize, Ordering},
++    },
++    time::Duration,
++};
++
++use futures_util::stream;
++use serde_json::{Value, json};
++use tokio_util::sync::CancellationToken;
++use wickle::*;
++
++use crate::core::{self, admission, event, id, scope};
++
++pub struct Database {
++    directory: PathBuf,
++}
++impl Database {
++    pub fn new() -> Self {
++        let unique = RandomIdSource.next_id().unwrap();
++        let directory = std::env::temp_dir().join(format!("wickle-sqlite-test-{unique}"));
++        std::fs::create_dir(&directory).unwrap();
++        Self { directory }
++    }
++    pub fn path(&self) -> PathBuf {
++        self.directory.join("state.sqlite")
++    }
++    pub fn file(&self, name: &str) -> PathBuf {
++        self.directory.join(name)
++    }
++}
++impl Drop for Database {
++    fn drop(&mut self) {
++        let _ = std::fs::remove_dir_all(&self.directory);
++    }
++}
++
++pub async fn durable_admission(run: &str, request: &str, session: &str) -> AdmissionInput {
++    let mut input = admission(run, request, session, "Stored request", "1").await;
++    input.require_durable = true;
++    input
++}
++
++#[derive(Default)]
++struct FixedIds(AtomicUsize);
++impl IdSource for FixedIds {
++    fn next_id(&self) -> Result<Id, ContractError> {
++        Ok(id(&format!(
++            "attempt-{}",
++            self.0.fetch_add(1, Ordering::SeqCst)
++        )))
++    }
++}
++struct FixedClock;
++impl Clock for FixedClock {
++    fn now(&self) -> Result<ClockReading, ContractError> {
++        Ok(ClockReading {
++            utc_ms: 0,
++            monotonic_ms: 0,
++        })
++    }
++    fn sleep_until<'a>(&'a self, _: u64) -> PortFuture<'a, ()> {
++        Box::pin(std::future::pending())
++    }
++}
++struct Allow;
++impl PolicyPort for Allow {
++    fn authorize<'a>(
++        &'a self,
++        _: &'a PolicyRequest,
++        _: PolicyContext<'a>,
++    ) -> PortFuture<'a, PolicyDecision> {
++        Box::pin(async { Ok(PolicyDecision::Allow {}) })
++    }
++}
++fn reference(name: &str) -> VersionedRef {
++    VersionedRef {
++        id: id(name),
++        version: id("1"),
++    }
++}
++struct Model;
++impl ModelPort for Model {
++    fn binding(&self) -> ModelPortBinding {
++        ModelPortBinding {
++            provider: id("fixture-provider"),
++            adapter: reference("fixture-adapter"),
++            connection_ref: reference("fixture-connection"),
++        }
++    }
++    fn generate<'a>(
++        &'a self,
++        request: &'a ModelRequest,
++        context: &'a ModelCallContext,
++    ) -> PortStream<'a, ModelEvent> {
++        assert_eq!(request.request_id, context.attempt_id);
++        Box::pin(stream::iter([
++            Ok(ModelEvent::ToolArgumentsDelta {
++                index: 0,
++                provider_call_id: Some("provider-call".into()),
++                name: Some("search".into()),
++                delta: r#"{"query":"reports"}"#.into(),
++            }),
++            Ok(ModelEvent::ResponseCompleted {
++                finish: ModelFinish::ToolCalls,
++                metadata: ModelResponseMetadata {
++                    provider_request_id: Some(id("reported-request")),
++                    reported_model_id: Some(id("reported-model")),
++                    reported_model_version: None,
++                    usage: Some(ModelUsage {
++                        measurement: UsageMeasurement::Reported,
++                        input_tokens: Some(7),
++                        output_tokens: Some(3),
++                    }),
++                },
++                continuation: vec![],
++            }),
++        ]))
++    }
++}
++
++/// Use real model/binder boundaries to create historical records whose state later changes.
++pub async fn populate_protected_run(store: Arc<dyn StateStore>) -> Value {
++    let registry = Arc::new(
++        SystemInputRegistry::new(vec![SystemInputDefinition {
++            key: id("workspace_id"),
++            version: id("definition-1"),
++            value_schema: json!({"type":"string","format":"uuid"}),
++            source: SystemInputSource::Run {},
++        }])
++        .unwrap(),
++    );
++    let compiled = SchemaCompiler::new().compile(ToolDescriptor {
++        tool: reference("search"), name: id("search"), description: "Search reports".into(),
++        input_schema: json!({"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer","default":10},"workspace_id":{"type":"string","format":"uuid"}},"required":["query","workspace_id"],"additionalProperties":false}),
++        agent_parameters: vec!["query".into(), "limit".into()], system_bindings: None,
++        output_schema: json!({"type":"string"}), side_effect: ToolSideEffect::ReadOnly,
++        concurrency: ToolConcurrency::Serial, retry: ToolRetryPolicy::Never, reconcile: false,
++        max_output_bytes: 1024.try_into().unwrap(),
++    }, &registry).unwrap();
++    let mut input = durable_admission("run", "request", "session").await;
++    let mut profile = serde_json::to_value(input.snapshot.profile.profile()).unwrap();
++    profile["tools"] = json!([{"tool_id":"search","version":"1"}]);
++    input.snapshot.profile = ProfileValidator::new(&core::Catalog { revision: "1" })
++        .validate(
++            &AgentProfile::from_json(&profile.to_string()).unwrap(),
++            &scope(),
++        )
++        .await
++        .unwrap();
++    let values = SystemInputs::new(
++        [(
++            "workspace_id".into(),
++            json!("11111111-1111-4111-8111-111111111111"),
++        )]
++        .into_iter()
++        .collect(),
++    );
++    let captured = RunSystemInputs::capture(scope(), Some(values), &registry).unwrap();
++    let run_record = captured.to_record(id("run-inputs"), 7);
++    input.snapshot.system_inputs = Some(captured.snapshot_ref(run_record.reference()).unwrap());
++    input.snapshot.request_digest = admission_digest(
++        &input.snapshot.request,
++        &input.snapshot.profile,
++        input.snapshot.system_inputs.as_ref(),
++    );
++    if let RunEventPayload::RunStarted { profile_digest, .. } = &mut input.events[0].payload {
++        *profile_digest = input.snapshot.profile.profile_digest().clone();
++    }
++    input.records.push(run_record);
++    store.admit(&scope(), input).await.unwrap();
++    let lease = store
++        .acquire_lease(&scope(), &id("run"), &id("worker"), 0, 20_000)
++        .await
++        .unwrap();
++    let cancellation = CancellationToken::new();
++    let context = ExecutionContext::new(
++        ExecutionContextData {
++            scope: scope(),
++            principal_ref: id("principal"),
++            capability_grant_ref: id("grant"),
++            trace_context: None,
++            system_inputs: None,
++        },
++        cancellation.clone(),
++    );
++    let ids = Arc::new(FixedIds::default());
++    let budget = RunBudget::attach(
++        store.clone(),
++        Arc::new(FixedClock),
++        ids.clone(),
++        scope(),
++        id("run"),
++        lease.clone(),
++        cancellation,
++    )
++    .await
++    .unwrap();
++    let policy = Arc::new(PolicyGate::new(Arc::new(Allow), Duration::from_secs(1)).unwrap());
++    let binding = Model.binding();
++    let request = ModelRequest {
++        options: JsonObject::new(),
++        request_id: id("step"),
++        purpose: ModelPurpose::Agent,
++        route: ResolvedModelRoute {
++            binding: reference("primary"),
++            catalog_revision: id("catalog"),
++            routing_policy_revision: id("policy"),
++            requested_model: id("requested-model"),
++            model_id: id("resolved-model"),
++            model_version: id("resolved-release"),
++            version_semantics: VersionSemantics::Pinned,
++            provider: binding.provider,
++            target: JsonObject::new(),
++            deployment_revision: None,
++            api_contract: ApiContract {
++                operation: id("messages"),
++                version: id("v1"),
++            },
++            adapter: binding.adapter,
++            capability_revision: id("capability-1"),
++            connection_ref: binding.connection_ref,
++        },
++        messages: vec![ModelMessage {
++            role: ModelRole::User,
++            content: vec![ModelContent::Text {
++                text: "Find reports".into(),
++            }],
++        }],
++        tools: vec![compiled.to_model_tool()],
++        output: ModelOutput::Text {},
++        max_output_tokens: 64.try_into().unwrap(),
++        limits: ModelResponseLimits {
++            max_input_bytes: 16384,
++            max_response_bytes: 4096,
++            max_delta_bytes: 1024,
++            max_events: 4,
++            max_tool_calls: 1,
++        },
++    };
++    let Guarded::Completed(ModelExchangeOutcome::Completed { response }) =
++        ModelExchange::new(Arc::new(Model), policy.clone())
++            .generate(&request, &context, &budget)
++            .await
++            .unwrap()
++    else {
++        panic!("fixture model was not completed");
++    };
++    let proposal = &response.tool_calls[0];
++    let call = ToolCall {
++        call_id: id("call"),
++        model_request_id: response.request_id.clone(),
++        provider_call_id: proposal.provider_call_id.clone(),
++        tool_name: proposal.name.clone(),
++        model_inputs: proposal.model_inputs.clone(),
++        descriptor_digest: compiled.descriptor_digest().clone(),
++        bound_input_ref: None,
++    };
++    let planned = ProtectedRecord::new(id("planned-call"), 1, serde_json::to_value(&call).unwrap());
++    let saved = store.load(&scope(), &id("run")).await.unwrap();
++    let mut update = core::prepared(&saved.snapshot, lease.clone(), 0);
++    update.snapshot.phase = RunPhase::Tool;
++    update.snapshot.tool_ledger.push(ToolLedgerEntry {
++        call: call.clone(),
++        state: ToolCallState::Planned {},
++    });
++    update.snapshot.last_event_seq += 1;
++    update.events.push(event(
++        &id("run"),
++        &id("session"),
++        &scope(),
++        update.snapshot.last_event_seq,
++        RunEventPayload::ToolPlanned {
++            call_ref: planned.reference().clone(),
++        },
++    ));
++    update.messages.push(Message {
++        message_id: id("call-message"),
++        run_id: id("run"),
++        sequence: 2.try_into().unwrap(),
++        role: MessageRole::Assistant,
++        origin: MessageOrigin::Model,
++        visibility: Visibility::UserAndModel,
++        content: vec![ContentBlock::ToolCall { call: call.clone() }],
++    });
++    update.records.push(planned);
++    store.commit(&scope(), &id("run"), update).await.unwrap();
++    let bound = InputBinder::new(registry, None, policy, ids)
++        .bind(&compiled, &id("call"), &context, &budget)
++        .await
++        .unwrap();
++    let attempt = budget
++        .reserve(ReservationKind::Tool {
++            call_id: id("call"),
++        })
++        .await
++        .unwrap();
++    let saved = store.load(&scope(), &id("run")).await.unwrap();
++    let mut dispatch = core::prepared(&saved.snapshot, lease.clone(), 0);
++    dispatch.snapshot.phase = RunPhase::Tool;
++    dispatch.snapshot.tool_ledger[0].state = ToolCallState::Dispatching {
++        attempt_id: attempt.attempt_id,
++        idempotency_key: id("effect-key"),
++    };
++    store.commit(&scope(), &id("run"), dispatch).await.unwrap();
++    let receipt = ProtectedRecord::new(id("receipt"), 1, json!({"fixture_effect":"completed"}));
++    let tool_result = ToolResult {
++        call_id: id("call"),
++        call_message_id: id("call-message"),
++        status: ToolResultStatus::Succeeded,
++        content: vec![InputContent::Text {
++            text: "Observed reports".into(),
++        }],
++        effect_receipt_ref: Some(receipt.reference().clone()),
++        error: None,
++    };
++    let result_record = ProtectedRecord::new(
++        id("tool-result"),
++        1,
++        serde_json::to_value(&tool_result).unwrap(),
++    );
++    let saved = store.load(&scope(), &id("run")).await.unwrap();
++    let mut settled = core::prepared(&saved.snapshot, lease.clone(), 0);
++    settled.snapshot.tool_ledger[0].state = ToolCallState::Settled {
++        result: tool_result.clone(),
++    };
++    settled.snapshot.last_event_seq += 1;
++    settled.events.push(event(
++        &id("run"),
++        &id("session"),
++        &scope(),
++        settled.snapshot.last_event_seq,
++        RunEventPayload::ToolSettled {
++            result_ref: result_record.reference().clone(),
++        },
++    ));
++    settled.messages.push(Message {
++        message_id: id("result-message"),
++        run_id: id("run"),
++        sequence: 3.try_into().unwrap(),
++        role: MessageRole::Tool,
++        origin: MessageOrigin::Tool,
++        visibility: Visibility::UserAndModel,
++        content: vec![ContentBlock::ToolResult {
++            result: tool_result,
++        }],
++    });
++    settled.records.extend([receipt.clone(), result_record]);
++    store.commit(&scope(), &id("run"), settled).await.unwrap();
++    let saved = store.load(&scope(), &id("run")).await.unwrap();
++    store
++        .commit(
++            &scope(),
++            &id("run"),
++            core::finished(&saved.snapshot, lease, 0),
++        )
++        .await
++        .unwrap();
++    let saved = store.load(&scope(), &id("run")).await.unwrap();
++    let references = [
++        saved
++            .snapshot
++            .system_inputs
++            .as_ref()
++            .unwrap()
++            .snapshot_ref
++            .clone(),
++        bound.reference,
++        saved.snapshot.model_ledger[0].response_ref.clone().unwrap(),
++        receipt.reference().clone(),
++    ];
++    let mut records = Vec::new();
++    for reference in references {
++        let record = store.read_record(&scope(), &reference).await.unwrap();
++        records.push(json!({"reference":reference,"value":record.value()}));
++    }
++    json!({"snapshot":saved.snapshot,"session":saved.session,"messages":saved.messages,"records":records})
++}
+diff --git a/crates/wickle-state-sqlite/tests/support/workers.rs b/crates/wickle-state-sqlite/tests/support/workers.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..bad18762f4ce685886c471abc29f213c08af296b
+--- /dev/null
++++ b/crates/wickle-state-sqlite/tests/support/workers.rs
+@@ -0,0 +1,163 @@
++use std::{
++    path::{Path, PathBuf},
++    process::{Child, Command, Stdio},
++    time::{Duration, Instant},
++};
++
++use serde_json::{Value, json};
++use wickle::*;
++use wickle_state_sqlite::SqliteStateStore;
++
++use crate::{
++    core::{id, prepared, scope},
++    support::{Database, durable_admission, populate_protected_run},
++};
++
++pub struct Worker {
++    child: Child,
++    pub result: PathBuf,
++    pub ready: PathBuf,
++}
++impl Worker {
++    pub fn spawn(database: &Database, actor: &str, mode: &str, details: Value) -> Self {
++        let result = database.file(&format!("{actor}.result"));
++        let ready = database.file(&format!("{actor}.ready"));
++        let config = json!({
++            "database":database.path(), "result":result, "ready":ready,
++            "gate":database.file("gate"), "resume":database.file("resume"),
++            "mode":mode, "actor":actor, "details":details,
++        });
++        let child = Command::new(std::env::current_exe().unwrap())
++            .args(["--ignored", "--exact", "process_worker", "--nocapture"])
++            .env("WICKLE_SQLITE_TEST_WORKER", config.to_string())
++            .stdin(Stdio::null())
++            .stdout(Stdio::null())
++            .stderr(Stdio::null())
++            .spawn()
++            .unwrap();
++        Self {
++            child,
++            result,
++            ready,
++        }
++    }
++    pub fn finish(&mut self) -> Value {
++        let deadline = Instant::now() + Duration::from_secs(20);
++        loop {
++            if let Some(status) = self.child.try_wait().unwrap() {
++                assert!(status.success(), "SQLite subprocess failed");
++                return read(&self.result);
++            }
++            assert!(
++                Instant::now() < deadline,
++                "SQLite subprocess did not finish"
++            );
++            std::thread::sleep(Duration::from_millis(5));
++        }
++    }
++    pub fn terminate(&mut self) {
++        self.child.kill().unwrap();
++        self.child.wait().unwrap();
++    }
++}
++impl Drop for Worker {
++    fn drop(&mut self) {
++        let _ = self.child.kill();
++        let _ = self.child.wait();
++    }
++}
++
++pub fn wait(path: &Path) {
++    let deadline = Instant::now() + Duration::from_secs(20);
++    while !path.exists() {
++        assert!(
++            Instant::now() < deadline,
++            "SQLite subprocess barrier timed out"
++        );
++        std::thread::sleep(Duration::from_millis(5));
++    }
++}
++pub fn signal(path: &Path) {
++    std::fs::write(path, b"ready").unwrap();
++}
++pub fn read(path: &Path) -> Value {
++    serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
++}
++fn write(path: &Path, value: Value) {
++    let temporary = path.with_extension("writing");
++    std::fs::write(&temporary, serde_json::to_vec(&value).unwrap()).unwrap();
++    std::fs::rename(temporary, path).unwrap();
++}
++
++pub fn run() {
++    let encoded = std::env::var("WICKLE_SQLITE_TEST_WORKER")
++        .expect("This ignored fixture requires an explicit parent test command");
++    let config: Value = serde_json::from_str(&encoded).unwrap();
++    let database = Path::new(config["database"].as_str().unwrap());
++    let result = Path::new(config["result"].as_str().unwrap());
++    let ready = Path::new(config["ready"].as_str().unwrap());
++    let actor = config["actor"].as_str().unwrap();
++    let mode = config["mode"].as_str().unwrap();
++    if mode == "uncommitted" {
++        let connection = rusqlite::Connection::open(database).unwrap();
++        connection.execute_batch("BEGIN IMMEDIATE; UPDATE wickle_scope_checkpoints SET checkpoint_json='uncommitted invalid image', checksum='uncommitted';").unwrap();
++        signal(ready);
++        loop {
++            std::thread::park();
++        }
++    }
++    let runtime = tokio::runtime::Builder::new_current_thread()
++        .enable_all()
++        .build()
++        .unwrap();
++    runtime.block_on(async {
++        let store = SqliteStateStore::open(database).unwrap();
++        signal(ready);
++        if matches!(mode, "admit" | "lease_hold") {
++            wait(Path::new(config["gate"].as_str().unwrap()));
++        }
++        match mode {
++            "admit" => {
++                let request = config["details"]["request"].as_str().unwrap();
++                let receipt = store.admit(&scope(), durable_admission(actor, request, "session").await).await;
++                write(result, match receipt {
++                    Ok(receipt) => json!({"created":receipt.created,"run":receipt.state.snapshot.run_id}),
++                    Err(error) => json!({"error":format!("{:?}",error.code)}),
++                });
++            }
++            "lease_hold" => {
++                match store.acquire_lease(&scope(), &id("run"), &id(actor), 100, 10_000).await {
++                    Ok(lease) => {
++                        write(result, json!({"fence":lease.fencing_token,"expires_at_ms":lease.expires_at_ms}));
++                        wait(Path::new(config["resume"].as_str().unwrap()));
++                        let latest = store.load(&scope(), &id("run")).await.unwrap();
++                        let error = store.commit(&scope(), &id("run"), prepared(&latest.snapshot, lease.clone(), lease.expires_at_ms + 10)).await.unwrap_err();
++                        write(result, json!({"fence":lease.fencing_token,"stale_error":format!("{:?}",error.code),"observed_revision":latest.snapshot.revision}));
++                    }
++                    Err(error) => write(result, json!({"error":format!("{:?}",error.code)})),
++                }
++            }
++            "takeover" => {
++                let now = config["details"]["now"].as_i64().unwrap();
++                let owner = config["details"]["owner"].as_str().unwrap();
++                let lease = store.acquire_lease(&scope(), &id("run"), &id(owner), now, 10_000).await.unwrap();
++                let saved = store.load(&scope(), &id("run")).await.unwrap();
++                let committed = store.commit(&scope(), &id("run"), prepared(&saved.snapshot, lease.clone(), now + 1)).await.unwrap();
++                write(result, json!({"fence":lease.fencing_token,"revision":committed.snapshot.revision}));
++            }
++            "commit_exit" => {
++                let retained_connection = rusqlite::Connection::open(database).unwrap();
++                let _: i64 = retained_connection.query_row(
++                    "SELECT count(*) FROM wickle_scope_checkpoints", [], |row| row.get(0)
++                ).unwrap();
++                let retained_store = std::sync::Arc::new(store);
++                let saved = populate_protected_run(retained_store.clone()).await;
++                write(result, saved);
++                // Keep an initialized WAL connection alive so operation-level closes
++                // cannot perform last-connection cleanup before this abrupt exit.
++                std::process::exit(0);
++            }
++            _ => panic!("Unknown SQLite subprocess fixture mode"),
++        }
++    });
++}
+diff --git a/crates/wickle/src/lib.rs b/crates/wickle/src/lib.rs
+index e0f527a1668d578db97cdedd1c522f96b4a2079d..f2fadeb06f674615f98bb88f1ab6a5e61015b853 100644
+--- a/crates/wickle/src/lib.rs
++++ b/crates/wickle/src/lib.rs
+@@ -61,7 +61,8 @@ pub use policy::{
+ };
+ pub use state::{
+     AdmissionInput, AdmissionResult, CommitInput, EventPage, MAX_EVENT_PAGE_SIZE, MemoryStateStore,
+-    ProtectedRecord, RunLease, StateStore, StateStoreCapabilities, StoredRun,
++    ProtectedRecord, RunLease, STATE_STORE_CHECKPOINT_VERSION, StateStore, StateStoreCapabilities,
++    StateStoreCheckpoint, StoredRun,
+ };
+ pub use tool_schema::{
+     CompiledTool, SchemaCompiler, SystemInputDefinition, SystemInputRegistry, SystemInputSource,
+diff --git a/crates/wickle/src/state.rs b/crates/wickle/src/state.rs
+index bba953491e5b634c6680f5efcde249f55f843a8c..e87d5e7808308f2c369d92448493ed5856e7c2e5 100644
+--- a/crates/wickle/src/state.rs
++++ b/crates/wickle/src/state.rs
+@@ -8,6 +8,9 @@ use std::{
+ use serde::de::DeserializeOwned;
+ use serde_json::Value;
+ 
++mod checkpoint;
++pub use checkpoint::{STATE_STORE_CHECKPOINT_VERSION, StateStoreCheckpoint};
++
+ use crate::{
+     ApprovalTarget, BudgetUsage, ContentBlock, ContractError, ErrorCode, Id, Message,
+     ModelAttemptState, ModelExchangeOutcome, ModelFinish, ModelInvocationRecord, OutcomeResult,
+@@ -251,7 +254,7 @@ pub trait StateStore: Send + Sync {
+ type ScopeKey = (Id, Id, Option<Id>);
+ type RecordKey = (Id, u64);
+ 
+-#[derive(Default)]
++#[derive(Clone, Default)]
+ struct ScopeState {
+     sessions: BTreeMap<Id, SessionState>,
+     runs: BTreeMap<Id, RunState>,
+@@ -261,11 +264,13 @@ struct ScopeState {
+     message_ids: BTreeSet<Id>,
+ }
+ 
++#[derive(Clone)]
+ struct SessionState {
+     snapshot: SessionSnapshot,
+     messages: Vec<Message>,
+ }
+ 
++#[derive(Clone)]
+ struct RunState {
+     snapshot: RunSnapshot,
+     events: Vec<RunEvent>,
+diff --git a/crates/wickle/src/state/checkpoint.rs b/crates/wickle/src/state/checkpoint.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..f22dd6e0be0583ce288357639d712ca1dcff2346
+--- /dev/null
++++ b/crates/wickle/src/state/checkpoint.rs
+@@ -0,0 +1,549 @@
++use super::*;
++use crate::{JsonDigest, RunOutcome, RunRequest, serialization::data_digest};
++use serde::{Deserialize, Serialize, Serializer};
++
++/// Version of the protected, scope-local memory-store checkpoint format.
++pub const STATE_STORE_CHECKPOINT_VERSION: &str = "wickle.state-store.v1";
++
++/// An owned, validated scope graph. Explicit serialization contains protected
++/// transcript and input data and is intended only for authorized storage adapters.
++/// No caller can mutate its state or deserialize it without full validation.
++#[derive(Clone)]
++pub struct StateStoreCheckpoint {
++    scope: Scope,
++    state: ScopeState,
++}
++
++impl fmt::Debug for StateStoreCheckpoint {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_struct("StateStoreCheckpoint")
++            .field("session_count", &self.state.sessions.len())
++            .field("run_count", &self.state.runs.len())
++            .field("record_count", &self.state.records.len())
++            .finish_non_exhaustive()
++    }
++}
++
++#[derive(Serialize)]
++struct CheckpointView<'a> {
++    schema_version: &'static str,
++    scope: &'a Scope,
++    sessions: Vec<SessionView<'a>>,
++    runs: Vec<RunView<'a>>,
++    records: Vec<RecordView<'a>>,
++}
++#[derive(Serialize)]
++struct SessionView<'a> {
++    snapshot: &'a SessionSnapshot,
++    messages: &'a [Message],
++}
++#[derive(Serialize)]
++struct RunView<'a> {
++    snapshot: &'a RunSnapshot,
++    events: &'a [RunEvent],
++    lease: Option<LeaseData>,
++    last_fencing_token: u64,
++}
++#[derive(Serialize)]
++struct RecordView<'a> {
++    reference: &'a RecordRef,
++    value: &'a Value,
++}
++
++impl Serialize for StateStoreCheckpoint {
++    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
++        CheckpointView {
++            schema_version: STATE_STORE_CHECKPOINT_VERSION,
++            scope: &self.scope,
++            sessions: self
++                .state
++                .sessions
++                .values()
++                .map(|session| SessionView {
++                    snapshot: &session.snapshot,
++                    messages: &session.messages,
++                })
++                .collect(),
++            runs: self
++                .state
++                .runs
++                .values()
++                .map(|run| RunView {
++                    snapshot: &run.snapshot,
++                    events: &run.events,
++                    lease: run.lease.as_ref().map(LeaseData::from),
++                    last_fencing_token: run.last_fencing_token,
++                })
++                .collect(),
++            records: self
++                .state
++                .records
++                .values()
++                .map(|record| RecordView {
++                    reference: record.reference(),
++                    value: record.value(),
++                })
++                .collect(),
++        }
++        .serialize(serializer)
++    }
++}
++
++#[derive(Deserialize)]
++#[serde(deny_unknown_fields)]
++struct CheckpointData {
++    schema_version: String,
++    scope: Scope,
++    sessions: Vec<SessionData>,
++    runs: Vec<RunData>,
++    records: Vec<RecordData>,
++}
++#[derive(Deserialize)]
++#[serde(deny_unknown_fields)]
++struct SessionData {
++    snapshot: SessionSnapshot,
++    messages: Vec<Message>,
++}
++#[derive(Deserialize)]
++#[serde(deny_unknown_fields)]
++struct RunData {
++    snapshot: RunSnapshot,
++    events: Vec<RunEvent>,
++    lease: Option<LeaseData>,
++    last_fencing_token: u64,
++}
++#[derive(Deserialize)]
++#[serde(deny_unknown_fields)]
++struct RecordData {
++    reference: RecordRef,
++    value: Value,
++}
++#[derive(Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++struct LeaseData {
++    scope: Scope,
++    run_id: Id,
++    owner: Id,
++    fencing_token: u64,
++    expires_at_ms: i64,
++}
++impl From<&RunLease> for LeaseData {
++    fn from(lease: &RunLease) -> Self {
++        Self {
++            scope: lease.scope.clone(),
++            run_id: lease.run_id.clone(),
++            owner: lease.owner.clone(),
++            fencing_token: lease.fencing_token,
++            expires_at_ms: lease.expires_at_ms,
++        }
++    }
++}
++impl From<LeaseData> for RunLease {
++    fn from(lease: LeaseData) -> Self {
++        Self {
++            scope: lease.scope,
++            run_id: lease.run_id,
++            owner: lease.owner,
++            fencing_token: lease.fencing_token,
++            expires_at_ms: lease.expires_at_ms,
++        }
++    }
++}
++
++impl StateStoreCheckpoint {
++    /// Exact namespace covered by the protected checkpoint.
++    pub fn scope(&self) -> &Scope {
++        &self.scope
++    }
++    /// Canonical identity of the serialized scope graph, excluding derived indexes.
++    pub fn digest(&self) -> JsonDigest {
++        data_digest(self)
++    }
++    /// Parse a known version and validate scope, trusted digest, current state,
++    /// historical typed records and derived indexes. Collection order is the stable
++    /// key order produced by export; malformed or noncanonical images are rejected.
++    pub fn from_json(
++        input: &str,
++        scope: &Scope,
++        expected_digest: &JsonDigest,
++    ) -> Result<Self, ContractError> {
++        let value = crate::parse_json(input)?;
++        if value.get("schema_version").and_then(Value::as_str)
++            != Some(STATE_STORE_CHECKPOINT_VERSION)
++        {
++            return Err(error(
++                ErrorCode::UnsupportedSchemaVersion,
++                "checkpoint.schema_version",
++            ));
++        }
++        if canonical_digest(&value) != *expected_digest {
++            return Err(invalid("checkpoint.digest"));
++        }
++        let data: CheckpointData =
++            serde_json::from_value(value).map_err(|_| invalid("checkpoint"))?;
++        if &data.scope != scope {
++            return Err(error(ErrorCode::AccessDenied, "checkpoint.scope"));
++        }
++        let checkpoint = restore_graph(data)?;
++        if checkpoint.digest() != *expected_digest {
++            return Err(invalid("checkpoint.canonical_form"));
++        }
++        Ok(checkpoint)
++    }
++}
++
++impl MemoryStateStore {
++    /// Copy only the requested namespace without performing I/O or exposing live
++    /// mutable references. Unknown namespaces return StateNotFound.
++    pub fn export_checkpoint(&self, scope: &Scope) -> Result<StateStoreCheckpoint, ContractError> {
++        let scopes = self.lock()?;
++        Ok(StateStoreCheckpoint {
++            scope: scope.clone(),
++            state: namespace(&scopes, scope)?.clone(),
++        })
++    }
++    /// Move an already validated private checkpoint into a new process-local store.
++    /// This does not perform a second graph validation or claim durable capabilities.
++    pub fn from_checkpoint(checkpoint: StateStoreCheckpoint) -> Self {
++        Self {
++            scopes: Mutex::new(BTreeMap::from([(
++                scope_key(&checkpoint.scope),
++                checkpoint.state,
++            )])),
++        }
++    }
++}
++
++fn restore_graph(data: CheckpointData) -> Result<StateStoreCheckpoint, ContractError> {
++    if data.schema_version != STATE_STORE_CHECKPOINT_VERSION {
++        return Err(invalid("checkpoint.schema_version"));
++    }
++    let mut state = ScopeState::default();
++    for record in data.records {
++        if canonical_digest(&record.value) != record.reference.digest {
++            return Err(invalid("checkpoint.record_digest"));
++        }
++        let key = record_key(&record.reference);
++        if state
++            .records
++            .insert(
++                key,
++                ProtectedRecord {
++                    reference: record.reference,
++                    value: record.value,
++                },
++            )
++            .is_some()
++        {
++            return Err(invalid("checkpoint.duplicate_record"));
++        }
++    }
++    for session in data.sessions {
++        if session.snapshot.scope != data.scope {
++            return Err(invalid("checkpoint.session_scope"));
++        }
++        if state
++            .sessions
++            .insert(
++                session.snapshot.session_id.clone(),
++                SessionState {
++                    snapshot: session.snapshot,
++                    messages: session.messages,
++                },
++            )
++            .is_some()
++        {
++            return Err(invalid("checkpoint.duplicate_session"));
++        }
++    }
++    for run in data.runs {
++        if run.snapshot.scope != data.scope {
++            return Err(invalid("checkpoint.run_scope"));
++        }
++        run.snapshot.validate()?;
++        let session = state
++            .sessions
++            .get(&run.snapshot.request.session_id)
++            .ok_or_else(|| invalid("checkpoint.run_session"))?;
++        if session.snapshot.profile_digest != *run.snapshot.profile.profile_digest() {
++            return Err(invalid("checkpoint.session_profile"));
++        }
++        if run.snapshot.revision > 0 && run.last_fencing_token == 0 {
++            return Err(invalid("checkpoint.fencing_generation"));
++        }
++        if let Some(lease) = &run.lease {
++            if lease.scope != data.scope
++                || lease.run_id != run.snapshot.run_id
++                || lease.fencing_token == 0
++                || lease.fencing_token != run.last_fencing_token
++                || run.snapshot.status.is_terminal()
++            {
++                return Err(invalid("checkpoint.lease"));
++            }
++        }
++        if run.snapshot.revision == 0
++            && (run.snapshot.status != RunStatus::Running
++                || run.snapshot.phase != RunPhase::Admission
++                || run.snapshot.usage != BudgetUsage::default()
++                || !run.snapshot.reservations.is_empty()
++                || !run.snapshot.model_ledger.is_empty()
++                || !run.snapshot.tool_ledger.is_empty()
++                || run.events.len() != 1)
++        {
++            return Err(invalid("checkpoint.admission"));
++        }
++        let request = (
++            run.snapshot.request.session_id.clone(),
++            run.snapshot.request.request_id.clone(),
++        );
++        if state
++            .requests
++            .insert(request, run.snapshot.run_id.clone())
++            .is_some()
++        {
++            return Err(invalid("checkpoint.duplicate_request"));
++        }
++        let run_id = run.snapshot.run_id.clone();
++        if state
++            .runs
++            .insert(
++                run_id,
++                RunState {
++                    snapshot: run.snapshot,
++                    events: run.events,
++                    lease: run.lease.map(Into::into),
++                    last_fencing_token: run.last_fencing_token,
++                },
++            )
++            .is_some()
++        {
++            return Err(invalid("checkpoint.duplicate_run"));
++        }
++    }
++    let empty = BTreeMap::new();
++    let mut message_ids = BTreeSet::new();
++    for session in state.sessions.values() {
++        record_value(&state, &empty, &session.snapshot.prompt_snapshot)?;
++        let active: Vec<_> = state
++            .runs
++            .values()
++            .filter(|run| {
++                run.snapshot.request.session_id == session.snapshot.session_id
++                    && !run.snapshot.status.is_terminal()
++            })
++            .collect();
++        if active.len() > 1
++            || active.first().map(|run| &run.snapshot.run_id)
++                != session.snapshot.active_run_id.as_ref()
++        {
++            return Err(invalid("checkpoint.active_run"));
++        }
++        if !state
++            .runs
++            .values()
++            .any(|run| run.snapshot.request.session_id == session.snapshot.session_id)
++        {
++            return Err(invalid("checkpoint.orphan_session"));
++        }
++        let mut sequence = 0;
++        let mut seen_runs = BTreeSet::new();
++        let mut previous_run = None;
++        for message in &session.messages {
++            let run = state
++                .runs
++                .get(&message.run_id)
++                .ok_or_else(|| invalid("checkpoint.message_run"))?;
++            if run.snapshot.request.session_id != session.snapshot.session_id
++                || !message_ids.insert(message.message_id.clone())
++            {
++                return Err(invalid("checkpoint.message_identity"));
++            }
++            if previous_run != Some(&message.run_id) {
++                if !seen_runs.insert(&message.run_id) {
++                    return Err(invalid("checkpoint.message_run_order"));
++                }
++                previous_run = Some(&message.run_id);
++            }
++            sequence = validate_messages(
++                &state,
++                &empty,
++                &message.run_id,
++                sequence,
++                std::slice::from_ref(message),
++            )?;
++        }
++        if sequence != session.snapshot.transcript_revision {
++            return Err(invalid("checkpoint.transcript_revision"));
++        }
++        if let Some(active_run) = &session.snapshot.active_run_id {
++            if seen_runs.contains(active_run) && previous_run != Some(active_run) {
++                return Err(invalid("checkpoint.active_run_order"));
++            }
++        }
++    }
++    let mut event_ids = BTreeSet::new();
++    for run in state.runs.values() {
++        validate_snapshot_refs(&state, &empty, &run.snapshot)?;
++        validate_history(&state, run, &mut event_ids)?;
++    }
++    state.message_ids = message_ids;
++    state.event_ids = event_ids;
++    Ok(StateStoreCheckpoint {
++        scope: data.scope,
++        state,
++    })
++}
++
++fn validate_history(
++    state: &ScopeState,
++    run: &RunState,
++    event_ids: &mut BTreeSet<Id>,
++) -> Result<(), ContractError> {
++    let empty = BTreeMap::new();
++    let mut sequence = 0_u64;
++    let mut started = 0;
++    let mut finished = 0;
++    for event in &run.events {
++        sequence = sequence
++            .checked_add(1)
++            .ok_or_else(|| invalid("checkpoint.event_sequence"))?;
++        if event.scope != run.snapshot.scope
++            || event.run_id != run.snapshot.run_id
++            || event.session_id != run.snapshot.request.session_id
++            || event.seq.get() != sequence
++            || !event_ids.insert(event.event_id.clone())
++        {
++            return Err(invalid("checkpoint.event_identity"));
++        }
++        match &event.payload {
++            RunEventPayload::RunStarted {
++                request_ref,
++                profile_digest,
++            } => {
++                started += 1;
++                let request: RunRequest = event_record(state, &empty, request_ref)?;
++                if sequence != 1
++                    || request != run.snapshot.request
++                    || profile_digest != run.snapshot.profile.profile_digest()
++                {
++                    return Err(invalid("checkpoint.run_started"));
++                }
++            }
++            RunEventPayload::RunFinished { outcome_ref } => {
++                finished += 1;
++                let outcome: RunOutcome = event_record(state, &empty, outcome_ref)?;
++                if !run.snapshot.status.is_terminal()
++                    || run.snapshot.outcome.as_ref() != Some(&outcome)
++                {
++                    return Err(invalid("checkpoint.run_finished"));
++                }
++            }
++            RunEventPayload::ToolPlanned { call_ref } => {
++                let mut call: ToolCall = event_record(state, &empty, call_ref)?;
++                let current = run
++                    .snapshot
++                    .tool_ledger
++                    .iter()
++                    .find(|entry| entry.call.call_id == call.call_id)
++                    .ok_or_else(|| invalid("checkpoint.tool_planned"))?;
++                if call.bound_input_ref.is_none() {
++                    call.bound_input_ref = current.call.bound_input_ref.clone();
++                }
++                if call != current.call {
++                    return Err(invalid("checkpoint.tool_planned"));
++                }
++            }
++            RunEventPayload::ToolSettled { result_ref } => {
++                let result: ToolResult = event_record(state, &empty, result_ref)?;
++                if !run.snapshot.tool_ledger.iter().any(|entry| matches!(&entry.state, ToolCallState::Settled { result: current } if current == &result)) {
++                    return Err(invalid("checkpoint.tool_settled"));
++                }
++                for reference in tool_result_refs(&result) {
++                    record_value(state, &empty, reference)?;
++                }
++            }
++            RunEventPayload::VerificationCompleted { verification_ref } => {
++                let verification: VerificationSummary =
++                    event_record(state, &empty, verification_ref)?;
++                for reference in &verification.evidence {
++                    record_value(state, &empty, reference)?;
++                }
++            }
++            RunEventPayload::RunWaiting { wait_ref } => {
++                let wait: WaitState = event_record(state, &empty, wait_ref)?;
++                if let WaitTarget::Approval {
++                    target: ApprovalTarget::Candidate { candidate_ref, .. },
++                } = &wait.target
++                {
++                    record_value(state, &empty, candidate_ref)?;
++                }
++            }
++            RunEventPayload::RunResumed { command_ref } => {
++                let command: ResumeCommand = event_record(state, &empty, command_ref)?;
++                if command.run_id != run.snapshot.run_id
++                    || command.expected_revision >= run.snapshot.revision
++                {
++                    return Err(invalid("checkpoint.run_resumed"));
++                }
++                let reference = match &command.action {
++                    ResumeAction::External { receipt_ref, .. } => Some(receipt_ref),
++                    ResumeAction::Recover { recovery_ref } => Some(recovery_ref),
++                    ResumeAction::Approve {
++                        target: ApprovalTarget::Candidate { candidate_ref, .. },
++                        ..
++                    }
++                    | ResumeAction::Deny {
++                        target: ApprovalTarget::Candidate { candidate_ref, .. },
++                        ..
++                    } => Some(candidate_ref),
++                    _ => None,
++                };
++                if let Some(reference) = reference {
++                    record_value(state, &empty, reference)?;
++                }
++            }
++            RunEventPayload::ModelRouteSelected {
++                invocation_ref,
++                route_digest,
++            } => {
++                let old: ModelInvocationRecord = event_record(state, &empty, invocation_ref)?;
++                let current = run
++                    .snapshot
++                    .model_ledger
++                    .iter()
++                    .find(|current| current.attempt_id == old.attempt_id)
++                    .ok_or_else(|| invalid("checkpoint.model_route"))?;
++                if old.run_id != current.run_id
++                    || old.model_step_id != current.model_step_id
++                    || old.purpose != current.purpose
++                    || old.route != current.route
++                    || old.selection_reason != current.selection_reason
++                    || old.request_digest != current.request_digest
++                    || old.route.digest() != *route_digest
++                    || (matches!(
++                        old.state,
++                        ModelAttemptState::Completed {} | ModelAttemptState::Failed { .. }
++                    ) && &old != current)
++                    || (matches!(old.state, ModelAttemptState::Unknown {})
++                        && matches!(current.state, ModelAttemptState::Reserved {}))
++                {
++                    return Err(invalid("checkpoint.model_route"));
++                }
++                if let Some(reference) = &old.response_ref {
++                    validate_model_response(state, &empty, &old, reference)?;
++                }
++            }
++        }
++    }
++    if started != 1
++        || sequence != run.snapshot.last_event_seq
++        || finished != usize::from(run.snapshot.status.is_terminal())
++    {
++        return Err(invalid("checkpoint.events"));
++    }
++    Ok(())
++}
++
++fn invalid(path: &str) -> ContractError {
++    error(ErrorCode::InvalidSnapshot, path)
++}
+diff --git a/crates/wickle/tests/state_checkpoint.rs b/crates/wickle/tests/state_checkpoint.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..95b064a926c98506d57cc36d4f0bd2ced95999a3
+--- /dev/null
++++ b/crates/wickle/tests/state_checkpoint.rs
+@@ -0,0 +1,394 @@
++//! Restoration checks exercise saved state and historical facts, not implementation text.
++
++mod support;
++
++use serde_json::{Value, json};
++use support::{admission, event, finished, id, prepared, scope};
++use wickle::*;
++
++fn restore_json(value: &Value, owner: &Scope) -> Result<MemoryStateStore, ContractError> {
++    let digest = canonical_digest(value);
++    let checkpoint = StateStoreCheckpoint::from_json(&value.to_string(), owner, &digest)?;
++    Ok(MemoryStateStore::from_checkpoint(checkpoint))
++}
++
++#[tokio::test]
++async fn exporting_one_namespace_excludes_another_scope_with_the_same_identifiers() {
++    let store = MemoryStateStore::new();
++    store
++        .admit(
++            &scope(),
++            admission("run", "request", "session", "first scope", "1").await,
++        )
++        .await
++        .unwrap();
++    let mut other = scope();
++    other.tenant_id = id("other-tenant");
++    let mut input = admission(
++        "run",
++        "request",
++        "session",
++        "second scope private data",
++        "1",
++    )
++    .await;
++    input.snapshot.profile = ProfileValidator::new(&support::Catalog { revision: "1" })
++        .validate(input.snapshot.profile.profile(), &other)
++        .await
++        .unwrap();
++    input.snapshot.scope = other.clone();
++    input.snapshot.request_digest =
++        admission_digest(&input.snapshot.request, &input.snapshot.profile, None);
++    for event in &mut input.events {
++        event.scope = other.clone();
++    }
++    store.admit(&other, input).await.unwrap();
++    let checkpoint = store.export_checkpoint(&scope()).unwrap();
++    let serialized = serde_json::to_string(&checkpoint).unwrap();
++    assert!(!serialized.contains("second scope private data"));
++    let restored = MemoryStateStore::from_checkpoint(checkpoint);
++    assert_eq!(
++        restored
++            .load(&scope(), &id("run"))
++            .await
++            .unwrap()
++            .snapshot
++            .request
++            .input,
++        vec![InputContent::Text {
++            text: "first scope".into()
++        }]
++    );
++    assert_eq!(
++        restored.load(&other, &id("run")).await.unwrap_err().code,
++        ErrorCode::StateNotFound
++    );
++    assert!(store.load(&other, &id("run")).await.is_ok());
++}
++
++#[tokio::test]
++async fn checkpoint_preserves_request_identity_private_records_and_lease_generation() {
++    let store = MemoryStateStore::new();
++    let request = admission("run", "request", "session", "private user input", "1").await;
++    store.admit(&scope(), request.clone()).await.unwrap();
++    let lease = store
++        .acquire_lease(&scope(), &id("run"), &id("worker"), 100, 10)
++        .await
++        .unwrap();
++    let snapshot = store.load(&scope(), &id("run")).await.unwrap().snapshot;
++    let record = ProtectedRecord::new(
++        id("orphan-private-record"),
++        7,
++        json!({"secret":"protected checkpoint value"}),
++    );
++    let record_ref = record.reference().clone();
++    let mut change = prepared(&snapshot, lease.clone(), 101);
++    change.records.push(record);
++    store.commit(&scope(), &id("run"), change).await.unwrap();
++    let before = store.load(&scope(), &id("run")).await.unwrap();
++    let checkpoint = store.export_checkpoint(&scope()).unwrap();
++    let encoded = serde_json::to_string(&checkpoint).unwrap();
++    assert_eq!(
++        canonical_digest(&serde_json::from_str(&encoded).unwrap()),
++        checkpoint.digest()
++    );
++    assert!(!format!("{checkpoint:?}").contains("protected checkpoint value"));
++    assert!(!format!("{checkpoint:?}").contains("private user input"));
++    let decoded =
++        StateStoreCheckpoint::from_json(&encoded, &scope(), &checkpoint.digest()).unwrap();
++    let restored = MemoryStateStore::from_checkpoint(decoded);
++    assert_eq!(restored.load(&scope(), &id("run")).await.unwrap(), before);
++    assert_eq!(
++        restored
++            .read_record(&scope(), &record_ref)
++            .await
++            .unwrap()
++            .value(),
++        &json!({"secret":"protected checkpoint value"})
++    );
++    assert!(!restored.admit(&scope(), request).await.unwrap().created);
++    assert_eq!(
++        restored
++            .check_lease(&scope(), &id("run"), &lease, 109)
++            .await
++            .unwrap(),
++        lease
++    );
++    assert_eq!(
++        restored
++            .check_lease(&scope(), &id("run"), &lease, 110)
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::LeaseLost
++    );
++    let replacement = restored
++        .acquire_lease(&scope(), &id("run"), &id("new-worker"), 110, 20)
++        .await
++        .unwrap();
++    assert!(replacement.fencing_token > lease.fencing_token);
++    assert_eq!(
++        restored
++            .commit(&scope(), &id("run"), prepared(&before.snapshot, lease, 111))
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::LeaseLost
++    );
++    assert!(!restored.capabilities().durable);
++    assert!(!restored.capabilities().cross_process_leases);
++}
++
++#[tokio::test]
++async fn released_leases_keep_their_fencing_counter_after_restoration() {
++    let store = MemoryStateStore::new();
++    store
++        .admit(
++            &scope(),
++            admission("run", "request", "session", "input", "1").await,
++        )
++        .await
++        .unwrap();
++    let first = store
++        .acquire_lease(&scope(), &id("run"), &id("worker"), 1, 100)
++        .await
++        .unwrap();
++    store
++        .release_lease(&scope(), &id("run"), &first, 2)
++        .await
++        .unwrap();
++    let restored = MemoryStateStore::from_checkpoint(store.export_checkpoint(&scope()).unwrap());
++    assert!(
++        restored
++            .check_lease(&scope(), &id("run"), &first, 3)
++            .await
++            .is_err()
++    );
++    let second = restored
++        .acquire_lease(&scope(), &id("run"), &id("worker"), 3, 100)
++        .await
++        .unwrap();
++    assert!(second.fencing_token > first.fencing_token);
++}
++
++#[tokio::test]
++async fn historical_wait_and_resume_survive_a_finished_run_and_a_new_session_run() {
++    let store = MemoryStateStore::new();
++    store
++        .admit(
++            &scope(),
++            admission("run-a", "request-a", "session", "first input", "1").await,
++        )
++        .await
++        .unwrap();
++    let lease = store
++        .acquire_lease(&scope(), &id("run-a"), &id("worker"), 100, 100)
++        .await
++        .unwrap();
++    let snapshot = store.load(&scope(), &id("run-a")).await.unwrap().snapshot;
++    let wait = WaitState {
++        wait_id: id("wait"),
++        target: WaitTarget::Input {
++            request: InputRequest {
++                input_request_id: id("question"),
++                call_id: id("input-call"),
++                question: "Select a source".into(),
++                schema_ref: None,
++            },
++        },
++        expires_at_ms: Some(180),
++    };
++    let wait_record = ProtectedRecord::new(id("old-wait"), 1, serde_json::to_value(&wait).unwrap());
++    let mut waiting = prepared(&snapshot, lease.clone(), 101);
++    waiting.snapshot.status = RunStatus::Waiting;
++    waiting.snapshot.phase = RunPhase::Waiting;
++    waiting.snapshot.wait = Some(wait);
++    waiting.snapshot.last_event_seq += 1;
++    waiting.events.push(event(
++        &id("run-a"),
++        &id("session"),
++        &scope(),
++        2,
++        RunEventPayload::RunWaiting {
++            wait_ref: wait_record.reference().clone(),
++        },
++    ));
++    waiting.records.push(wait_record);
++    let waiting = store.commit(&scope(), &id("run-a"), waiting).await.unwrap();
++    let command = ResumeCommand {
++        run_id: id("run-a"),
++        expected_revision: waiting.snapshot.revision,
++        command_id: id("answer"),
++        action: ResumeAction::Input {
++            wait_id: id("wait"),
++            answer: json!("selected source"),
++        },
++    };
++    let command_record = ProtectedRecord::new(
++        id("old-command"),
++        1,
++        serde_json::to_value(&command).unwrap(),
++    );
++    let mut resumed = prepared(&waiting.snapshot, lease.clone(), 102);
++    resumed.snapshot.status = RunStatus::Running;
++    resumed.snapshot.wait = None;
++    resumed.snapshot.last_event_seq += 1;
++    resumed.events.push(event(
++        &id("run-a"),
++        &id("session"),
++        &scope(),
++        3,
++        RunEventPayload::RunResumed {
++            command_ref: command_record.reference().clone(),
++        },
++    ));
++    resumed.records.push(command_record);
++    let resumed = store.commit(&scope(), &id("run-a"), resumed).await.unwrap();
++    store
++        .commit(
++            &scope(),
++            &id("run-a"),
++            finished(&resumed.snapshot, lease, 103),
++        )
++        .await
++        .unwrap();
++    let mut next = admission("run-b", "request-b", "session", "next input", "2").await;
++    next.messages[0].sequence = 2.try_into().unwrap();
++    store.admit(&scope(), next).await.unwrap();
++    let image = serde_json::to_value(store.export_checkpoint(&scope()).unwrap()).unwrap();
++    let restored = restore_json(&image, &scope()).unwrap();
++    let old = restored.load(&scope(), &id("run-a")).await.unwrap();
++    assert_eq!(old.snapshot.status, RunStatus::Succeeded);
++    assert!(old.snapshot.wait.is_none());
++    assert_eq!(old.session.active_run_id, Some(id("run-b")));
++    assert_eq!(old.messages.len(), 2);
++    let events = restored
++        .read_events(&scope(), &id("run-a"), 0, 10)
++        .await
++        .unwrap();
++    assert_eq!(events.events.len(), 4);
++    assert!(matches!(
++        events.events[1].payload,
++        RunEventPayload::RunWaiting { .. }
++    ));
++    assert!(matches!(
++        events.events[2].payload,
++        RunEventPayload::RunResumed { .. }
++    ));
++
++    // An active run cannot precede a later completed run in the same transcript.
++    let mut reversed = image;
++    let messages = reversed["sessions"][0]["messages"].as_array_mut().unwrap();
++    messages.swap(0, 1);
++    messages[0]["sequence"] = json!(1);
++    messages[1]["sequence"] = json!(2);
++    assert_eq!(
++        restore_json(&reversed, &scope()).err().unwrap().code,
++        ErrorCode::InvalidSnapshot
++    );
++}
++
++#[tokio::test]
++async fn structural_corruption_is_rejected_even_with_a_recomputed_outer_digest() {
++    let store = MemoryStateStore::new();
++    store
++        .admit(
++            &scope(),
++            admission("run", "request", "session", "input", "1").await,
++        )
++        .await
++        .unwrap();
++    let lease = store
++        .acquire_lease(&scope(), &id("run"), &id("worker"), 100, 20)
++        .await
++        .unwrap();
++    let original = serde_json::to_value(store.export_checkpoint(&scope()).unwrap()).unwrap();
++    let mut mutations = Vec::new();
++    for collection in ["sessions", "runs", "records"] {
++        let mut value = original.clone();
++        let duplicate = value[collection][0].clone();
++        value[collection].as_array_mut().unwrap().push(duplicate);
++        mutations.push(value);
++    }
++    let paths = [
++        (
++            "/runs/0/snapshot/scope/workspace_id",
++            json!("different-workspace"),
++        ),
++        (
++            "/sessions/0/snapshot/scope/tenant_id",
++            json!("different-tenant"),
++        ),
++        ("/sessions/0/snapshot/active_run_id", json!("missing-run")),
++        ("/sessions/0/snapshot/transcript_revision", json!(2)),
++        ("/sessions/0/messages/0/run_id", json!("missing-run")),
++        ("/runs/0/events/0/seq", json!(2)),
++        ("/runs/0/events/0/run_id", json!("missing-run")),
++        (
++            "/runs/0/lease/fencing_token",
++            json!(lease.fencing_token + 1),
++        ),
++        ("/runs/0/last_fencing_token", json!(0)),
++        (
++            "/records/0/value",
++            json!({"changed":"without updating record digest"}),
++        ),
++    ];
++    for (path, replacement) in paths {
++        let mut value = original.clone();
++        *value.pointer_mut(path).unwrap() = replacement;
++        mutations.push(value);
++    }
++    for mutation in mutations {
++        assert!(restore_json(&mutation, &scope()).is_err());
++    }
++    let restored = restore_json(&original, &scope()).unwrap();
++    assert_eq!(
++        restored
++            .load(&scope(), &id("run"))
++            .await
++            .unwrap()
++            .snapshot
++            .run_id,
++        id("run")
++    );
++}
++
++#[tokio::test]
++async fn version_scope_and_trusted_digest_are_independent_restore_guards() {
++    let store = MemoryStateStore::new();
++    store
++        .admit(
++            &scope(),
++            admission("run", "request", "session", "input", "1").await,
++        )
++        .await
++        .unwrap();
++    let checkpoint = store.export_checkpoint(&scope()).unwrap();
++    let json = serde_json::to_string(&checkpoint).unwrap();
++    let mut foreign = scope();
++    foreign.user_id = Some(id("another-user"));
++    assert_eq!(
++        StateStoreCheckpoint::from_json(&json, &foreign, &checkpoint.digest())
++            .unwrap_err()
++            .code,
++        ErrorCode::AccessDenied
++    );
++    assert!(store.export_checkpoint(&foreign).is_err());
++    assert!(
++        StateStoreCheckpoint::from_json(&json, &scope(), &canonical_digest(&json!("wrong digest")))
++            .is_err()
++    );
++    let mut unknown: Value = serde_json::from_str(&json).unwrap();
++    unknown["schema_version"] = json!("wickle.state-store.v99");
++    assert_eq!(
++        StateStoreCheckpoint::from_json(
++            &unknown.to_string(),
++            &scope(),
++            &canonical_digest(&unknown)
++        )
++        .unwrap_err()
++        .code,
++        ErrorCode::UnsupportedSchemaVersion
++    );
++}
+diff --git a/docs/contracts.md b/docs/contracts.md
+index 28f73e8bca4db3238e413fbb4027832a43ee0635..7f1641e3d29dfcb184bd8cfbc0f2e624e7329c8d 100644
+--- a/docs/contracts.md
++++ b/docs/contracts.md
+@@ -134,6 +134,9 @@ immutable catalog implementation are described in
+ 
+ ## Execution and storage data
+ 
++The [SQLite state store](sqlite-state-store.md) provides a separate persistence
++adapter with process-restart recovery and cross-process lease coordination.
++
+ | Contract | Purpose |
+ | --- | --- |
+ | `RunRequest`, `ResumeCommand` | Caller data with request/command identity and typed input or decisions |
+diff --git a/docs/sqlite-state-store.md b/docs/sqlite-state-store.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..eb2e7c8f1dd5384b6208ca41a270fdeea363eb8e
+--- /dev/null
++++ b/docs/sqlite-state-store.md
+@@ -0,0 +1,76 @@
++# Persist state with SQLite
++
++`wickle-state-sqlite` implements `StateStore` for a local SQLite file. It preserves
++runs, session transcripts, protected records, event history, and lease fencing
++generations across process restarts. The core remains independent of SQLite and
++filesystem configuration.
++
++```rust
++use wickle_state_sqlite::SqliteStateStore;
++
++let store = SqliteStateStore::open("state.sqlite3")?;
++```
++
++The Host supplies the file path and a Tokio runtime for asynchronous operations.
++No `.env` file or environment variable is used to configure the library. SQLite
++operations run on blocking workers so database lock waits do not block the Host's
++async runtime thread. `open_with_busy_timeout(path, duration)` sets an explicit
++finite lock-wait limit.
++
++## Transactions and restarts
++
++Each write acquires an immediate transaction, reads the latest scope checkpoint,
++applies the core's state validation, and saves the checkpoint. Results become
++successful only after SQLite commits. Failed candidate validation rolls back the
++transaction, including associated records and events. Reads use a consistent
++transaction snapshot.
++
++The adapter uses WAL and `synchronous=FULL`. Its bundled SQLite version includes
++the WAL-reset fix. Use a local file on the same computer as the processes sharing
++it; SQLite WAL relies on shared memory between those processes.
++[SQLite WAL documentation](https://www.sqlite.org/wal.html),
++[synchronization settings](https://www.sqlite.org/pragma.html#pragma_synchronous).
++
++On restart, leases retain their stored owner, expiration, and fencing generation.
++An expired lease can be replaced with a higher generation; an old worker cannot
++commit with its earlier lease. Releasing a lease preserves the last generation.
++Opening a file does not silently expire leases or replace run identity.
++
++Unknown database or checkpoint versions and inconsistent scope, checksum,
++references, or state relationships fail explicitly. Restoration checks historical
++events against their stored records and identities. It does not require a past
++waiting or reserved state to equal the latest completed state.
++
++If an operation loses its acknowledgement, read the stored revision before
++deciding what to retry. Dropping an async caller does not prove that an already
++running blocking database operation rolled back. Run request deduplication, CAS,
++and fencing remain necessary across this boundary.
++
++## Reference implementation scope
++
++This adapter stores one complete checkpoint per scope to reuse the core's state
++contracts. Reads and writes cost more as that scope's retained history grows, and
++SQLite serializes writers. It is a reference implementation for local persistence;
++applications with larger storage or concurrency needs can supply another
++`StateStore` implementation.
++
++All committed events and protected records are retained. No pruning or schema
++migration is performed. The Host controls database file access and should treat
++checkpoint data as protected application state. A checksum detects inconsistent
++data; it does not replace access control.
++
++`MemoryStateStore` can export and restore a versioned `StateStoreCheckpoint` for
++storage implementations. These values contain protected data and offer no mutable
++access. Restoring one into memory does not give that memory store persistence or
++cross-process lease guarantees.
++
++The [independent consumer](../tests/support/sqlite_consumer.rs) admits and finishes
++a run, then starts another process that reopens the file and reads its outcome and
++events. Run it with the other extracted-package consumers:
++
++```sh
++python3 scripts/check-package.py --allow-dirty
++```
++
++Process termination and restart are tested directly. Hardware power-loss behavior
++depends on SQLite and the underlying storage and is not simulated by those tests.
+diff --git a/scripts/check-package.py b/scripts/check-package.py
+index 2a041fed32ed62f48e579788bbd7a079164c53ee..517b3d4530d51a99182b963e23f1beae4033ec15 100644
+--- a/scripts/check-package.py
++++ b/scripts/check-package.py
+@@ -37,6 +37,8 @@ def main():
+     workspace = metadata(ROOT)
+     core = next(p for p in workspace["packages"] if p["name"] == "wickle")
+     catalog = next(p for p in workspace["packages"] if p["name"] == "wickle-model-router")
++    sqlite = next(p for p in workspace["packages"] if p["name"] == "wickle-state-sqlite")
++    libraries = [core, catalog, sqlite]
+     versions = {d["name"]: d["req"] for d in core["dependencies"] if d["kind"] is None}
+     for dep in core["dependencies"]:
+         if dep["kind"] != "dev":
+@@ -65,29 +67,35 @@ def main():
+         staged.mkdir()
+         for filename in ["Cargo.toml", "Cargo.lock"]:
+             shutil.copyfile(ROOT / filename, staged / filename)
+-        for package in [core, catalog]:
++        for package in libraries:
+             manifest = Path(package["manifest_path"])
+             destination = staged / manifest.parent.relative_to(ROOT)
+             destination.mkdir(parents=True)
+             shutil.copyfile(manifest, destination / "Cargo.toml")
+             shutil.copytree(manifest.parent / "src", destination / "src")
+         patch = f'patch.crates-io.wickle.path="{base / package_name}"'
+-        subprocess.run(
+-            ["cargo", "package", "-p", "wickle-model-router", "--allow-dirty",
+-             "--offline", "--no-verify", "--config", patch],
+-            cwd=staged, env={**env, "CARGO_TARGET_DIR": str(staged / "target")}, check=True,
+-        )
+-        catalog_name = f"wickle-model-router-{catalog['version']}"
+-        catalog_archive = staged / "target/package" / f"{catalog_name}.crate"
+-        print(f"Catalog package SHA-256: {hashlib.sha256(catalog_archive.read_bytes()).hexdigest()}", flush=True)
+-        subprocess.run(["tar", "-xzf", str(catalog_archive), "-C", str(base)], check=True)
++        package_paths = {core["name"]: base / package_name}
++        for package in [catalog, sqlite]:
++            subprocess.run(
++                ["cargo", "package", "-p", package["name"], "--allow-dirty",
++                 "--offline", "--no-verify", "--config", patch],
++                cwd=staged, env={**env, "CARGO_TARGET_DIR": str(staged / "target")}, check=True,
++            )
++            name = f"{package['name']}-{package['version']}"
++            packaged = staged / "target/package" / f"{name}.crate"
++            print(f"{package['name']} package SHA-256: {hashlib.sha256(packaged.read_bytes()).hexdigest()}", flush=True)
++            subprocess.run(["tar", "-xzf", str(packaged), "-C", str(base)], check=True)
++            package_paths[package["name"]] = base / name
+         consumer = base / "consumer"
+         (consumer / "src").mkdir(parents=True)
++        library_dependencies = ''.join(
++            f'{name} = {{ path = "../{path.name}" }}\n'
++            for name, path in package_paths.items()
++        )
+         (consumer / "Cargo.toml").write_text(
+             '[package]\nname = "wickle-package-consumer"\nversion = "0.0.0"\n'
+             'edition = "2024"\npublish = false\n\n[workspace]\n\n'
+-            f'[dependencies]\nwickle = {{ path = "../{package_name}" }}\n'
+-            f'wickle-model-router = {{ path = "../{catalog_name}" }}\n'
++            f'[dependencies]\n{library_dependencies}'
+             f'serde_json = "{versions["serde_json"]}"\n'
+             f'futures-util = {{ version = "{versions["futures-util"]}", default-features = false, features = ["std", "async-await"] }}\n'
+             f'tokio = {{ version = "{versions["tokio"]}", features = ["rt", "macros"] }}\n'
+@@ -107,8 +115,6 @@ def main():
+         resolved = metadata(consumer)
+         allowed_registry = {(p["name"], p["version"], p["source"])
+                             for p in workspace["packages"] if p["source"] is not None}
+-        package_paths = {core["name"]: base / package_name,
+-                         catalog["name"]: base / catalog_name}
+         for package in resolved["packages"]:
+             if package["name"] in package_paths:
+                 expected = package_paths[package["name"]] / "Cargo.toml"
+@@ -125,7 +131,7 @@ def main():
+         for example in examples:
+             subprocess.run(["cargo", "run", "--locked", "--offline", "--bin", example.stem],
+                            cwd=consumer, env=env, check=True)
+-    print("Independent package consumers: passed (core and model catalog)", flush=True)
++    print("Independent package consumers: passed (core, model catalog, SQLite store)", flush=True)
+ 
+ 
+ if __name__ == "__main__":
+diff --git a/tests/support/sqlite_consumer.rs b/tests/support/sqlite_consumer.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..ad1597ae682020cefb27f30c7df17f17cb33c9fa
+--- /dev/null
++++ b/tests/support/sqlite_consumer.rs
+@@ -0,0 +1,290 @@
++use serde_json::json;
++use std::collections::BTreeSet;
++use wickle::*;
++use wickle_state_sqlite::SqliteStateStore;
++
++struct TemporaryStore(std::path::PathBuf);
++impl TemporaryStore {
++    fn new() -> Result<Self, Box<dyn std::error::Error>> {
++        let nonce = std::time::SystemTime::now()
++            .duration_since(std::time::UNIX_EPOCH)?
++            .as_nanos();
++        let directory = std::env::temp_dir().join(format!(
++            "wickle-sqlite-consumer-{}-{nonce}",
++            std::process::id()
++        ));
++        std::fs::create_dir(&directory)?;
++        Ok(Self(directory))
++    }
++}
++impl Drop for TemporaryStore {
++    fn drop(&mut self) {
++        let _ = std::fs::remove_dir_all(&self.0);
++    }
++}
++
++fn id(s: &str) -> Id {
++    Id::new(s).expect("example identifiers")
++}
++struct Catalog;
++impl ProfileResolver for Catalog {
++    fn resolve<'a>(
++        &'a self,
++        r: &'a ComponentRef,
++        _: &'a Scope,
++    ) -> PortFuture<'a, ComponentMetadata> {
++        Box::pin(async move {
++            Ok(ComponentMetadata {
++                reference: ComponentRef {
++                    version: Some(id("revision-1")),
++                    ..r.clone()
++                },
++                contract_version: 1,
++                manifest_digest: canonical_digest(&json!("registered model")),
++                config_schema: json!({"type":"object","additionalProperties":false}),
++                dependencies: vec![],
++                capabilities: BTreeSet::new(),
++                required_capabilities: BTreeSet::new(),
++                required_connections: BTreeSet::new(),
++                model_name: None,
++                hook_position: None,
++                exports: vec![],
++            })
++        })
++    }
++}
++
++#[tokio::main(flavor = "current_thread")]
++async fn main() -> Result<(), Box<dyn std::error::Error>> {
++    let scope = Scope {
++        tenant_id: id("tenant"),
++        workspace_id: id("workspace"),
++        user_id: None,
++    };
++    if std::env::args().nth(1).as_deref() == Some("verify") {
++        let database = std::env::args_os()
++            .nth(2)
++            .ok_or("database argument missing")?;
++        let parent: u32 = std::env::args()
++            .nth(3)
++            .ok_or("parent process missing")?
++            .parse()?;
++        assert_ne!(parent, std::process::id());
++        let store = SqliteStateStore::open(database)?;
++        let restored = store.load(&scope, &id("run")).await?;
++        assert_eq!(restored.snapshot.status, RunStatus::Succeeded);
++        assert_eq!(restored.snapshot.revision, 1);
++        assert_eq!(
++            restored.snapshot.request.model_options.get("reasoning_effort"),
++            Some(&json!("high"))
++        );
++        assert!(restored.session.active_run_id.is_none());
++        let outcome = restored
++            .snapshot
++            .outcome
++            .as_ref()
++            .ok_or("outcome missing")?;
++        assert_eq!(
++            outcome.output,
++            vec![InputContent::Text {
++                text: "Stored result".into()
++            }]
++        );
++        let reference = ProtectedRecord::new(id("outcome"), 1, serde_json::to_value(outcome)?);
++        assert_eq!(
++            store
++                .read_record(&scope, reference.reference())
++                .await?
++                .value(),
++            reference.value()
++        );
++        let events = store.read_events(&scope, &id("run"), 0, 10).await?;
++        assert_eq!(events.events.len(), 2);
++        assert_eq!(events.last_available_seq, 2);
++        println!("SQLite child: reopened completed run, outcome record, and two committed events");
++        return Ok(());
++    }
++    let temporary = TemporaryStore::new()?;
++    let database = temporary.0.join("state.sqlite3");
++    let profile = AgentProfile::from_json(
++        r#"{
++      "schema_version":"wickle.agent-profile.v1","agent_id":"assistant","version":"1.0.0",
++      "name":"Assistant","description":"Storage example","instructions":{"text":"Use evidence"},
++      "model_binding":"primary","tools":[],"skills":[],"connectors":[],"context_policy":{"strategy":"bounded"},"output_contract":{"type":"text"},
++      "limits":{"max_model_calls":4,"max_tool_attempts":0,"max_repair_attempts":0,"max_recovery_attempts":0,"max_elapsed_ms":10000}
++    }"#,
++    )?;
++    let profile = ProfileValidator::new(&Catalog)
++        .validate(&profile, &scope)
++        .await?;
++    let request = RunRequest {
++        request_id: id("request"),
++        session_id: id("session"),
++        input: vec![InputContent::Text {
++            text: "Inspect stored state".into(),
++        }],
++        trigger: RunTrigger::User {},
++        model_options: std::collections::BTreeMap::from([
++            ("reasoning_effort".into(), json!("high")),
++        ]),
++        output_contract: None,
++    };
++    let request_record =
++        ProtectedRecord::new(id("request-record"), 1, serde_json::to_value(&request)?);
++    let prompt = ProtectedRecord::new(id("prompt"), 1, json!({"text":"Use evidence"}));
++    let snapshot = RunSnapshot {
++        schema_version: RunSnapshotSchemaVersion::V1,
++        run_id: id("run"),
++        request_digest: admission_digest(&request, &profile, None),
++        request: request.clone(),
++        scope: scope.clone(),
++        timing: RunTiming::new(1000, profile.profile().limits.max_elapsed_ms.get()).unwrap(),
++        reservations: vec![],
++        limits: profile.profile().limits.clone(),
++        profile,
++        status: RunStatus::Running,
++        phase: RunPhase::Admission,
++        model_step_id: None,
++        usage: BudgetUsage::default(),
++        model_ledger: vec![],
++        tool_ledger: vec![],
++        system_inputs: None,
++        wait: None,
++        outcome: None,
++        assembly_ref: None,
++        context_batches: vec![],
++        source_states: vec![],
++        revision: 0,
++        last_event_seq: 1,
++    };
++    let started = RunEvent {
++        schema_version: RunEventSchemaVersion::V1,
++        event_id: id("started"),
++        scope: scope.clone(),
++        run_id: id("run"),
++        session_id: id("session"),
++        seq: 1.try_into()?,
++        timestamp_ms: 1000,
++        payload: RunEventPayload::RunStarted {
++            request_ref: request_record.reference().clone(),
++            profile_digest: snapshot.profile.profile_digest().clone(),
++        },
++    };
++    let message = Message {
++        message_id: id("user-message"),
++        run_id: id("run"),
++        sequence: 1.try_into()?,
++        role: MessageRole::User,
++        content: vec![ContentBlock::Content {
++            content: request.input[0].clone(),
++        }],
++        origin: MessageOrigin::User,
++        visibility: Visibility::UserAndModel,
++    };
++    let input = AdmissionInput {
++        snapshot,
++        prompt_snapshot: prompt.reference().clone(),
++        messages: vec![message],
++        events: vec![started],
++        records: vec![request_record, prompt],
++        require_durable: true,
++    };
++    let store = SqliteStateStore::open(&database)?;
++    assert!(store.capabilities().durable);
++    assert!(store.capabilities().cross_process_leases);
++    let first = store.admit(&scope, input.clone()).await?;
++    let replay = store.admit(&scope, input).await?;
++    assert!(first.created);
++    assert!(!replay.created);
++    assert_eq!(first.state, replay.state);
++    println!(
++        "admission: created={}, retry_created={}, run={}",
++        first.created, replay.created, replay.state.snapshot.run_id
++    );
++    let lease = store
++        .acquire_lease(&scope, &id("run"), &id("worker"), 1000, 10_000)
++        .await?;
++    let mut next = first.state.snapshot.clone();
++    next.revision = 1;
++    next.last_event_seq = 2;
++    next.status = RunStatus::Succeeded;
++    next.phase = RunPhase::Finish;
++    let outcome = RunOutcome {
++        result: OutcomeResult::Succeeded {
++            completion_basis: CompletionBasis::TurnEnded,
++        },
++        output: vec![InputContent::Text {
++            text: "Stored result".into(),
++        }],
++        artifacts: vec![],
++        usage: next.usage.clone(),
++        checkpoint_revision: 1,
++        verification: None,
++        unresolved_effects: vec![],
++    };
++    let outcome_record = ProtectedRecord::new(id("outcome"), 1, serde_json::to_value(&outcome)?);
++    next.outcome = Some(outcome);
++    let event = RunEvent {
++        schema_version: RunEventSchemaVersion::V1,
++        event_id: id("finished"),
++        scope: scope.clone(),
++        run_id: id("run"),
++        session_id: id("session"),
++        seq: 2.try_into()?,
++        timestamp_ms: 1001,
++        payload: RunEventPayload::RunFinished {
++            outcome_ref: outcome_record.reference().clone(),
++        },
++    };
++    let result = store
++        .commit(
++            &scope,
++            &id("run"),
++            CommitInput {
++                expected_revision: 0,
++                lease,
++                now_ms: 1001,
++                snapshot: next,
++                messages: vec![],
++                events: vec![event],
++                records: vec![outcome_record],
++            },
++        )
++        .await?;
++    println!(
++        "committed: revision={}, status={:?}, active_run={:?}",
++        result.snapshot.revision, result.snapshot.status, result.session.active_run_id
++    );
++    let events = store.read_events(&scope, &id("run"), 0, 10).await?;
++    println!(
++        "event replay: count={}, last_seq={}",
++        events.events.len(),
++        events.last_available_seq
++    );
++    let foreign = Scope {
++        tenant_id: id("another-tenant"),
++        ..scope.clone()
++    };
++    let rejected = store.load(&foreign, &id("run")).await;
++    assert!(matches!(&rejected, Err(error) if error.code == ErrorCode::StateNotFound));
++    println!(
++        "foreign scope: {}",
++        match rejected {
++            Err(error) => format!("{:?}", error.code),
++            Ok(_) => "UNEXPECTED ACCESS".into(),
++        }
++    );
++    drop(store);
++    let status = std::process::Command::new(std::env::current_exe()?)
++        .arg("verify")
++        .arg(&database)
++        .arg(std::process::id().to_string())
++        .status()?;
++    if !status.success() {
++        return Err("independent SQLite reader failed".into());
++    }
++    println!(
++        "SQLite consumer: atomic admission/commit, scope isolation, and independent process restoration passed"
++    );
++    Ok(())
++}

@@ -1,0 +1,2361 @@
+diff --git a/crates/wickle/src/error.rs b/crates/wickle/src/error.rs
+index b44f16a37b344b9e4a72e05497059ec4b1f5f4fc..c797eb5f8c26b68fbf097502804c2ea908e62c93 100644
+--- a/crates/wickle/src/error.rs
++++ b/crates/wickle/src/error.rs
+@@ -37,6 +37,30 @@ pub enum ErrorCode {
+     ProfileMismatch,
+     /// Stored data violates checkpoint invariants.
+     InvalidSnapshot,
++    /// The requested run, session, or protected record is absent in this exact scope.
++    StateNotFound,
++    /// An existing request identity was reused with different logical input.
++    RequestConflict,
++    /// The session already has a running or waiting run.
++    SessionBusy,
++    /// A proposed run identifier already belongs to another request in this scope.
++    RunConflict,
++    /// The compare-and-swap revision no longer matches saved state.
++    RevisionConflict,
++    /// Another unexpired execution lease already owns the run.
++    LeaseBusy,
++    /// The execution lease expired or no longer matches its owner and generation.
++    LeaseLost,
++    /// A candidate change violates immutable data or state-transition rules.
++    InvalidTransition,
++    /// An event has a duplicate identity, invalid sequence, or inconsistent references.
++    InvalidEvent,
++    /// A message has a duplicate identity, invalid sequence, or wrong owning run.
++    InvalidMessage,
++    /// Immutable record content or a requested reference digest conflicts.
++    RecordConflict,
++    /// Authoritative storage is unavailable; no successful commit is implied.
++    PersistenceUnavailable,
+ }
+ 
+ /// A validation error that does not retain submitted values or credentials.
+diff --git a/crates/wickle/src/lib.rs b/crates/wickle/src/lib.rs
+index d4d7b10c637f63a07a3184f650a1374a5491e04d..4d154e65ab6195c50ce81995f115e5e410ad780f 100644
+--- a/crates/wickle/src/lib.rs
++++ b/crates/wickle/src/lib.rs
+@@ -20,12 +20,17 @@ mod profile;
+ mod resolution;
+ mod run;
+ mod serialization;
++mod state;
+ mod views;
+ 
+ pub use policy::{
+     ApprovalChallenge, Guarded, PolicyAction, PolicyContext, PolicyDecision, PolicyGate,
+     PolicyPort, PolicyRequest, ToolPolicyInput,
+ };
++pub use state::{
++    AdmissionInput, AdmissionResult, CommitInput, EventPage, MAX_EVENT_PAGE_SIZE, MemoryStateStore,
++    ProtectedRecord, RunLease, StateStore, StateStoreCapabilities, StoredRun,
++};
+ pub use views::{ArtifactView, EventView, RunView};
+ 
+ pub use context::{
+diff --git a/crates/wickle/src/state.rs b/crates/wickle/src/state.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..f94945561a507ce8f2eac61c4a2757631385dc3f
+--- /dev/null
++++ b/crates/wickle/src/state.rs
+@@ -0,0 +1,1139 @@
++use std::{
++    collections::{BTreeMap, BTreeSet},
++    fmt,
++    num::NonZeroU64,
++    sync::{Mutex, MutexGuard},
++};
++
++use serde::de::DeserializeOwned;
++use serde_json::Value;
++
++use crate::{
++    ApprovalTarget, ContentBlock, ContractError, ErrorCode, Id, Message, ModelAttemptState,
++    ModelInvocationRecord, OutcomeResult, PortFuture, RecordRef, ResumeAction, ResumeCommand,
++    RunEvent, RunEventPayload, RunPhase, RunSnapshot, RunStatus, Scope, SessionSchemaVersion,
++    SessionSnapshot, ToolCall, ToolCallState, ToolResult, VerificationSummary, WaitState,
++    WaitTarget, admission_digest, canonical_digest,
++};
++
++/// Guarantees offered by a state-store implementation.
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub struct StateStoreCapabilities {
++    /// Records survive process termination.
++    pub durable: bool,
++    /// Execution leases coordinate independent processes.
++    pub cross_process_leases: bool,
++    /// Committed events can be replayed in sequence order.
++    pub event_replay: bool,
++}
++
++/// Immutable, scope-owned data stored with its referencing state and events.
++/// Access requires Host authorization; Debug never prints the payload.
++#[derive(Clone, PartialEq)]
++pub struct ProtectedRecord {
++    reference: RecordRef,
++    value: Value,
++}
++
++impl ProtectedRecord {
++    /// Compute the reference digest from owned data. A revision is immutable.
++    pub fn new(record_id: Id, revision: u64, value: Value) -> Self {
++        Self {
++            reference: RecordRef {
++                record_id,
++                revision,
++                digest: canonical_digest(&value),
++            },
++            value,
++        }
++    }
++
++    /// Exact immutable record identity, without its payload.
++    pub fn reference(&self) -> &RecordRef {
++        &self.reference
++    }
++
++    /// Explicit privileged access, never an automatic public/model projection.
++    pub fn value(&self) -> &Value {
++        &self.value
++    }
++}
++
++impl fmt::Debug for ProtectedRecord {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_struct("ProtectedRecord")
++            .field("reference", &self.reference)
++            .field("value", &"<redacted>")
++            .finish()
++    }
++}
++
++/// Initial records accepted atomically for a newly admitted run.
++#[derive(Clone)]
++pub struct AdmissionInput {
++    /// Running/admission checkpoint at revision zero.
++    pub snapshot: RunSnapshot,
++    /// Session-pinned prompt record; reused unchanged by subsequent runs.
++    pub prompt_snapshot: RecordRef,
++    /// New messages, numbered consecutively across the session.
++    pub messages: Vec<Message>,
++    /// One run.started event at sequence one, referencing the accepted request.
++    pub events: Vec<RunEvent>,
++    /// New immutable records, available to references in this transaction.
++    pub records: Vec<ProtectedRecord>,
++    /// Reject implementations that cannot preserve state across process termination.
++    pub require_durable: bool,
++}
++
++/// An owned protected checkpoint and its complete session transcript.
++/// Use PolicyGate views to select data for less privileged callers.
++#[derive(Clone, PartialEq)]
++pub struct StoredRun {
++    /// Current run checkpoint and protected record references.
++    pub snapshot: RunSnapshot,
++    /// Current session metadata, including its active run.
++    pub session: SessionSnapshot,
++    /// Append-only session transcript, including messages from earlier runs.
++    pub messages: Vec<Message>,
++}
++
++impl fmt::Debug for StoredRun {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_struct("StoredRun")
++            .field("run_id", &self.snapshot.run_id)
++            .field("revision", &self.snapshot.revision)
++            .field("message_count", &self.messages.len())
++            .finish_non_exhaustive()
++    }
++}
++
++/// Admission reports whether it created a run or found the original request.
++#[derive(Debug, Clone, PartialEq)]
++pub struct AdmissionResult {
++    /// False for identical request replay; candidate records are not applied.
++    pub created: bool,
++    /// Existing or newly admitted run, with its original pinned data.
++    pub state: StoredRun,
++}
++
++/// Store-issued lease identity. Possession is not Host authorization.
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub struct RunLease {
++    /// Exact resource namespace.
++    pub scope: Scope,
++    /// Run owned by this lease.
++    pub run_id: Id,
++    /// Worker identity supplied by trusted runtime code.
++    pub owner: Id,
++    /// Increasing generation retained across expiration and release.
++    pub fencing_token: u64,
++    /// Expiration reported when issued. Validation uses the store's current expiry,
++    /// so renewal does not invalidate copies of the same owner/fencing generation.
++    pub expires_at_ms: i64,
++}
++
++/// A complete candidate checkpoint and append-only data for one atomic commit.
++#[derive(Clone)]
++pub struct CommitInput {
++    /// Compare-and-swap revision of the currently saved checkpoint.
++    pub expected_revision: u64,
++    /// Current unexpired execution lease.
++    pub lease: RunLease,
++    /// Trusted current UTC milliseconds, also used to reject expired leases.
++    pub now_ms: i64,
++    /// Next checkpoint, at expected_revision + 1.
++    pub snapshot: RunSnapshot,
++    /// New messages, continuing the session sequence.
++    pub messages: Vec<Message>,
++    /// New events, continuing the run sequence.
++    pub events: Vec<RunEvent>,
++    /// Immutable records to insert in the same transaction.
++    pub records: Vec<ProtectedRecord>,
++}
++
++/// A bounded, ordered page of protected durable events.
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub struct EventPage {
++    /// Events strictly after the supplied cursor.
++    pub events: Vec<RunEvent>,
++    /// Cursor for the next page, unchanged for an empty page.
++    pub next_after_seq: u64,
++    /// More events were available when this page was read.
++    pub has_more: bool,
++    /// Oldest retained sequence; None when no events are stored.
++    pub first_available_seq: Option<NonZeroU64>,
++    /// Latest committed sequence when this page was read.
++    pub last_available_seq: u64,
++}
++
++/// Largest event page accepted by the reference store.
++pub const MAX_EVENT_PAGE_SIZE: usize = 1_000;
++
++/// Trusted core storage port. Scope isolation is enforced by the store itself.
++/// The facade separately applies current PolicyGate authorization. No raw load or
++/// record reference grants permission to publish the returned data.
++pub trait StateStore: Send + Sync {
++    /// Describe storage and coordination guarantees.
++    fn capabilities(&self) -> StateStoreCapabilities;
++    /// Atomically deduplicate a request and reserve its session's active-run slot.
++    fn admit<'a>(
++        &'a self,
++        scope: &'a Scope,
++        input: AdmissionInput,
++    ) -> PortFuture<'a, AdmissionResult>;
++    /// Load owned state and the complete session transcript.
++    fn load<'a>(&'a self, scope: &'a Scope, run_id: &'a Id) -> PortFuture<'a, StoredRun>;
++    /// Read session-pinned metadata without changing its active run.
++    fn load_session<'a>(
++        &'a self,
++        scope: &'a Scope,
++        session_id: &'a Id,
++    ) -> PortFuture<'a, SessionSnapshot>;
++    /// Acquire a new generation after any previous lease has expired or been released.
++    fn acquire_lease<'a>(
++        &'a self,
++        scope: &'a Scope,
++        run_id: &'a Id,
++        owner: &'a Id,
++        now_ms: i64,
++        ttl_ms: u64,
++    ) -> PortFuture<'a, RunLease>;
++    /// Renew an unexpired generation; an expired lease cannot be revived.
++    fn renew_lease<'a>(
++        &'a self,
++        scope: &'a Scope,
++        run_id: &'a Id,
++        lease: &'a RunLease,
++        now_ms: i64,
++        ttl_ms: u64,
++    ) -> PortFuture<'a, RunLease>;
++    /// Release only the currently owned unexpired generation.
++    fn release_lease<'a>(
++        &'a self,
++        scope: &'a Scope,
++        run_id: &'a Id,
++        lease: &'a RunLease,
++        now_ms: i64,
++    ) -> PortFuture<'a, ()>;
++    /// Validate and commit state, transcript, records and events atomically.
++    fn commit<'a>(
++        &'a self,
++        scope: &'a Scope,
++        run_id: &'a Id,
++        input: CommitInput,
++    ) -> PortFuture<'a, StoredRun>;
++    /// Replay a bounded page. Retention gaps must not silently skip missing events.
++    fn read_events<'a>(
++        &'a self,
++        scope: &'a Scope,
++        run_id: &'a Id,
++        after_seq: u64,
++        limit: usize,
++    ) -> PortFuture<'a, EventPage>;
++    /// Read an exact scope-owned immutable record after separate Host authorization.
++    fn read_record<'a>(
++        &'a self,
++        scope: &'a Scope,
++        reference: &'a RecordRef,
++    ) -> PortFuture<'a, ProtectedRecord>;
++}
++
++type ScopeKey = (Id, Id, Option<Id>);
++type RecordKey = (Id, u64);
++
++#[derive(Default)]
++struct ScopeState {
++    sessions: BTreeMap<Id, SessionState>,
++    runs: BTreeMap<Id, RunState>,
++    requests: BTreeMap<(Id, Id), Id>,
++    records: BTreeMap<RecordKey, ProtectedRecord>,
++    event_ids: BTreeSet<Id>,
++    message_ids: BTreeSet<Id>,
++}
++
++struct SessionState {
++    snapshot: SessionSnapshot,
++    messages: Vec<Message>,
++}
++
++struct RunState {
++    snapshot: RunSnapshot,
++    events: Vec<RunEvent>,
++    lease: Option<RunLease>,
++    last_fencing_token: u64,
++}
++
++/// Process-local reference store. It retains all committed data for its lifetime.
++/// A single short critical section validates and applies each transaction; no
++/// external calls or awaits occur while the lock is held. It provides neither
++/// process-restart durability nor coordination between separate processes.
++#[derive(Default)]
++pub struct MemoryStateStore {
++    scopes: Mutex<BTreeMap<ScopeKey, ScopeState>>,
++}
++
++impl MemoryStateStore {
++    /// Construct an empty store without creating a runtime or doing I/O.
++    pub fn new() -> Self {
++        Self::default()
++    }
++
++    fn lock(&self) -> Result<MutexGuard<'_, BTreeMap<ScopeKey, ScopeState>>, ContractError> {
++        self.scopes
++            .lock()
++            .map_err(|_| error(ErrorCode::PersistenceUnavailable, "state_store"))
++    }
++}
++
++impl StateStore for MemoryStateStore {
++    fn capabilities(&self) -> StateStoreCapabilities {
++        StateStoreCapabilities {
++            durable: false,
++            cross_process_leases: false,
++            event_replay: true,
++        }
++    }
++
++    fn admit<'a>(
++        &'a self,
++        scope: &'a Scope,
++        input: AdmissionInput,
++    ) -> PortFuture<'a, AdmissionResult> {
++        Box::pin(async move {
++            if input.require_durable {
++                return Err(error(ErrorCode::CapabilityUnsupported, "store.durable"));
++            }
++            check_scope(scope, &input.snapshot.scope)?;
++            if scope != input.snapshot.profile.scope()
++                || input.snapshot.request_digest
++                    != admission_digest(
++                        &input.snapshot.request,
++                        &input.snapshot.profile,
++                        input.snapshot.system_inputs.as_ref(),
++                    )
++            {
++                return Err(error(ErrorCode::InvalidSnapshot, "request_digest"));
++            }
++            let mut scopes = self.lock()?;
++            let empty = ScopeState::default();
++            let state = scopes.get(&scope_key(scope)).unwrap_or(&empty);
++            let request_key = (
++                input.snapshot.request.session_id.clone(),
++                input.snapshot.request.request_id.clone(),
++            );
++            if let Some(run_id) = state.requests.get(&request_key) {
++                let previous = stored_run(state, run_id)?;
++                if previous.snapshot.request_digest != input.snapshot.request_digest {
++                    return Err(error(ErrorCode::RequestConflict, "request"));
++                }
++                return Ok(AdmissionResult {
++                    created: false,
++                    state: previous,
++                });
++            }
++            input.snapshot.validate()?;
++            if input.snapshot.revision != 0
++                || input.snapshot.status != RunStatus::Running
++                || input.snapshot.phase != RunPhase::Admission
++                || !input.snapshot.model_ledger.is_empty()
++                || !input.snapshot.tool_ledger.is_empty()
++            {
++                return Err(error(ErrorCode::InvalidSnapshot, "admission"));
++            }
++            if state.runs.contains_key(&input.snapshot.run_id) {
++                return Err(error(ErrorCode::RunConflict, "run_id"));
++            }
++            let session_id = &input.snapshot.request.session_id;
++            let previous_session = state.sessions.get(session_id);
++            if let Some(session) = previous_session {
++                if session.snapshot.profile_digest != *input.snapshot.profile.profile_digest()
++                    || session.snapshot.prompt_snapshot != input.prompt_snapshot
++                {
++                    return Err(error(ErrorCode::ProfileMismatch, "session.profile"));
++                }
++                if session.snapshot.active_run_id.is_some() {
++                    return Err(error(ErrorCode::SessionBusy, "session"));
++                }
++            }
++            let additions = validate_records(state, &input.records)?;
++            record_value(state, &additions, &input.prompt_snapshot)?;
++            validate_snapshot_refs(state, &additions, &input.snapshot)?;
++            validate_events(state, &additions, &input.snapshot, 0, &input.events, true)?;
++            let previous_sequence = previous_session.map_or(0, |s| s.snapshot.transcript_revision);
++            let transcript_revision = validate_messages(
++                state,
++                &additions,
++                &input.snapshot.run_id,
++                previous_sequence,
++                &input.messages,
++            )?;
++            let mut messages = previous_session.map_or_else(Vec::new, |s| s.messages.clone());
++            messages.extend(input.messages);
++            let session = SessionSnapshot {
++                schema_version: SessionSchemaVersion::V1,
++                session_id: session_id.clone(),
++                scope: scope.clone(),
++                profile_digest: input.snapshot.profile.profile_digest().clone(),
++                prompt_snapshot: input.prompt_snapshot,
++                transcript_revision,
++                active_run_id: Some(input.snapshot.run_id.clone()),
++            };
++            let result = StoredRun {
++                snapshot: input.snapshot.clone(),
++                session: session.clone(),
++                messages: messages.clone(),
++            };
++            // All fallible checks precede these mutations.
++            let state = scopes.entry(scope_key(scope)).or_default();
++            state.records.extend(additions);
++            state
++                .message_ids
++                .extend(messages.iter().map(|m| m.message_id.clone()));
++            state
++                .event_ids
++                .extend(input.events.iter().map(|e| e.event_id.clone()));
++            state
++                .requests
++                .insert(request_key, input.snapshot.run_id.clone());
++            state.sessions.insert(
++                session.session_id.clone(),
++                SessionState {
++                    snapshot: session,
++                    messages,
++                },
++            );
++            state.runs.insert(
++                input.snapshot.run_id.clone(),
++                RunState {
++                    snapshot: input.snapshot,
++                    events: input.events,
++                    lease: None,
++                    last_fencing_token: 0,
++                },
++            );
++            Ok(AdmissionResult {
++                created: true,
++                state: result,
++            })
++        })
++    }
++
++    fn load<'a>(&'a self, scope: &'a Scope, run_id: &'a Id) -> PortFuture<'a, StoredRun> {
++        Box::pin(async move {
++            let scopes = self.lock()?;
++            stored_run(namespace(&scopes, scope)?, run_id)
++        })
++    }
++
++    fn load_session<'a>(
++        &'a self,
++        scope: &'a Scope,
++        session_id: &'a Id,
++    ) -> PortFuture<'a, SessionSnapshot> {
++        Box::pin(async move {
++            let scopes = self.lock()?;
++            namespace(&scopes, scope)?
++                .sessions
++                .get(session_id)
++                .map(|session| session.snapshot.clone())
++                .ok_or_else(not_found)
++        })
++    }
++
++    fn acquire_lease<'a>(
++        &'a self,
++        scope: &'a Scope,
++        run_id: &'a Id,
++        owner: &'a Id,
++        now_ms: i64,
++        ttl_ms: u64,
++    ) -> PortFuture<'a, RunLease> {
++        Box::pin(async move {
++            let expires_at_ms = lease_expiry(now_ms, ttl_ms)?;
++            let mut scopes = self.lock()?;
++            let run = run_mut(&mut scopes, scope, run_id)?;
++            if run.snapshot.status.is_terminal() {
++                return Err(error(ErrorCode::InvalidTransition, "run.status"));
++            }
++            if run.lease.as_ref().is_some_and(|l| l.expires_at_ms > now_ms) {
++                return Err(error(ErrorCode::LeaseBusy, "lease"));
++            }
++            let fencing_token = run
++                .last_fencing_token
++                .checked_add(1)
++                .ok_or_else(|| error(ErrorCode::InvalidContract, "lease.fencing_token"))?;
++            let lease = RunLease {
++                scope: scope.clone(),
++                run_id: run_id.clone(),
++                owner: owner.clone(),
++                fencing_token,
++                expires_at_ms,
++            };
++            run.last_fencing_token = fencing_token;
++            run.lease = Some(lease.clone());
++            Ok(lease)
++        })
++    }
++
++    fn renew_lease<'a>(
++        &'a self,
++        scope: &'a Scope,
++        run_id: &'a Id,
++        lease: &'a RunLease,
++        now_ms: i64,
++        ttl_ms: u64,
++    ) -> PortFuture<'a, RunLease> {
++        Box::pin(async move {
++            let expires_at_ms = lease_expiry(now_ms, ttl_ms)?;
++            let mut scopes = self.lock()?;
++            let run = run_mut(&mut scopes, scope, run_id)?;
++            validate_lease(run, scope, run_id, lease, now_ms)?;
++            let renewed = RunLease {
++                expires_at_ms,
++                ..lease.clone()
++            };
++            run.lease = Some(renewed.clone());
++            Ok(renewed)
++        })
++    }
++
++    fn release_lease<'a>(
++        &'a self,
++        scope: &'a Scope,
++        run_id: &'a Id,
++        lease: &'a RunLease,
++        now_ms: i64,
++    ) -> PortFuture<'a, ()> {
++        Box::pin(async move {
++            let mut scopes = self.lock()?;
++            let run = run_mut(&mut scopes, scope, run_id)?;
++            validate_lease(run, scope, run_id, lease, now_ms)?;
++            run.lease = None;
++            Ok(())
++        })
++    }
++
++    fn commit<'a>(
++        &'a self,
++        scope: &'a Scope,
++        run_id: &'a Id,
++        input: CommitInput,
++    ) -> PortFuture<'a, StoredRun> {
++        Box::pin(async move {
++            check_scope(scope, &input.snapshot.scope)?;
++            let mut scopes = self.lock()?;
++            let state = namespace(&scopes, scope)?;
++            let run = state.runs.get(run_id).ok_or_else(not_found)?;
++            validate_lease(run, scope, run_id, &input.lease, input.now_ms)?;
++            if run.snapshot.revision != input.expected_revision {
++                return Err(error(ErrorCode::RevisionConflict, "revision"));
++            }
++            validate_transition(&run.snapshot, &input.snapshot)?;
++            let additions = validate_records(state, &input.records)?;
++            validate_snapshot_refs(state, &additions, &input.snapshot)?;
++            validate_events(
++                state,
++                &additions,
++                &input.snapshot,
++                run.snapshot.last_event_seq,
++                &input.events,
++                false,
++            )?;
++            let session = state
++                .sessions
++                .get(&run.snapshot.request.session_id)
++                .ok_or_else(not_found)?;
++            if session.snapshot.active_run_id.as_ref() != Some(run_id) {
++                return Err(error(ErrorCode::InvalidTransition, "session.active_run_id"));
++            }
++            let transcript_revision = validate_messages(
++                state,
++                &additions,
++                run_id,
++                session.snapshot.transcript_revision,
++                &input.messages,
++            )?;
++            let mut session_snapshot = session.snapshot.clone();
++            session_snapshot.transcript_revision = transcript_revision;
++            if input.snapshot.status.is_terminal() {
++                session_snapshot.active_run_id = None;
++            }
++            let mut messages = session.messages.clone();
++            messages.extend(input.messages);
++            let result = StoredRun {
++                snapshot: input.snapshot.clone(),
++                session: session_snapshot.clone(),
++                messages: messages.clone(),
++            };
++            let state = scopes
++                .get_mut(&scope_key(scope))
++                .expect("validated namespace");
++            state.records.extend(additions);
++            state
++                .message_ids
++                .extend(messages.iter().map(|m| m.message_id.clone()));
++            state
++                .event_ids
++                .extend(input.events.iter().map(|e| e.event_id.clone()));
++            state.sessions.insert(
++                session_snapshot.session_id.clone(),
++                SessionState {
++                    snapshot: session_snapshot,
++                    messages,
++                },
++            );
++            let run = state.runs.get_mut(run_id).expect("validated run");
++            run.snapshot = input.snapshot;
++            run.events.extend(input.events);
++            if run.snapshot.status.is_terminal() {
++                run.lease = None;
++            }
++            Ok(result)
++        })
++    }
++
++    fn read_events<'a>(
++        &'a self,
++        scope: &'a Scope,
++        run_id: &'a Id,
++        after_seq: u64,
++        limit: usize,
++    ) -> PortFuture<'a, EventPage> {
++        Box::pin(async move {
++            if limit == 0 || limit > MAX_EVENT_PAGE_SIZE {
++                return Err(error(ErrorCode::InvalidContract, "events.limit"));
++            }
++            let scopes = self.lock()?;
++            let run = namespace(&scopes, scope)?
++                .runs
++                .get(run_id)
++                .ok_or_else(not_found)?;
++            let mut available = run.events.iter().filter(|e| e.seq.get() > after_seq);
++            let events: Vec<_> = available.by_ref().take(limit).cloned().collect();
++            Ok(EventPage {
++                next_after_seq: events.last().map_or(after_seq, |e| e.seq.get()),
++                has_more: available.next().is_some(),
++                first_available_seq: run.events.first().map(|e| e.seq),
++                last_available_seq: run.snapshot.last_event_seq,
++                events,
++            })
++        })
++    }
++
++    fn read_record<'a>(
++        &'a self,
++        scope: &'a Scope,
++        reference: &'a RecordRef,
++    ) -> PortFuture<'a, ProtectedRecord> {
++        Box::pin(async move {
++            let scopes = self.lock()?;
++            let record = namespace(&scopes, scope)?
++                .records
++                .get(&record_key(reference))
++                .ok_or_else(not_found)?;
++            if record.reference != *reference {
++                return Err(error(ErrorCode::RecordConflict, "record.reference"));
++            }
++            Ok(record.clone())
++        })
++    }
++}
++
++fn error(code: ErrorCode, path: &str) -> ContractError {
++    ContractError::new(code, path)
++}
++
++fn not_found() -> ContractError {
++    error(ErrorCode::StateNotFound, "state")
++}
++
++fn scope_key(scope: &Scope) -> ScopeKey {
++    (
++        scope.tenant_id.clone(),
++        scope.workspace_id.clone(),
++        scope.user_id.clone(),
++    )
++}
++
++fn record_key(reference: &RecordRef) -> RecordKey {
++    (reference.record_id.clone(), reference.revision)
++}
++
++fn check_scope(expected: &Scope, actual: &Scope) -> Result<(), ContractError> {
++    if expected != actual {
++        Err(error(ErrorCode::AccessDenied, "scope"))
++    } else {
++        Ok(())
++    }
++}
++
++fn namespace<'a>(
++    scopes: &'a BTreeMap<ScopeKey, ScopeState>,
++    scope: &Scope,
++) -> Result<&'a ScopeState, ContractError> {
++    scopes.get(&scope_key(scope)).ok_or_else(not_found)
++}
++
++fn run_mut<'a>(
++    scopes: &'a mut BTreeMap<ScopeKey, ScopeState>,
++    scope: &Scope,
++    run_id: &Id,
++) -> Result<&'a mut RunState, ContractError> {
++    scopes
++        .get_mut(&scope_key(scope))
++        .and_then(|state| state.runs.get_mut(run_id))
++        .ok_or_else(not_found)
++}
++
++fn stored_run(state: &ScopeState, run_id: &Id) -> Result<StoredRun, ContractError> {
++    let run = state.runs.get(run_id).ok_or_else(not_found)?;
++    let session = state
++        .sessions
++        .get(&run.snapshot.request.session_id)
++        .ok_or_else(not_found)?;
++    Ok(StoredRun {
++        snapshot: run.snapshot.clone(),
++        session: session.snapshot.clone(),
++        messages: session.messages.clone(),
++    })
++}
++
++fn lease_expiry(now_ms: i64, ttl_ms: u64) -> Result<i64, ContractError> {
++    let ttl = i64::try_from(ttl_ms)
++        .ok()
++        .filter(|ttl| *ttl > 0)
++        .ok_or_else(|| error(ErrorCode::InvalidContract, "lease.ttl_ms"))?;
++    now_ms
++        .checked_add(ttl)
++        .ok_or_else(|| error(ErrorCode::InvalidContract, "lease.expires_at_ms"))
++}
++
++fn validate_lease(
++    run: &RunState,
++    scope: &Scope,
++    run_id: &Id,
++    provided: &RunLease,
++    now_ms: i64,
++) -> Result<(), ContractError> {
++    if &provided.scope != scope
++        || &provided.run_id != run_id
++        || !run.lease.as_ref().is_some_and(|stored| {
++            stored.owner == provided.owner
++                && stored.fencing_token == provided.fencing_token
++                && now_ms < stored.expires_at_ms
++        })
++    {
++        return Err(error(ErrorCode::LeaseLost, "lease"));
++    }
++    Ok(())
++}
++
++fn validate_records(
++    state: &ScopeState,
++    records: &[ProtectedRecord],
++) -> Result<BTreeMap<RecordKey, ProtectedRecord>, ContractError> {
++    let mut additions = BTreeMap::new();
++    for record in records {
++        let key = record_key(&record.reference);
++        if state
++            .records
++            .get(&key)
++            .or_else(|| additions.get(&key))
++            .is_some_and(|existing| existing != record)
++        {
++            return Err(error(ErrorCode::RecordConflict, "records"));
++        }
++        additions.insert(key, record.clone());
++    }
++    Ok(additions)
++}
++
++fn record_value<'a>(
++    state: &'a ScopeState,
++    additions: &'a BTreeMap<RecordKey, ProtectedRecord>,
++    reference: &RecordRef,
++) -> Result<&'a Value, ContractError> {
++    let record = additions
++        .get(&record_key(reference))
++        .or_else(|| state.records.get(&record_key(reference)))
++        .ok_or_else(not_found)?;
++    if &record.reference != reference {
++        return Err(error(ErrorCode::RecordConflict, "record.reference"));
++    }
++    Ok(&record.value)
++}
++
++fn validate_snapshot_refs(
++    state: &ScopeState,
++    additions: &BTreeMap<RecordKey, ProtectedRecord>,
++    snapshot: &RunSnapshot,
++) -> Result<(), ContractError> {
++    let mut references = Vec::new();
++    if let Some(inputs) = &snapshot.system_inputs {
++        references.push(&inputs.snapshot_ref);
++    }
++    references.extend(snapshot.assembly_ref.iter());
++    references.extend(&snapshot.context_batches);
++    references.extend(snapshot.source_states.iter().map(|s| &s.batch_ref));
++    references.extend(
++        snapshot
++            .tool_ledger
++            .iter()
++            .filter_map(|entry| entry.call.bound_input_ref.as_ref()),
++    );
++    for entry in &snapshot.tool_ledger {
++        if let ToolCallState::Settled { result } = &entry.state {
++            references.extend(tool_result_refs(result));
++        }
++    }
++    if let Some(wait) = &snapshot.wait {
++        if let WaitTarget::Approval {
++            target: ApprovalTarget::Candidate { candidate_ref, .. },
++        } = &wait.target
++        {
++            references.push(candidate_ref);
++        }
++    }
++    if let Some(outcome) = &snapshot.outcome {
++        references.extend(&outcome.unresolved_effects);
++        if let Some(verification) = &outcome.verification {
++            references.extend(&verification.evidence);
++        }
++        if let OutcomeResult::Failed { failure } = &outcome.result {
++            references.extend(failure.diagnostic_ref.iter());
++        }
++    }
++    for reference in references {
++        record_value(state, additions, reference)?;
++    }
++    Ok(())
++}
++
++fn validate_messages(
++    state: &ScopeState,
++    additions: &BTreeMap<RecordKey, ProtectedRecord>,
++    run_id: &Id,
++    last_sequence: u64,
++    messages: &[Message],
++) -> Result<u64, ContractError> {
++    let mut sequence = last_sequence;
++    let mut seen = BTreeSet::new();
++    for message in messages {
++        sequence = sequence
++            .checked_add(1)
++            .ok_or_else(|| error(ErrorCode::InvalidMessage, "messages.sequence"))?;
++        if &message.run_id != run_id
++            || message.sequence.get() != sequence
++            || state.message_ids.contains(&message.message_id)
++            || !seen.insert(&message.message_id)
++        {
++            return Err(error(ErrorCode::InvalidMessage, "messages"));
++        }
++        for content in &message.content {
++            let references = match content {
++                ContentBlock::Content { .. } => Vec::new(),
++                ContentBlock::ToolCall { call } => call.bound_input_ref.iter().collect(),
++                ContentBlock::ToolResult { result } => tool_result_refs(result),
++                ContentBlock::ProviderOpaque { data_ref, .. } => vec![data_ref],
++            };
++            for reference in references {
++                record_value(state, additions, reference)?;
++            }
++        }
++    }
++    Ok(sequence)
++}
++
++fn tool_result_refs(result: &ToolResult) -> Vec<&RecordRef> {
++    result
++        .effect_receipt_ref
++        .iter()
++        .chain(
++            result
++                .error
++                .iter()
++                .flat_map(|error| error.diagnostic_ref.iter()),
++        )
++        .collect()
++}
++
++fn validate_events(
++    state: &ScopeState,
++    additions: &BTreeMap<RecordKey, ProtectedRecord>,
++    snapshot: &RunSnapshot,
++    previous_seq: u64,
++    events: &[RunEvent],
++    admission: bool,
++) -> Result<(), ContractError> {
++    let mut sequence = previous_seq;
++    let mut seen = BTreeSet::new();
++    let mut started = 0;
++    let mut finished = 0;
++    for event in events {
++        sequence = sequence
++            .checked_add(1)
++            .ok_or_else(|| error(ErrorCode::InvalidEvent, "events.seq"))?;
++        if event.scope != snapshot.scope
++            || event.run_id != snapshot.run_id
++            || event.session_id != snapshot.request.session_id
++            || event.seq.get() != sequence
++            || state.event_ids.contains(&event.event_id)
++            || !seen.insert(&event.event_id)
++        {
++            return Err(error(ErrorCode::InvalidEvent, "events"));
++        }
++        let reference = match &event.payload {
++            RunEventPayload::RunStarted {
++                request_ref,
++                profile_digest,
++            } => {
++                started += 1;
++                if !admission
++                    || profile_digest != snapshot.profile.profile_digest()
++                    || record_value(state, additions, request_ref)?
++                        != &serde_json::to_value(&snapshot.request)
++                            .map_err(|_| error(ErrorCode::InvalidContract, "request"))?
++                {
++                    return Err(error(ErrorCode::InvalidEvent, "events.run_started"));
++                }
++                request_ref
++            }
++            RunEventPayload::RunFinished { outcome_ref } => {
++                finished += 1;
++                let outcome = snapshot
++                    .outcome
++                    .as_ref()
++                    .filter(|_| snapshot.status.is_terminal())
++                    .ok_or_else(|| error(ErrorCode::InvalidEvent, "events.run_finished"))?;
++                if record_value(state, additions, outcome_ref)?
++                    != &serde_json::to_value(outcome)
++                        .map_err(|_| error(ErrorCode::InvalidContract, "outcome"))?
++                {
++                    return Err(error(ErrorCode::InvalidEvent, "events.run_finished"));
++                }
++                outcome_ref
++            }
++            RunEventPayload::ToolPlanned { call_ref } => {
++                let call: ToolCall = event_record(state, additions, call_ref)?;
++                if !snapshot.tool_ledger.iter().any(|entry| entry.call == call) {
++                    return Err(error(ErrorCode::InvalidEvent, "events.tool_planned"));
++                }
++                call_ref
++            }
++            RunEventPayload::ToolSettled { result_ref } => {
++                let result: ToolResult = event_record(state, additions, result_ref)?;
++                if !snapshot.tool_ledger.iter().any(|entry| {
++                    matches!(
++                        &entry.state, ToolCallState::Settled { result: saved } if *saved == result
++                    )
++                }) {
++                    return Err(error(ErrorCode::InvalidEvent, "events.tool_settled"));
++                }
++                result_ref
++            }
++            RunEventPayload::VerificationCompleted { verification_ref } => {
++                // Additional verification history needs an explicit checkpoint contract.
++                // A standalone event cannot substitute for the saved verification record.
++                let verification: VerificationSummary =
++                    event_record(state, additions, verification_ref)?;
++                if snapshot
++                    .outcome
++                    .as_ref()
++                    .and_then(|outcome| outcome.verification.as_ref())
++                    != Some(&verification)
++                {
++                    return Err(error(
++                        ErrorCode::InvalidEvent,
++                        "events.verification_completed",
++                    ));
++                }
++                verification_ref
++            }
++            RunEventPayload::RunWaiting { wait_ref } => {
++                let wait: WaitState = event_record(state, additions, wait_ref)?;
++                if snapshot.status != RunStatus::Waiting || snapshot.wait.as_ref() != Some(&wait) {
++                    return Err(error(ErrorCode::InvalidEvent, "events.run_waiting"));
++                }
++                wait_ref
++            }
++            RunEventPayload::RunResumed { command_ref } => {
++                let command: ResumeCommand = event_record(state, additions, command_ref)?;
++                let previous = state.runs.get(&snapshot.run_id).ok_or_else(not_found)?;
++                if snapshot.status != RunStatus::Running
++                    || command.run_id != snapshot.run_id
++                    || command.expected_revision != previous.snapshot.revision
++                    || !resume_target_matches(&previous.snapshot, &command.action)
++                {
++                    return Err(error(ErrorCode::InvalidEvent, "events.run_resumed"));
++                }
++                match &command.action {
++                    ResumeAction::External { receipt_ref, .. } => {
++                        record_value(state, additions, receipt_ref)?;
++                    }
++                    ResumeAction::Recover { recovery_ref } => {
++                        record_value(state, additions, recovery_ref)?;
++                    }
++                    _ => {}
++                }
++                command_ref
++            }
++            RunEventPayload::ModelRouteSelected {
++                invocation_ref,
++                route_digest,
++            } => {
++                let invocation: ModelInvocationRecord =
++                    event_record(state, additions, invocation_ref)?;
++                if invocation.route.digest() != *route_digest
++                    || !snapshot.model_ledger.contains(&invocation)
++                {
++                    return Err(error(
++                        ErrorCode::InvalidEvent,
++                        "events.model_route_selected",
++                    ));
++                }
++                invocation_ref
++            }
++        };
++        record_value(state, additions, reference)?;
++    }
++    if sequence != snapshot.last_event_seq
++        || (admission && (started != 1 || events.len() != 1))
++        || (snapshot.status.is_terminal() && finished != 1)
++    {
++        return Err(error(ErrorCode::InvalidEvent, "events"));
++    }
++    Ok(())
++}
++
++fn event_record<T: DeserializeOwned>(
++    state: &ScopeState,
++    additions: &BTreeMap<RecordKey, ProtectedRecord>,
++    reference: &RecordRef,
++) -> Result<T, ContractError> {
++    serde_json::from_value(record_value(state, additions, reference)?.clone())
++        .map_err(|_| error(ErrorCode::InvalidEvent, "events.record"))
++}
++
++fn resume_target_matches(previous: &RunSnapshot, action: &ResumeAction) -> bool {
++    match action {
++        ResumeAction::Recover { .. } => previous.status == RunStatus::Running,
++        ResumeAction::Approve { wait_id, target }
++        | ResumeAction::Deny {
++            wait_id, target, ..
++        } => previous.wait.as_ref().is_some_and(|wait| {
++            &wait.wait_id == wait_id
++                && matches!(&wait.target, WaitTarget::Approval { target: saved } if saved == target)
++        }),
++        ResumeAction::Input { wait_id, .. } => previous.wait.as_ref().is_some_and(|wait| {
++            &wait.wait_id == wait_id && matches!(wait.target, WaitTarget::Input { .. })
++        }),
++        ResumeAction::External { wait_id, .. } => previous.wait.as_ref().is_some_and(|wait| {
++            &wait.wait_id == wait_id && matches!(wait.target, WaitTarget::External { .. })
++        }),
++    }
++}
++
++fn validate_transition(previous: &RunSnapshot, next: &RunSnapshot) -> Result<(), ContractError> {
++    if previous.status.is_terminal() {
++        return Err(error(ErrorCode::InvalidTransition, "run.status"));
++    }
++    next.validate()?;
++    if previous.run_id != next.run_id
++        || previous.request != next.request
++        || previous.request_digest != next.request_digest
++        || previous.scope != next.scope
++        || previous.system_inputs != next.system_inputs
++        || previous.limits != next.limits
++        || next.revision
++            != previous
++                .revision
++                .checked_add(1)
++                .ok_or_else(|| error(ErrorCode::RevisionConflict, "revision"))?
++        || (previous.assembly_ref.is_some() && previous.assembly_ref != next.assembly_ref)
++    {
++        return Err(error(
++            ErrorCode::InvalidTransition,
++            "snapshot.immutable_fields",
++        ));
++    }
++    if previous.profile != next.profile {
++        return Err(error(ErrorCode::ProfileMismatch, "snapshot.profile"));
++    }
++    if previous.tool_ledger.len() > next.tool_ledger.len() {
++        return Err(error(ErrorCode::InvalidTransition, "tool_ledger"));
++    }
++    for (old, new) in previous.tool_ledger.iter().zip(&next.tool_ledger) {
++        let mut call = old.call.clone();
++        if call.bound_input_ref.is_none() {
++            call.bound_input_ref = new.call.bound_input_ref.clone();
++        }
++        if call != new.call
++            || (matches!(old.state, ToolCallState::Settled { .. }) && old != new)
++            || (matches!(
++                old.state,
++                ToolCallState::Dispatching { .. } | ToolCallState::Unknown { .. }
++            ) && matches!(new.state, ToolCallState::Planned { .. }))
++        {
++            return Err(error(ErrorCode::InvalidTransition, "tool_ledger"));
++        }
++        if let (
++            ToolCallState::Dispatching {
++                attempt_id: old_attempt,
++                idempotency_key: old_key,
++            }
++            | ToolCallState::Unknown {
++                attempt_id: old_attempt,
++                idempotency_key: old_key,
++            },
++            ToolCallState::Dispatching {
++                attempt_id: new_attempt,
++                idempotency_key: new_key,
++            }
++            | ToolCallState::Unknown {
++                attempt_id: new_attempt,
++                idempotency_key: new_key,
++            },
++        ) = (&old.state, &new.state)
++        {
++            let retry = matches!(old.state, ToolCallState::Unknown { .. })
++                && matches!(new.state, ToolCallState::Dispatching { .. });
++            if old_key != new_key || (!retry && old_attempt != new_attempt) {
++                return Err(error(ErrorCode::InvalidTransition, "tool_ledger.attempt"));
++            }
++        }
++    }
++    if previous.model_ledger.len() > next.model_ledger.len()
++        || previous
++            .model_ledger
++            .iter()
++            .zip(&next.model_ledger)
++            .any(|(old, new)| {
++                old.run_id != new.run_id
++                    || old.model_step_id != new.model_step_id
++                    || old.attempt_id != new.attempt_id
++                    || old.purpose != new.purpose
++                    || old.route != new.route
++                    || old.selection_reason != new.selection_reason
++                    || old.request_digest != new.request_digest
++                    || (matches!(
++                        old.state,
++                        ModelAttemptState::Completed {} | ModelAttemptState::Failed { .. }
++                    ) && old != new)
++                    || (matches!(old.state, ModelAttemptState::Unknown {})
++                        && matches!(new.state, ModelAttemptState::Reserved {}))
++            })
++    {
++        return Err(error(ErrorCode::InvalidTransition, "model_ledger"));
++    }
++    let old = &previous.usage;
++    let new = &next.usage;
++    if new.model_calls < old.model_calls
++        || new.tool_attempts < old.tool_attempts
++        || new.repair_attempts < old.repair_attempts
++        || new.recovery_attempts < old.recovery_attempts
++        || new.elapsed_ms < old.elapsed_ms
++    {
++        return Err(error(ErrorCode::InvalidTransition, "usage"));
++    }
++    Ok(())
++}
+diff --git a/crates/wickle/tests/state.rs b/crates/wickle/tests/state.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..48c71f6bca8d65b4773aae455f4884f9b0739ab0
+--- /dev/null
++++ b/crates/wickle/tests/state.rs
+@@ -0,0 +1,864 @@
++//! Atomic admission, persistence, leases, and scope isolation of the memory store.
++
++use serde_json::json;
++use std::{collections::BTreeSet, sync::Arc};
++use wickle::*;
++
++fn id(value: &str) -> Id {
++    Id::new(value).unwrap()
++}
++fn scope() -> Scope {
++    Scope {
++        tenant_id: id("tenant"),
++        workspace_id: id("workspace"),
++        user_id: None,
++    }
++}
++
++struct Catalog {
++    revision: &'static str,
++}
++impl ProfileResolver for Catalog {
++    fn resolve<'a>(
++        &'a self,
++        reference: &'a ComponentRef,
++        _: &'a Scope,
++    ) -> PortFuture<'a, ComponentMetadata> {
++        Box::pin(async move {
++            Ok(ComponentMetadata {
++                reference: ComponentRef {
++                    version: Some(id(self.revision)),
++                    ..reference.clone()
++                },
++                contract_version: 1,
++                manifest_digest: canonical_digest(&json!(self.revision)),
++                config_schema: json!({"type":"object","additionalProperties":false}),
++                dependencies: vec![],
++                capabilities: BTreeSet::new(),
++                required_capabilities: BTreeSet::new(),
++                required_connections: BTreeSet::new(),
++                model_name: None,
++                hook_position: None,
++                exports: vec![],
++            })
++        })
++    }
++}
++
++fn event(run: &Id, session: &Id, owner: &Scope, seq: u64, payload: RunEventPayload) -> RunEvent {
++    RunEvent {
++        schema_version: RunEventSchemaVersion::V1,
++        event_id: id(&format!("event-{run}-{seq}")),
++        scope: owner.clone(),
++        run_id: run.clone(),
++        session_id: session.clone(),
++        seq: seq.try_into().unwrap(),
++        timestamp_ms: 1000 + seq as i64,
++        payload,
++    }
++}
++
++async fn admission(
++    run: &str,
++    request_id: &str,
++    session: &str,
++    text: &str,
++    revision: &'static str,
++) -> AdmissionInput {
++    let owner = scope();
++    let profile=AgentProfile::from_json(&json!({
++        "schema_version":"wickle.agent-profile.v1","agent_id":"assistant","version":"1.0.0",
++        "name":"Assistant","description":"State contract example","instructions":{"text":"Use evidence"},
++        "model_binding":"primary","tools":[],"skills":[],"connectors":[],"context_policy":{"strategy":"bounded"},"output_contract":{"type":"text"},
++        "limits":{"max_model_calls":8,"max_tool_attempts":4,"max_repair_attempts":1,"max_recovery_attempts":1,"max_elapsed_ms":10000}
++    }).to_string()).unwrap();
++    let profile = ProfileValidator::new(&Catalog { revision })
++        .validate(&profile, &owner)
++        .await
++        .unwrap();
++    let request = RunRequest {
++        request_id: id(request_id),
++        session_id: id(session),
++        input: vec![InputContent::Text { text: text.into() }],
++        trigger: RunTrigger::User {},
++        output_contract: None,
++    };
++    let request_record = ProtectedRecord::new(
++        id(&format!("request-{run}")),
++        1,
++        serde_json::to_value(&request).unwrap(),
++    );
++    let prompt_record = ProtectedRecord::new(
++        id(&format!("prompt-{session}")),
++        1,
++        json!({"instructions":"Use evidence"}),
++    );
++    let snapshot = RunSnapshot {
++        schema_version: RunSnapshotSchemaVersion::V1,
++        run_id: id(run),
++        request_digest: admission_digest(&request, &profile, None),
++        request: request.clone(),
++        scope: owner.clone(),
++        limits: profile.profile().limits.clone(),
++        profile,
++        status: RunStatus::Running,
++        phase: RunPhase::Admission,
++        model_step_id: None,
++        usage: BudgetUsage::default(),
++        model_ledger: vec![],
++        tool_ledger: vec![],
++        system_inputs: None,
++        wait: None,
++        outcome: None,
++        assembly_ref: None,
++        context_batches: vec![],
++        source_states: vec![],
++        revision: 0,
++        last_event_seq: 1,
++    };
++    let started = event(
++        &snapshot.run_id,
++        &request.session_id,
++        &owner,
++        1,
++        RunEventPayload::RunStarted {
++            request_ref: request_record.reference().clone(),
++            profile_digest: snapshot.profile.profile_digest().clone(),
++        },
++    );
++    let message = Message {
++        message_id: id(&format!("message-{run}")),
++        run_id: snapshot.run_id.clone(),
++        sequence: 1.try_into().unwrap(),
++        role: MessageRole::User,
++        content: vec![ContentBlock::Content {
++            content: InputContent::Text { text: text.into() },
++        }],
++        origin: MessageOrigin::User,
++        visibility: Visibility::UserAndModel,
++    };
++    AdmissionInput {
++        snapshot,
++        prompt_snapshot: prompt_record.reference().clone(),
++        messages: vec![message],
++        events: vec![started],
++        records: vec![request_record, prompt_record],
++        require_durable: false,
++    }
++}
++
++fn prepared(snapshot: &RunSnapshot, lease: RunLease, now: i64) -> CommitInput {
++    let mut next = snapshot.clone();
++    next.revision += 1;
++    next.phase = RunPhase::Prepare;
++    CommitInput {
++        expected_revision: snapshot.revision,
++        lease,
++        now_ms: now,
++        snapshot: next,
++        messages: vec![],
++        events: vec![],
++        records: vec![],
++    }
++}
++
++fn finished(snapshot: &RunSnapshot, lease: RunLease, now: i64) -> CommitInput {
++    let mut next = snapshot.clone();
++    next.revision += 1;
++    next.last_event_seq += 1;
++    next.status = RunStatus::Succeeded;
++    next.phase = RunPhase::Finish;
++    let outcome = RunOutcome {
++        result: OutcomeResult::Succeeded {
++            completion_basis: CompletionBasis::TurnEnded,
++        },
++        output: vec![InputContent::Text {
++            text: "Completed".into(),
++        }],
++        artifacts: vec![],
++        usage: next.usage.clone(),
++        checkpoint_revision: next.revision,
++        verification: None,
++        unresolved_effects: vec![],
++    };
++    let record = ProtectedRecord::new(
++        id(&format!("outcome-{}", next.run_id)),
++        1,
++        serde_json::to_value(&outcome).unwrap(),
++    );
++    next.outcome = Some(outcome);
++    let finished = event(
++        &next.run_id,
++        &next.request.session_id,
++        &next.scope,
++        next.last_event_seq,
++        RunEventPayload::RunFinished {
++            outcome_ref: record.reference().clone(),
++        },
++    );
++    CommitInput {
++        expected_revision: snapshot.revision,
++        lease,
++        now_ms: now,
++        snapshot: next,
++        messages: vec![],
++        events: vec![finished],
++        records: vec![record],
++    }
++}
++
++#[tokio::test]
++async fn identical_retries_return_the_original_run_without_replacing_resolved_metadata() {
++    let store = MemoryStateStore::new();
++    let first = admission("run-a", "request", "session", "input", "1").await;
++    let receipt = store.admit(&scope(), first.clone()).await.unwrap();
++    assert!(receipt.created);
++    let retry = admission("run-b", "request", "session", "input", "2").await;
++    let replay = store.admit(&scope(), retry).await.unwrap();
++    assert!(!replay.created);
++    assert_eq!(replay.state.snapshot.run_id, id("run-a"));
++    assert_eq!(
++        replay.state.snapshot.profile.resolution_digest(),
++        first.snapshot.profile.resolution_digest()
++    );
++    assert_eq!(replay.state.messages.len(), 1);
++    let changed = admission("run-c", "request", "session", "different input", "1").await;
++    assert!(store.admit(&scope(), changed).await.is_err());
++    assert_eq!(
++        store
++            .load(&scope(), &id("run-a"))
++            .await
++            .unwrap()
++            .snapshot
++            .revision,
++        0
++    );
++    let events = store
++        .read_events(&scope(), &id("run-a"), 0, 100)
++        .await
++        .unwrap();
++    assert_eq!(events.events.len(), 1);
++}
++
++#[tokio::test]
++async fn concurrent_duplicate_admission_creates_exactly_one_run() {
++    let store = Arc::new(MemoryStateStore::new());
++    let barrier = Arc::new(tokio::sync::Barrier::new(8));
++    let mut handles = vec![];
++    for n in 0..8 {
++        let input = admission(&format!("run-{n}"), "request", "session", "input", "1").await;
++        let store = store.clone();
++        let barrier = barrier.clone();
++        handles.push(tokio::spawn(async move {
++            barrier.wait().await;
++            store.admit(&scope(), input).await.unwrap()
++        }));
++    }
++    let mut created = 0;
++    let mut ids = BTreeSet::new();
++    for h in handles {
++        let result = h.await.unwrap();
++        created += usize::from(result.created);
++        ids.insert(result.state.snapshot.run_id);
++    }
++    assert_eq!(created, 1);
++    assert_eq!(ids.len(), 1);
++}
++
++#[tokio::test]
++async fn distinct_concurrent_requests_create_only_one_active_run_in_the_session() {
++    let store = Arc::new(MemoryStateStore::new());
++    let barrier = Arc::new(tokio::sync::Barrier::new(8));
++    let mut handles = Vec::new();
++    for n in 0..8 {
++        let input = admission(
++            &format!("run-{n}"),
++            &format!("request-{n}"),
++            "session",
++            "input",
++            "1",
++        )
++        .await;
++        let store = store.clone();
++        let barrier = barrier.clone();
++        handles.push(tokio::spawn(async move {
++            barrier.wait().await;
++            store.admit(&scope(), input).await
++        }));
++    }
++    let mut accepted = Vec::new();
++    let mut rejected = 0;
++    for handle in handles {
++        match handle.await.unwrap() {
++            Ok(result) => accepted.push(result.state.snapshot.run_id),
++            Err(_) => rejected += 1,
++        }
++    }
++    assert_eq!(accepted.len(), 1);
++    assert_eq!(rejected, 7);
++    assert_eq!(
++        store
++            .load_session(&scope(), &id("session"))
++            .await
++            .unwrap()
++            .active_run_id
++            .as_ref(),
++        accepted.first()
++    );
++}
++
++#[tokio::test]
++async fn waiting_keeps_the_session_busy_even_after_the_worker_releases_its_lease() {
++    let store = MemoryStateStore::new();
++    store
++        .admit(
++            &scope(),
++            admission("run", "request", "session", "input", "1").await,
++        )
++        .await
++        .unwrap();
++    let state = store.load(&scope(), &id("run")).await.unwrap();
++    let lease = store
++        .acquire_lease(&scope(), &id("run"), &id("owner"), 100, 100)
++        .await
++        .unwrap();
++    let mut update = prepared(&state.snapshot, lease.clone(), 101);
++    let wait = WaitState {
++        wait_id: id("wait"),
++        target: WaitTarget::Input {
++            request: InputRequest {
++                input_request_id: id("input-request"),
++                call_id: id("input-call"),
++                question: "Choose a source".into(),
++                schema_ref: None,
++            },
++        },
++        expires_at_ms: Some(1000),
++    };
++    let record = ProtectedRecord::new(id("wait-record"), 1, serde_json::to_value(&wait).unwrap());
++    update.snapshot.status = RunStatus::Waiting;
++    update.snapshot.phase = RunPhase::Waiting;
++    update.snapshot.wait = Some(wait);
++    update.snapshot.last_event_seq = 2;
++    update.events.push(event(
++        &id("run"),
++        &id("session"),
++        &scope(),
++        2,
++        RunEventPayload::RunWaiting {
++            wait_ref: record.reference().clone(),
++        },
++    ));
++    update.records.push(record);
++    store.commit(&scope(), &id("run"), update).await.unwrap();
++    store
++        .release_lease(&scope(), &id("run"), &lease, 102)
++        .await
++        .unwrap();
++    assert!(
++        store
++            .admit(
++                &scope(),
++                admission("other", "other-request", "session", "other", "1").await
++            )
++            .await
++            .is_err()
++    );
++    let replay = store
++        .admit(
++            &scope(),
++            admission("replacement", "request", "session", "input", "2").await,
++        )
++        .await
++        .unwrap();
++    assert!(!replay.created);
++    assert_eq!(replay.state.snapshot.status, RunStatus::Waiting);
++}
++
++#[tokio::test]
++async fn competing_requests_cannot_share_an_active_session_and_terminal_commit_releases_it() {
++    let store = MemoryStateStore::new();
++    let first = admission("run", "request", "session", "input", "1").await;
++    store.admit(&scope(), first).await.unwrap();
++    assert!(
++        store
++            .admit(
++                &scope(),
++                admission("other", "other-request", "session", "other", "1").await
++            )
++            .await
++            .is_err()
++    );
++    let state = store.load(&scope(), &id("run")).await.unwrap();
++    let lease = store
++        .acquire_lease(&scope(), &id("run"), &id("owner"), 100, 50)
++        .await
++        .unwrap();
++    store
++        .commit(&scope(), &id("run"), finished(&state.snapshot, lease, 101))
++        .await
++        .unwrap();
++    assert!(
++        store
++            .load_session(&scope(), &id("session"))
++            .await
++            .unwrap()
++            .active_run_id
++            .is_none()
++    );
++    let mut second = admission("other", "other-request", "session", "other", "1").await;
++    second.messages[0].sequence = 2.try_into().unwrap();
++    assert!(store.admit(&scope(), second).await.unwrap().created);
++    assert_eq!(
++        store
++            .load(&scope(), &id("run"))
++            .await
++            .unwrap()
++            .snapshot
++            .status,
++        RunStatus::Succeeded
++    );
++    let replay = store
++        .admit(
++            &scope(),
++            admission("replacement", "request", "session", "input", "2").await,
++        )
++        .await
++        .unwrap();
++    assert!(!replay.created);
++    assert_eq!(replay.state.snapshot.run_id, id("run"));
++}
++
++#[tokio::test]
++async fn lease_expiry_fencing_and_revision_conflicts_are_independent() {
++    let store = MemoryStateStore::new();
++    let input = admission("run", "request", "session", "input", "1").await;
++    store.admit(&scope(), input).await.unwrap();
++    let first = store
++        .acquire_lease(&scope(), &id("run"), &id("owner-a"), 100, 10)
++        .await
++        .unwrap();
++    assert!(
++        store
++            .acquire_lease(&scope(), &id("run"), &id("owner-b"), 109, 10)
++            .await
++            .is_err()
++    );
++    assert!(
++        store
++            .renew_lease(&scope(), &id("run"), &first, 110, 10)
++            .await
++            .is_err()
++    );
++    let second = store
++        .acquire_lease(&scope(), &id("run"), &id("owner-b"), 110, 10)
++        .await
++        .unwrap();
++    assert!(second.fencing_token > first.fencing_token);
++    let state = store.load(&scope(), &id("run")).await.unwrap();
++    assert!(
++        store
++            .commit(
++                &scope(),
++                &id("run"),
++                prepared(&state.snapshot, first.clone(), 111)
++            )
++            .await
++            .is_err()
++    );
++    let update = prepared(&state.snapshot, second.clone(), 111);
++    store
++        .commit(&scope(), &id("run"), update.clone())
++        .await
++        .unwrap();
++    assert!(store.commit(&scope(), &id("run"), update).await.is_err());
++    assert!(
++        store
++            .renew_lease(&scope(), &id("run"), &first, 111, 20)
++            .await
++            .is_err()
++    );
++    let renewed = store
++        .renew_lease(&scope(), &id("run"), &second, 119, 20)
++        .await
++        .unwrap();
++    assert_eq!(renewed.fencing_token, second.fencing_token);
++    let current = store.load(&scope(), &id("run")).await.unwrap();
++    // Heartbeat renews expiry without invalidating the driver's same-generation copy.
++    store
++        .commit(
++            &scope(),
++            &id("run"),
++            prepared(&current.snapshot, second.clone(), 125),
++        )
++        .await
++        .unwrap();
++    store
++        .release_lease(&scope(), &id("run"), &renewed, 130)
++        .await
++        .unwrap();
++    let third = store
++        .acquire_lease(&scope(), &id("run"), &id("owner-c"), 130, 20)
++        .await
++        .unwrap();
++    assert!(third.fencing_token > renewed.fencing_token);
++    let current = store.load(&scope(), &id("run")).await.unwrap();
++    let mut forged = third.clone();
++    forged.expires_at_ms = i64::MAX;
++    assert_eq!(
++        store
++            .commit(
++                &scope(),
++                &id("run"),
++                prepared(&current.snapshot, forged, 150)
++            )
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::LeaseLost
++    );
++}
++
++#[tokio::test]
++async fn an_event_cannot_announce_a_wait_absent_from_the_committed_snapshot() {
++    let store = MemoryStateStore::new();
++    let input = admission("run", "request", "session", "input", "1").await;
++    let wrong_payload = input.records[0].reference().clone();
++    store.admit(&scope(), input).await.unwrap();
++    let before = store.load(&scope(), &id("run")).await.unwrap();
++    let lease = store
++        .acquire_lease(&scope(), &id("run"), &id("owner"), 100, 100)
++        .await
++        .unwrap();
++    let mut update = prepared(&before.snapshot, lease, 101);
++    update.snapshot.last_event_seq = 2;
++    update.events.push(event(
++        &id("run"),
++        &id("session"),
++        &scope(),
++        2,
++        RunEventPayload::RunWaiting {
++            wait_ref: wrong_payload,
++        },
++    ));
++    assert_eq!(
++        store
++            .commit(&scope(), &id("run"), update)
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::InvalidEvent
++    );
++    assert_eq!(store.load(&scope(), &id("run")).await.unwrap(), before);
++    assert_eq!(
++        store
++            .read_events(&scope(), &id("run"), 0, 100)
++            .await
++            .unwrap()
++            .events
++            .len(),
++        1
++    );
++}
++
++#[tokio::test]
++async fn uncertain_tool_effects_keep_the_original_attempt_and_idempotency_key() {
++    let store = MemoryStateStore::new();
++    store
++        .admit(
++            &scope(),
++            admission("run", "request", "session", "input", "1").await,
++        )
++        .await
++        .unwrap();
++    let before = store.load(&scope(), &id("run")).await.unwrap();
++    let lease = store
++        .acquire_lease(&scope(), &id("run"), &id("owner"), 100, 100)
++        .await
++        .unwrap();
++    let mut plan = prepared(&before.snapshot, lease.clone(), 101);
++    let call = ToolCall {
++        call_id: id("call"),
++        model_request_id: id("model-request"),
++        provider_call_id: id("provider-call"),
++        tool_name: id("tool"),
++        model_inputs: Default::default(),
++        descriptor_digest: canonical_digest(&json!("descriptor")),
++        bound_input_ref: None,
++    };
++    let call_record =
++        ProtectedRecord::new(id("planned-call"), 1, serde_json::to_value(&call).unwrap());
++    plan.snapshot.phase = RunPhase::Tool;
++    plan.snapshot.last_event_seq = 2;
++    plan.snapshot.tool_ledger.push(ToolLedgerEntry {
++        call,
++        state: ToolCallState::Planned {},
++    });
++    plan.events.push(event(
++        &id("run"),
++        &id("session"),
++        &scope(),
++        2,
++        RunEventPayload::ToolPlanned {
++            call_ref: call_record.reference().clone(),
++        },
++    ));
++    plan.records.push(call_record);
++    let planned = store.commit(&scope(), &id("run"), plan).await.unwrap();
++    let bound = ProtectedRecord::new(id("bound-input"), 1, json!({"target":"record"}));
++    let mut dispatch = prepared(&planned.snapshot, lease.clone(), 102);
++    dispatch.snapshot.phase = RunPhase::Tool;
++    dispatch.snapshot.tool_ledger[0].call.bound_input_ref = Some(bound.reference().clone());
++    dispatch.snapshot.tool_ledger[0].state = ToolCallState::Dispatching {
++        attempt_id: id("attempt-a"),
++        idempotency_key: id("effect-key"),
++    };
++    dispatch.records.push(bound);
++    let dispatched = store.commit(&scope(), &id("run"), dispatch).await.unwrap();
++    let mut lost = prepared(&dispatched.snapshot, lease.clone(), 103);
++    lost.snapshot.phase = RunPhase::Tool;
++    lost.snapshot.tool_ledger[0].state = ToolCallState::Unknown {
++        attempt_id: id("attempt-b"),
++        idempotency_key: id("different-key"),
++    };
++    assert_eq!(
++        store
++            .commit(&scope(), &id("run"), lost)
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::InvalidTransition
++    );
++    let mut lost = prepared(&dispatched.snapshot, lease, 103);
++    lost.snapshot.phase = RunPhase::Tool;
++    lost.snapshot.tool_ledger[0].state = ToolCallState::Unknown {
++        attempt_id: id("attempt-a"),
++        idempotency_key: id("effect-key"),
++    };
++    let saved = store.commit(&scope(), &id("run"), lost).await.unwrap();
++    assert!(
++        matches!(&saved.snapshot.tool_ledger[0].state, ToolCallState::Unknown { attempt_id, idempotency_key } if attempt_id == &id("attempt-a") && idempotency_key == &id("effect-key"))
++    );
++}
++
++#[tokio::test]
++async fn invalid_multi_event_commit_does_not_partially_publish_records_state_or_messages() {
++    let store = MemoryStateStore::new();
++    let input = admission("run", "request", "session", "input", "1").await;
++    store.admit(&scope(), input).await.unwrap();
++    let before = store.load(&scope(), &id("run")).await.unwrap();
++    let lease = store
++        .acquire_lease(&scope(), &id("run"), &id("owner"), 100, 100)
++        .await
++        .unwrap();
++    let mut update = prepared(&before.snapshot, lease, 101);
++    let wait = WaitState {
++        wait_id: id("new-wait"),
++        target: WaitTarget::Input {
++            request: InputRequest {
++                input_request_id: id("input-request"),
++                call_id: id("input-call"),
++                question: "Choose a source".into(),
++                schema_ref: None,
++            },
++        },
++        expires_at_ms: None,
++    };
++    let record = ProtectedRecord::new(id("new-record"), 1, serde_json::to_value(&wait).unwrap());
++    let reference = record.reference().clone();
++    update.records.push(record);
++    update.events = vec![
++        event(
++            &id("run"),
++            &id("session"),
++            &scope(),
++            2,
++            RunEventPayload::RunWaiting {
++                wait_ref: reference.clone(),
++            },
++        ),
++        event(
++            &id("run"),
++            &id("session"),
++            &scope(),
++            2,
++            RunEventPayload::RunWaiting {
++                wait_ref: reference.clone(),
++            },
++        ),
++    ];
++    update.snapshot.last_event_seq = 2;
++    update.snapshot.status = RunStatus::Waiting;
++    update.snapshot.phase = RunPhase::Waiting;
++    update.snapshot.wait = Some(wait);
++    let mut message = before.messages[0].clone();
++    message.message_id = id("new-message");
++    message.sequence = 2.try_into().unwrap();
++    update.messages.push(message);
++    assert!(store.commit(&scope(), &id("run"), update).await.is_err());
++    let after = store.load(&scope(), &id("run")).await.unwrap();
++    assert_eq!(after.snapshot, before.snapshot);
++    assert_eq!(after.messages, before.messages);
++    assert_eq!(after.session, before.session);
++    assert!(store.read_record(&scope(), &reference).await.is_err());
++    assert_eq!(
++        store
++            .read_events(&scope(), &id("run"), 0, 100)
++            .await
++            .unwrap()
++            .events
++            .len(),
++        1
++    );
++}
++
++#[tokio::test]
++async fn commits_cannot_replace_request_or_resolved_profile_and_reads_return_owned_snapshots() {
++    let store = MemoryStateStore::new();
++    let input = admission("run", "request", "session", "input", "1").await;
++    store.admit(&scope(), input).await.unwrap();
++    let before = store.load(&scope(), &id("run")).await.unwrap();
++    let lease = store
++        .acquire_lease(&scope(), &id("run"), &id("owner"), 100, 100)
++        .await
++        .unwrap();
++    let mut update = prepared(&before.snapshot, lease.clone(), 101);
++    update.snapshot.request.input = vec![InputContent::Text {
++        text: "replacement".into(),
++    }];
++    update.snapshot.request_digest =
++        admission_digest(&update.snapshot.request, &update.snapshot.profile, None);
++    assert!(store.commit(&scope(), &id("run"), update).await.is_err());
++    let replacement = admission("run", "request", "session", "input", "2").await;
++    let mut update = prepared(&before.snapshot, lease, 101);
++    update.snapshot.profile = replacement.snapshot.profile;
++    assert!(store.commit(&scope(), &id("run"), update).await.is_err());
++    let mut copy = store.load(&scope(), &id("run")).await.unwrap();
++    copy.messages.clear();
++    copy.snapshot.request.input.clear();
++    let after = store.load(&scope(), &id("run")).await.unwrap();
++    assert_eq!(after.snapshot, before.snapshot);
++    assert_eq!(after.messages, before.messages);
++}
++
++#[tokio::test]
++async fn every_store_surface_is_scoped_and_memory_does_not_claim_durability() {
++    let store = MemoryStateStore::new();
++    let capabilities = store.capabilities();
++    assert!(
++        !capabilities.durable && !capabilities.cross_process_leases && capabilities.event_replay
++    );
++    let mut durable = admission(
++        "durable",
++        "durable-request",
++        "durable-session",
++        "input",
++        "1",
++    )
++    .await;
++    durable.require_durable = true;
++    assert!(store.admit(&scope(), durable).await.is_err());
++    let input = admission("run", "request", "session", "input", "1").await;
++    let record = input.records[0].reference().clone();
++    store.admit(&scope(), input).await.unwrap();
++    let snapshot = store.load(&scope(), &id("run")).await.unwrap().snapshot;
++    let lease = store
++        .acquire_lease(&scope(), &id("run"), &id("owner"), 100, 100)
++        .await
++        .unwrap();
++    for foreign in [
++        Scope {
++            tenant_id: id("other"),
++            ..scope()
++        },
++        Scope {
++            workspace_id: id("other"),
++            ..scope()
++        },
++        Scope {
++            user_id: Some(id("other")),
++            ..scope()
++        },
++    ] {
++        assert!(store.load(&foreign, &id("run")).await.is_err());
++        assert!(store.load_session(&foreign, &id("session")).await.is_err());
++        assert!(
++            store
++                .read_events(&foreign, &id("run"), 0, 100)
++                .await
++                .is_err()
++        );
++        assert!(store.read_record(&foreign, &record).await.is_err());
++        assert!(
++            store
++                .acquire_lease(&foreign, &id("run"), &id("owner"), 101, 10)
++                .await
++                .is_err()
++        );
++        assert!(
++            store
++                .renew_lease(&foreign, &id("run"), &lease, 101, 10)
++                .await
++                .is_err()
++        );
++        assert!(
++            store
++                .commit(
++                    &foreign,
++                    &id("run"),
++                    prepared(&snapshot, lease.clone(), 101)
++                )
++                .await
++                .is_err()
++        );
++    }
++}
++
++#[tokio::test]
++async fn event_pages_are_exclusive_ordered_replayable_and_preserved_after_completion() {
++    let store = MemoryStateStore::new();
++    let input = admission("run", "request", "session", "input", "1").await;
++    store.admit(&scope(), input).await.unwrap();
++    let snapshot = store.load(&scope(), &id("run")).await.unwrap().snapshot;
++    let lease = store
++        .acquire_lease(&scope(), &id("run"), &id("owner"), 100, 100)
++        .await
++        .unwrap();
++    store
++        .commit(&scope(), &id("run"), finished(&snapshot, lease, 101))
++        .await
++        .unwrap();
++    let first = store.read_events(&scope(), &id("run"), 0, 1).await.unwrap();
++    assert_eq!(first.events.len(), 1);
++    assert!(first.has_more);
++    assert_eq!(first.next_after_seq, 1);
++    let second = store
++        .read_events(&scope(), &id("run"), first.next_after_seq, 1)
++        .await
++        .unwrap();
++    assert_eq!(second.events.len(), 1);
++    assert_eq!(second.events[0].seq.get(), 2);
++    assert!(!second.has_more);
++    assert_eq!(
++        store
++            .read_events(&scope(), &id("run"), 1, 100)
++            .await
++            .unwrap()
++            .events,
++        second.events
++    );
++    assert!(
++        store
++            .read_events(&scope(), &id("run"), 2, 100)
++            .await
++            .unwrap()
++            .events
++            .is_empty()
++    );
++    assert!(
++        store
++            .acquire_lease(&scope(), &id("run"), &id("owner"), 102, 100)
++            .await
++            .is_err()
++    );
++}
+diff --git a/docs/state.md b/docs/state.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..c7cabb4022b30e98b6da014ddbb0cc2317d418c3
+--- /dev/null
++++ b/docs/state.md
+@@ -0,0 +1,76 @@
++# StateStore and the memory reference store
++
++`StateStore` is the trusted storage boundary for admission, checkpoints, leases,
++session transcripts, protected records, and event replay. `MemoryStateStore`
++implements that contract in-process with a mutex-protected transaction boundary.
++It performs no external calls or awaits while holding its lock.
++
++All keys use the exact tenant/workspace/optional-user scope. Raw store access is
++for trusted runtime code; the facade must also apply current `PolicyGate` checks
++before publishing data or performing a protected operation.
++
++## Admission
++
++`admit(scope, AdmissionInput)` accepts a running/admission checkpoint at revision
++zero, the pinned prompt record, initial messages, and one `run.started` event.
++The event must reference the actual accepted request. Referenced protected data
++must already exist in the same scope or be supplied in the transaction.
++
++The deduplication key is `(scope, session_id, request_id)`. An identical logical
++digest returns the original run without adding messages/events or replacing its
++resolved profile and record references, even after it finishes. A changed digest
++returns `RequestConflict`. Other requests cannot occupy a session while its active
++run is running or waiting. Profile and prompt identity remain pinned across the
++session; a new run may resolve its allowed model binding revision separately.
++
++`StoredRun.messages` is an owned copy of the complete session transcript.
++Message sequences continue across runs. Changing a returned object does not
++mutate the stored data.
++
++## Leases and atomic commits
++
++Acquire, renew, and release use explicit trusted UTC `now_ms` and a positive finite
++TTL. An acquired lease has a monotonic fencing generation. `now == expires_at_ms`
++is already expired. Renewal preserves the generation; an older copy from that
++same generation is checked against the store's current expiry, not an untrusted
++expiry supplied by the caller. An expired or replaced generation cannot revive
++itself by renewing.
++
++`commit` requires the current lease and the expected checkpoint revision. The
++candidate revision must be exactly one greater. It validates the complete
++candidate, messages, records, and events before changing anything. A failure does
++not partially append data or release a session. Terminal commits atomically store
++the matching `run.finished` outcome and clear the active-run slot.
++
++Request/profile identity, fixed system inputs, existing bound inputs, settled tool
++results, and completed model attempts cannot be silently replaced. Uncertain
++tool effects retain their physical attempt and idempotency identity. Retry and
++reconciliation policy belongs to the driver; store validation does not authorize
++another external dispatch.
++
++Events are checked against their typed referenced data and the committed
++checkpoint/ledger. A record merely existing is insufficient. Verification events
++currently require the matching `outcome.verification`; separate intermediate
++verification history is not represented yet. Resume event validation does not
++replace the driver's approval, input-schema, or command-deduplication checks.
++
++## Protected records and replay
++
++`ProtectedRecord::new` owns its JSON value and computes its digest. Its
++`(record_id, revision)` is immutable within a scope and can be reused by another
++run in that scope. Explicit `read_record` access still requires the Host's separate
++protected-record permission. Debug output omits the value. External artifact and
++evidence references are resolved through their own storage/authorization ports.
++
++`read_events` uses an exclusive cursor and returns a bounded ordered page. Reading
++does not consume events. The memory store retains its full history while alive
++and reports the first/latest available sequence. Pages are limited to 1,000 events.
++
++The reference store declares `durable=false`, `cross_process_leases=false`, and
++`event_replay=true`. Admission requiring durability is rejected. Recreating a
++memory store is not process-restart recovery.
++
++The [independent consumer](../tests/support/state_consumer.rs) exercises admission,
++idempotent replay, lease acquisition, terminal commit, event replay, and a foreign
++scope lookup. It is built against the extracted package by
++`python3 scripts/check-package.py`.
+diff --git a/tests/support/state_consumer.rs b/tests/support/state_consumer.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..50e0adfab5281c7d6169a3f0880535418c44455e
+--- /dev/null
++++ b/tests/support/state_consumer.rs
+@@ -0,0 +1,201 @@
++use serde_json::json;
++use std::collections::BTreeSet;
++use wickle::*;
++
++fn id(s: &str) -> Id {
++    Id::new(s).expect("example identifiers")
++}
++struct Catalog;
++impl ProfileResolver for Catalog {
++    fn resolve<'a>(
++        &'a self,
++        r: &'a ComponentRef,
++        _: &'a Scope,
++    ) -> PortFuture<'a, ComponentMetadata> {
++        Box::pin(async move {
++            Ok(ComponentMetadata {
++                reference: ComponentRef {
++                    version: Some(id("revision-1")),
++                    ..r.clone()
++                },
++                contract_version: 1,
++                manifest_digest: canonical_digest(&json!("registered model")),
++                config_schema: json!({"type":"object","additionalProperties":false}),
++                dependencies: vec![],
++                capabilities: BTreeSet::new(),
++                required_capabilities: BTreeSet::new(),
++                required_connections: BTreeSet::new(),
++                model_name: None,
++                hook_position: None,
++                exports: vec![],
++            })
++        })
++    }
++}
++
++#[tokio::main(flavor = "current_thread")]
++async fn main() -> Result<(), Box<dyn std::error::Error>> {
++    let scope = Scope {
++        tenant_id: id("tenant"),
++        workspace_id: id("workspace"),
++        user_id: None,
++    };
++    let profile = AgentProfile::from_json(
++        r#"{
++      "schema_version":"wickle.agent-profile.v1","agent_id":"assistant","version":"1.0.0",
++      "name":"Assistant","description":"Storage example","instructions":{"text":"Use evidence"},
++      "model_binding":"primary","tools":[],"skills":[],"connectors":[],"context_policy":{"strategy":"bounded"},"output_contract":{"type":"text"},
++      "limits":{"max_model_calls":4,"max_tool_attempts":0,"max_repair_attempts":0,"max_recovery_attempts":0,"max_elapsed_ms":10000}
++    }"#,
++    )?;
++    let profile = ProfileValidator::new(&Catalog)
++        .validate(&profile, &scope)
++        .await?;
++    let request = RunRequest {
++        request_id: id("request"),
++        session_id: id("session"),
++        input: vec![InputContent::Text {
++            text: "Inspect stored state".into(),
++        }],
++        trigger: RunTrigger::User {},
++        output_contract: None,
++    };
++    let request_record =
++        ProtectedRecord::new(id("request-record"), 1, serde_json::to_value(&request)?);
++    let prompt = ProtectedRecord::new(id("prompt"), 1, json!({"text":"Use evidence"}));
++    let snapshot = RunSnapshot {
++        schema_version: RunSnapshotSchemaVersion::V1,
++        run_id: id("run"),
++        request_digest: admission_digest(&request, &profile, None),
++        request: request.clone(),
++        scope: scope.clone(),
++        limits: profile.profile().limits.clone(),
++        profile,
++        status: RunStatus::Running,
++        phase: RunPhase::Admission,
++        model_step_id: None,
++        usage: BudgetUsage::default(),
++        model_ledger: vec![],
++        tool_ledger: vec![],
++        system_inputs: None,
++        wait: None,
++        outcome: None,
++        assembly_ref: None,
++        context_batches: vec![],
++        source_states: vec![],
++        revision: 0,
++        last_event_seq: 1,
++    };
++    let started = RunEvent {
++        schema_version: RunEventSchemaVersion::V1,
++        event_id: id("started"),
++        scope: scope.clone(),
++        run_id: id("run"),
++        session_id: id("session"),
++        seq: 1.try_into()?,
++        timestamp_ms: 1000,
++        payload: RunEventPayload::RunStarted {
++            request_ref: request_record.reference().clone(),
++            profile_digest: snapshot.profile.profile_digest().clone(),
++        },
++    };
++    let message = Message {
++        message_id: id("user-message"),
++        run_id: id("run"),
++        sequence: 1.try_into()?,
++        role: MessageRole::User,
++        content: vec![ContentBlock::Content {
++            content: request.input[0].clone(),
++        }],
++        origin: MessageOrigin::User,
++        visibility: Visibility::UserAndModel,
++    };
++    let input = AdmissionInput {
++        snapshot,
++        prompt_snapshot: prompt.reference().clone(),
++        messages: vec![message],
++        events: vec![started],
++        records: vec![request_record, prompt],
++        require_durable: false,
++    };
++    let store = MemoryStateStore::new();
++    let first = store.admit(&scope, input.clone()).await?;
++    let replay = store.admit(&scope, input).await?;
++    println!(
++        "admission: created={}, retry_created={}, run={}",
++        first.created, replay.created, replay.state.snapshot.run_id
++    );
++    let lease = store
++        .acquire_lease(&scope, &id("run"), &id("worker"), 1000, 100)
++        .await?;
++    let mut next = first.state.snapshot.clone();
++    next.revision = 1;
++    next.last_event_seq = 2;
++    next.status = RunStatus::Succeeded;
++    next.phase = RunPhase::Finish;
++    let outcome = RunOutcome {
++        result: OutcomeResult::Succeeded {
++            completion_basis: CompletionBasis::TurnEnded,
++        },
++        output: vec![InputContent::Text {
++            text: "Stored result".into(),
++        }],
++        artifacts: vec![],
++        usage: next.usage.clone(),
++        checkpoint_revision: 1,
++        verification: None,
++        unresolved_effects: vec![],
++    };
++    let outcome_record = ProtectedRecord::new(id("outcome"), 1, serde_json::to_value(&outcome)?);
++    next.outcome = Some(outcome);
++    let event = RunEvent {
++        schema_version: RunEventSchemaVersion::V1,
++        event_id: id("finished"),
++        scope: scope.clone(),
++        run_id: id("run"),
++        session_id: id("session"),
++        seq: 2.try_into()?,
++        timestamp_ms: 1001,
++        payload: RunEventPayload::RunFinished {
++            outcome_ref: outcome_record.reference().clone(),
++        },
++    };
++    let result = store
++        .commit(
++            &scope,
++            &id("run"),
++            CommitInput {
++                expected_revision: 0,
++                lease,
++                now_ms: 1001,
++                snapshot: next,
++                messages: vec![],
++                events: vec![event],
++                records: vec![outcome_record],
++            },
++        )
++        .await?;
++    println!(
++        "committed: revision={}, status={:?}, active_run={:?}",
++        result.snapshot.revision, result.snapshot.status, result.session.active_run_id
++    );
++    let events = store.read_events(&scope, &id("run"), 0, 10).await?;
++    println!(
++        "event replay: count={}, last_seq={}",
++        events.events.len(),
++        events.last_available_seq
++    );
++    let foreign = Scope {
++        tenant_id: id("another-tenant"),
++        ..scope
++    };
++    let rejected = store.load(&foreign, &id("run")).await;
++    println!(
++        "foreign scope: {}",
++        match rejected {
++            Err(error) => format!("{:?}", error.code),
++            Ok(_) => "UNEXPECTED ACCESS".into(),
++        }
++    );
++    Ok(())
++}

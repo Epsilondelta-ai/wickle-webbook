@@ -1,0 +1,950 @@
+diff --git a/crates/wickle-model-anthropic/Cargo.toml b/crates/wickle-model-anthropic/Cargo.toml
+index c68d0ad7a43e6a4cc5bbcf20745bf1f34018465f..740faa8126f5626b1296487def3a81123fdd9048 100644
+--- a/crates/wickle-model-anthropic/Cargo.toml
++++ b/crates/wickle-model-anthropic/Cargo.toml
+@@ -13,7 +13,7 @@ include = ["Cargo.toml", "LICENSE", "src/**"]
+ wickle-model-responses = { path = "../wickle-model-responses", version = "=0.1.0" }
+ wickle = { path = "../wickle", version = "=0.1.0" }
+ reqwest.workspace = true
+-serde_json.workspace = true
++serde_json = { workspace = true, features = ["raw_value"] }
+ futures-util.workspace = true
+ tokio.workspace = true
+ tokio-util.workspace = true
+diff --git a/crates/wickle-model-anthropic/src/codec.rs b/crates/wickle-model-anthropic/src/codec.rs
+index 910ef87c618abe8010ac02d9c1bfbfb86cc8281f..4fff5e88df34791228e93b7babeb25f4d6a61269 100644
+--- a/crates/wickle-model-anthropic/src/codec.rs
++++ b/crates/wickle-model-anthropic/src/codec.rs
+@@ -2,6 +2,7 @@ use crate::error;
+ use serde_json::{Value, json};
+ use wickle::*;
+ 
++pub(crate) const INVALID_REPLAY_KIND: &str = "wickle.anthropic.messages.v2";
+ pub(crate) const REPLAY_KIND: &str = "wickle.anthropic.messages.v1";
+ pub(crate) fn invalid() -> ContractError {
+     error(ErrorCode::InvalidContract, "content")
+@@ -19,6 +20,7 @@ pub fn encode_request(request: &ModelRequest) -> Result<Value, ContractError> {
+     }
+     let mut messages: Vec<Value> = vec![];
+     let mut system = vec![];
++    let mut invalid_tools = std::collections::BTreeMap::<String, String>::new();
+     for message in &request.messages {
+         let opaque: Vec<_> = message
+             .content
+@@ -38,7 +40,14 @@ pub fn encode_request(request: &ModelRequest) -> Result<Value, ContractError> {
+                     ModelContent::Text{text} if message.role != ModelRole::Tool => json!({"type":"text","text":text}),
+                     ModelContent::Json{value} if message.role != ModelRole::Tool => json!({"type":"text","text":serde_json::to_string(value).map_err(|_|invalid())?}),
+                     ModelContent::ToolCall{provider_call_id,name,arguments} if message.role==ModelRole::Assistant => json!({"type":"tool_use","id":provider_call_id,"name":name,"input":arguments}),
+-                    ModelContent::ToolResult{provider_call_id,content} if message.role==ModelRole::Tool => json!({"type":"tool_result","tool_use_id":provider_call_id,"content":serde_json::to_string(content).map_err(|_|invalid())?}),
++                    ModelContent::ToolResult{provider_call_id,content} if message.role==ModelRole::Tool => {
++                        let raw = invalid_tools.remove(provider_call_id.as_str());
++                        let failed = raw.is_some();
++                        let content = match raw { Some(raw) => json!({"INVALID_JSON":raw,"feedback":content}), None => content.clone() };
++                        let mut block = json!({"type":"tool_result","tool_use_id":provider_call_id,"content":serde_json::to_string(&content).map_err(|_|invalid())?});
++                        if failed { block["is_error"] = json!(true); }
++                        block
++                    },
+                     _=>return Err(error(ErrorCode::ModelContextIncompatible,"message")),
+                 });
+             }
+@@ -48,16 +57,29 @@ pub fn encode_request(request: &ModelRequest) -> Result<Value, ContractError> {
+                 return Err(invalid());
+             }
+             let data = opaque[0].data();
+-            if data.get("kind") != Some(&json!(REPLAY_KIND))
+-                || data.as_object().is_none_or(|o| o.len() != 2)
+-            {
+-                return Err(error(ErrorCode::ModelContextIncompatible, "replay"));
+-            }
++            let invalid_arguments = match data.get("kind").and_then(Value::as_str) {
++                Some(REPLAY_KIND) if data.as_object().is_some_and(|o| o.len() == 2) => None,
++                Some(INVALID_REPLAY_KIND) if data.as_object().is_some_and(|o| o.len() == 3) => {
++                    Some(
++                        data.get("invalid_arguments")
++                            .and_then(Value::as_object)
++                            .filter(|map| !map.is_empty())
++                            .ok_or_else(invalid)?,
++                    )
++                }
++                _ => return Err(error(ErrorCode::ModelContextIncompatible, "replay")),
++            };
+             let blocks = data
+                 .get("blocks")
+                 .and_then(Value::as_array)
+                 .ok_or_else(invalid)?;
+             let decoded = inspect_blocks(blocks)?;
++            if invalid_arguments.is_some_and(|map| {
++                map.keys()
++                    .any(|id| !decoded.calls.iter().any(|call| &call.id == id))
++            }) {
++                return Err(error(ErrorCode::ModelContextIncompatible, "replay"));
++            }
+             let text: String = message
+                 .content
+                 .iter()
+@@ -101,7 +123,24 @@ pub fn encode_request(request: &ModelRequest) -> Result<Value, ContractError> {
+             for ((id, name, args), original) in calls.iter().zip(&decoded.calls) {
+                 if id.as_str() != original.id
+                     || name.as_str() != original.name
+-                    || serde_json::to_value(args).map_err(|_| invalid())? != original.input
++                    || match invalid_arguments.and_then(|map| map.get(&original.id)) {
++                        Some(raw) => {
++                            let raw = raw.as_str().ok_or_else(invalid)?;
++                            if parse_provider_arguments(raw, request.limits.max_input_bytes).is_ok()
++                                || original.input != json!({})
++                                || !args.is_empty()
++                            {
++                                true
++                            } else {
++                                invalid_tools
++                                    .insert(original.id.clone(), raw.into())
++                                    .is_some()
++                            }
++                        }
++                        None => {
++                            serde_json::to_value(args).map_err(|_| invalid())? != original.input
++                        }
++                    }
+                 {
+                     return Err(error(ErrorCode::ModelContextIncompatible, "replay"));
+                 }
+@@ -109,6 +148,14 @@ pub fn encode_request(request: &ModelRequest) -> Result<Value, ContractError> {
+             let mut replay = blocks.clone();
+             for block in &mut replay {
+                 if block["type"] == "tool_use" {
++                    if let Some(raw) = invalid_arguments.and_then(|map| {
++                        block
++                            .get("id")
++                            .and_then(Value::as_str)
++                            .and_then(|id| map.get(id))
++                    }) {
++                        block["input"] = json!({"INVALID_JSON":raw});
++                    }
+                     for key in ["caller", "toolset_name"] {
+                         if block.get(key).is_some_and(Value::is_null) {
+                             block.as_object_mut().ok_or_else(invalid)?.remove(key);
+@@ -193,7 +240,11 @@ pub fn encode_request(request: &ModelRequest) -> Result<Value, ContractError> {
+                     .as_str()
+                     .strip_prefix("anthropic.")
+                     .unwrap_or(request.route.model_id.as_str()),
+-                "claude-opus-5" | "claude-sonnet-5" | "claude-opus-4-7" | "claude-opus-4-8"
++                "claude-opus-5"
++                    | "claude-opus-5-5"
++                    | "claude-sonnet-5"
++                    | "claude-opus-4-7"
++                    | "claude-opus-4-8"
+             ) {
+                 return Err(error(ErrorCode::ModelOptionUnsupported, "manual_thinking"));
+             }
+@@ -203,18 +254,19 @@ pub fn encode_request(request: &ModelRequest) -> Result<Value, ContractError> {
+             if budget.is_some() {
+                 return Err(error(ErrorCode::ModelOptionUnsupported, "thinking_budget"));
+             }
++            let model = request
++                .route
++                .model_id
++                .as_str()
++                .strip_prefix("anthropic.")
++                .unwrap_or(request.route.model_id.as_str());
+             if mode == Some("disabled")
+-                && request
+-                    .route
+-                    .model_id
+-                    .as_str()
+-                    .strip_prefix("anthropic.")
+-                    .unwrap_or(request.route.model_id.as_str())
+-                    == "claude-opus-5"
+-                && matches!(
+-                    request.options.get("effort").and_then(Value::as_str),
+-                    Some("xhigh" | "max")
+-                )
++                && (model == "claude-opus-5-5"
++                    || (model == "claude-opus-5"
++                        && matches!(
++                            request.options.get("effort").and_then(Value::as_str),
++                            Some("xhigh" | "max")
++                        )))
+             {
+                 return Err(error(ErrorCode::ModelOptionUnsupported, "disabled_effort"));
+             }
+diff --git a/crates/wickle-model-anthropic/src/response.rs b/crates/wickle-model-anthropic/src/response.rs
+index 665f5a99491e441da41472c90f82279ceb0f35bb..0ce4804a1f9677738d0c036429a9c2735adfb626 100644
+--- a/crates/wickle-model-anthropic/src/response.rs
++++ b/crates/wickle-model-anthropic/src/response.rs
+@@ -47,7 +47,7 @@ impl<'a> Decoder<'a> {
+         if self.terminal.is_some() {
+             return Err(invalid());
+         }
+-        let value = parse_json(&event.data)?;
++        let (value, initial_input) = parse_event(&event.data)?;
+         let kind = nonempty(&value, "type")?;
+         if event
+             .name
+@@ -115,12 +115,13 @@ impl<'a> Decoder<'a> {
+                         {
+                             return Err(invalid());
+                         }
+-                        let input = block
+-                            .get("input")
+-                            .and_then(Value::as_object)
+-                            .ok_or_else(invalid)?;
+-                        if !input.is_empty() {
+-                            arguments = serde_json::to_string(input).map_err(|_| invalid())?;
++                        let input = initial_input.ok_or_else(invalid)?;
++                        // Only an empty object is the standard streaming placeholder.
++                        // Everything else retains its original bytes for core validation.
++                        if !parse_provider_arguments(input, self.request.limits.max_response_bytes)
++                            .is_ok_and(|input| input.is_empty())
++                        {
++                            arguments = input.to_owned();
+                         }
+                         self.charge(id.len() + name.len() + arguments.len())?;
+                         for (position, delta) in self.fragments(&arguments)?.into_iter().enumerate()
+@@ -239,15 +240,32 @@ impl<'a> Decoder<'a> {
+                 self.terminal = Some(if let Some(finish) = finish {
+                     let mut continuation = vec![];
+                     if matches!(finish, ModelFinish::Stop | ModelFinish::ToolCalls) {
++                        let mut invalid_arguments = serde_json::Map::new();
+                         for block in &mut self.blocks {
+                             if block.value["type"] == "tool_use" {
+-                                block.value["input"] = parse_json(&block.arguments)?;
++                                match parse_provider_arguments(
++                                    &block.arguments,
++                                    self.request.limits.max_response_bytes,
++                                ) {
++                                    Ok(input) => block.value["input"] = json!(input),
++                                    Err(_) => {
++                                        invalid_arguments.insert(
++                                            nonempty(&block.value, "id")?.into(),
++                                            json!(block.arguments),
++                                        );
++                                        block.value["input"] = json!({});
++                                    }
++                                }
+                             }
+                         }
+                         let blocks: Vec<_> = self.blocks.iter().map(|b| b.value.clone()).collect();
+                         codec::inspect_blocks(&blocks)?;
+                         if !blocks.is_empty() {
+-                            let data = json!({"kind":codec::REPLAY_KIND,"blocks":blocks});
++                            let data = if invalid_arguments.is_empty() {
++                                json!({"kind":codec::REPLAY_KIND,"blocks":blocks})
++                            } else {
++                                json!({"kind":codec::INVALID_REPLAY_KIND,"blocks":blocks,"invalid_arguments":invalid_arguments})
++                            };
+                             self.charge(serde_json::to_vec(&data).map_err(|_| invalid())?.len())?;
+                             continuation.push(OpaqueContinuation::new(&self.request.route, data));
+                         }
+@@ -368,3 +386,42 @@ fn index(value: &Value) -> Result<usize, ContractError> {
+         .and_then(|v| usize::try_from(v).ok())
+         .ok_or_else(invalid)
+ }
++
++// Keep Tool input out of envelope parsing: duplicate keys, non-object values
++// and numbers outside Value's representation belong to the core repair path.
++// Strict parsing still sees every original byte outside that single value.
++fn parse_event(event: &str) -> Result<(Value, Option<&str>), ContractError> {
++    type RawMap<'a> = std::collections::BTreeMap<String, &'a serde_json::value::RawValue>;
++    let fields: RawMap<'_> = serde_json::from_str(event).map_err(|_| invalid())?;
++    let kind = fields
++        .get("type")
++        .and_then(|value| serde_json::from_str::<String>(value.get()).ok());
++    if kind.as_deref() != Some("content_block_start") {
++        return Ok((parse_json(event)?, None));
++    }
++    let block = *fields.get("content_block").ok_or_else(invalid)?;
++    let block: RawMap<'_> = serde_json::from_str(block.get()).map_err(|_| invalid())?;
++    let kind = block
++        .get("type")
++        .and_then(|value| serde_json::from_str::<String>(value.get()).ok());
++    if kind.as_deref() != Some("tool_use") {
++        return Ok((parse_json(event)?, None));
++    }
++    let input = *block.get("input").ok_or_else(invalid)?;
++    let input = input.get();
++    // Borrowed RawValue points into this event. Check the span before slicing;
++    // retaining surrounding bytes also retains duplicate envelope keys for rejection.
++    let start = (input.as_ptr() as usize)
++        .checked_sub(event.as_ptr() as usize)
++        .ok_or_else(invalid)?;
++    let end = start.checked_add(input.len()).ok_or_else(invalid)?;
++    if event.get(start..end) != Some(input) {
++        return Err(invalid());
++    }
++    let envelope = format!(
++        "{}{{}}{}",
++        event.get(..start).ok_or_else(invalid)?,
++        event.get(end..).ok_or_else(invalid)?
++    );
++    Ok((parse_json(&envelope)?, Some(input)))
++}
+diff --git a/crates/wickle-model-anthropic/tests/agent_contract.rs b/crates/wickle-model-anthropic/tests/agent_contract.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..b2e173d55f6eb736b3bfbc2d21f276cb126f4187
+--- /dev/null
++++ b/crates/wickle-model-anthropic/tests/agent_contract.rs
+@@ -0,0 +1,279 @@
++//! Actual HTTP/SSE through the core: provider projection, repair and system binding.
++#[path = "../../wickle/tests/support/agent.rs"]
++#[allow(dead_code)]
++mod core_host;
++#[allow(dead_code)]
++mod support;
++use core_host::{completed, id, reference, scope};
++use serde_json::{Value, json};
++use std::sync::{
++    Arc, Mutex,
++    atomic::{AtomicUsize, Ordering},
++};
++use std::time::Duration;
++use wickle::*;
++use wickle_model_anthropic::*;
++const WORKSPACE: &str = "11111111-1111-4111-8111-111111111111";
++
++struct Catalog(core_host::Catalog);
++impl ProfileResolver for Catalog {
++    fn resolve<'a>(
++        &'a self,
++        reference: &'a ComponentRef,
++        scope: &'a Scope,
++    ) -> PortFuture<'a, ComponentMetadata> {
++        Box::pin(async move {
++            let mut metadata = self.0.resolve(reference, scope).await?;
++            if reference.kind == ComponentKind::Tool {
++                metadata.model_name = Some(reference.id.clone());
++            }
++            if let Some(version) = &reference.version {
++                metadata.reference.version = Some(version.clone());
++            }
++            Ok(metadata)
++        })
++    }
++}
++struct Inspector;
++impl ModelRouteInspector for Inspector {
++    fn inspect<'a>(
++        &'a self,
++        route: &'a ResolvedModelRoute,
++        _: &'a ModelInspectionContext,
++    ) -> PortFuture<'a, ModelRouteObservation> {
++        Box::pin(async move {
++            Ok(ModelRouteObservation {
++                route_digest: route.digest(),
++                availability: ModelRouteAvailability::Available,
++                model_id: Some(route.model_id.clone()),
++                model_version: Some(route.model_version.clone()),
++                deployment_revision: None,
++                version_semantics: VersionSemantics::Pinned,
++                evidence_ref: id("local-http-fixture"),
++            })
++        })
++    }
++}
++struct Capture(Mutex<Vec<JsonObject>>);
++impl ToolExecutor for Capture {
++    fn execute<'a>(
++        &'a self,
++        call: &'a JsonObject,
++        _: &'a ToolExecutionContext,
++    ) -> PortFuture<'a, ToolExecutionResult> {
++        Box::pin(async move {
++            self.0.lock().unwrap().push(call.clone());
++            Ok(ToolExecutionResult {
++                outcome: ToolExecutionOutcome::Succeeded {
++                    value: json!("observed"),
++                },
++                effect: ToolEffect::NotApplied,
++                receipt: None,
++            })
++        })
++    }
++}
++fn call_events(index: usize, arguments: &str) -> Vec<Value> {
++    let mut data = support::events("claude-opus-5", "");
++    data.truncate(4);
++    data[0]["message"]["id"] = json!(format!("msg_{index}"));
++    data.extend([
++        json!({"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":format!("call_{index}"),"name":"lookup","input":{}}}),
++        json!({"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":arguments}}),
++        json!({"type":"content_block_stop","index":1}),
++        json!({"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":20}}),
++        json!({"type":"message_stop"}),
++    ]);
++    data
++}
++#[tokio::test]
++async fn native_schema_constraints_and_invalid_arguments_repair_before_scoped_execution() {
++    let invalid_constraint =
++        json!({"query":"latest","limit":7,"note":null,"filter":{"category":"finance"}}).to_string();
++    let invalid_json =
++        json!({"query":"latest","limit":9,"note":null,"filter":"invalid-shape"}).to_string();
++    let valid =
++        json!({"query":"latest","limit":9,"note":null,"filter":{"category":"finance"}}).to_string();
++    let malformed = "{not json";
++    let rounded = r#"{"query":"latest","limit":0.12345678901234567890123456789}"#;
++    let server = support::Server::new(vec![
++        support::Reply::sse(&call_events(0, malformed)),
++        support::Reply::sse(&call_events(4, rounded)),
++        support::Reply::sse(&call_events(1, &invalid_constraint)),
++        support::Reply::sse(&call_events(2, &invalid_json)),
++        support::Reply::sse(&call_events(3, &valid)),
++        support::Reply::sse(&support::events("claude-opus-5", "complete")),
++    ])
++    .await;
++    let connection = AnthropicConnection::new(
++        scope(),
++        reference("account"),
++        "fixture-key-not-a-secret",
++        AnthropicOptions {
++            base_url: server.base.trim_end_matches("v1/").into(),
++            ..Default::default()
++        },
++    )
++    .unwrap();
++    let fixture = core_host::Fixture::new(core_host::Response::Text, false);
++    let mut catalog = fixture.router.snapshot.catalog().clone();
++    catalog.models[0].provider = id("anthropic");
++    catalog.models[0].model_id = id("claude-opus-5");
++    catalog.models[0]
++        .capabilities
++        .features
++        .insert(id("tool_calling"));
++    catalog.bindings[0].model = catalog.models[0].reference();
++    catalog.bindings[0].requested_model = id("claude-opus-5");
++    catalog.bindings[0].adapter = connection.binding().adapter;
++    catalog.bindings[0].connection_ref = connection.binding().connection_ref;
++    catalog.bindings[0].api_contract = AnthropicConnection::api_contract();
++    catalog.bindings[0].target = connection.target().clone();
++    catalog.bindings[0].target_schema = json!({"type":"object","properties":{"base_url":{"type":"string"}},"required":["base_url"],"additionalProperties":false});
++    catalog.bindings[0].capabilities = catalog.models[0].capabilities.clone();
++    catalog.bindings[0].evidence[0].binding_digest = catalog.bindings[0]
++        .contract_digest(&catalog.models[0])
++        .unwrap();
++    let snapshot = RoutingSnapshot::new(catalog, fixture.router.snapshot.policy().clone()).unwrap();
++    let mut bindings = fixture.bindings();
++    bindings.profile_resolver = Arc::new(Catalog(core_host::Catalog::default()));
++    bindings.router = Arc::new(core_host::Router {
++        snapshot,
++        queries: AtomicUsize::new(0),
++        snapshots: AtomicUsize::new(0),
++    });
++    bindings.model_exchange = Arc::new(
++        ModelExchange::new(
++            Arc::new(AnthropicModel::new(connection)),
++            bindings.policy.clone(),
++        )
++        .with_route_inspector(Arc::new(Inspector), Duration::from_secs(1))
++        .unwrap(),
++    );
++    bindings.system_inputs = SystemInputRegistry::new(vec![SystemInputDefinition {
++        key: id("workspace_id"),
++        version: id("1"),
++        value_schema: json!({"type":"string","format":"uuid"}),
++        source: SystemInputSource::Run {},
++    }])
++    .unwrap();
++    let tool = SchemaCompiler::new().compile(ToolDescriptor {
++        tool: reference("lookup"), name: id("lookup"), description: "Read scoped data".into(),
++        input_schema: json!({"type":"object","properties":{
++            "query":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":10,"default":7},"note":{"type":["string","null"]},
++            "filter":{"type":"object","properties":{"category":{"type":"string"},"term":{"type":"string"}},"required":["category"],"additionalProperties":false},
++            "workspace_id":{"type":"string","format":"uuid"}
++        },"required":["query","workspace_id"],"additionalProperties":false,"if":{"properties":{"query":{"const":"latest"}}},"then":{"properties":{"limit":{"minimum":8}}}}),
++        agent_parameters: vec!["query".into(),"limit".into(),"note".into(),"filter".into()], system_bindings: None,
++        output_schema: json!({"type":"string"}), side_effect: ToolSideEffect::ReadOnly, concurrency: ToolConcurrency::Serial, retry: ToolRetryPolicy::Never, reconcile: false, max_output_bytes: 4096.try_into().unwrap(),
++    }, &bindings.system_inputs).unwrap();
++    let capture = Arc::new(Capture(Mutex::new(vec![])));
++    bindings.tools = Some(Arc::new(
++        ToolRegistry::new(
++            scope(),
++            vec![ToolRegistration {
++                compiled: tool,
++                executor: capture.clone(),
++            }],
++        )
++        .unwrap(),
++    ));
++    let mut profile = core_host::profile();
++    profile.limits.max_model_calls = 7.try_into().unwrap();
++    profile.limits.max_tool_attempts = 2;
++    profile.limits.max_repair_attempts = 4;
++    profile.tools.push(ToolBindingRef::Catalog(CatalogToolRef {
++        tool_id: id("lookup"),
++        version: id("1"),
++        bindings: None,
++        config: None,
++    }));
++    let agent = create_agent(profile, bindings).unwrap();
++    let mut context = core_host::context();
++    context.data.system_inputs = Some(SystemInputs::new(
++        [("workspace_id".into(), json!(WORKSPACE))].into(),
++    ));
++    let handle = completed(
++        agent
++            .start(core_host::request("contract"), context.clone())
++            .await
++            .unwrap(),
++    );
++    let outcome = completed(
++        tokio::time::timeout(Duration::from_secs(10), handle.outcome(&context))
++            .await
++            .unwrap()
++            .unwrap(),
++    );
++    assert_eq!(
++        outcome.result.status(),
++        RunStatus::Succeeded,
++        "{:?}",
++        outcome.result
++    );
++    assert_eq!(outcome.usage.repair_attempts, 4);
++    assert_eq!(outcome.usage.tool_attempts, 1);
++    assert_eq!(
++        capture.0.lock().unwrap().as_slice(),
++        &[JsonObject::from([
++            ("query".into(), json!("latest")),
++            ("limit".into(), json!(9)),
++            ("note".into(), Value::Null),
++            ("filter".into(), json!({"category":"finance"})),
++            ("workspace_id".into(), json!(WORKSPACE))
++        ])]
++    );
++    let requests = server.requests.lock().unwrap();
++    assert_eq!(requests.len(), 6);
++    for request in requests.iter() {
++        assert_eq!(
++            request.body["tools"][0]["input_schema"]["required"],
++            json!(["query"])
++        );
++        assert_eq!(request.path, "/v1/messages");
++        assert!(!request.body.to_string().contains(WORKSPACE));
++    }
++    let content: Vec<_> = requests[5].body["messages"]
++        .as_array()
++        .unwrap()
++        .iter()
++        .flat_map(|message| message["content"].as_array().unwrap())
++        .collect();
++    let replayed: Vec<_> = content
++        .iter()
++        .filter(|item| item["type"] == "tool_use")
++        .map(|item| item["input"].clone())
++        .collect();
++    assert_eq!(
++        replayed,
++        vec![
++            json!({"INVALID_JSON":malformed}),
++            json!({"INVALID_JSON":rounded}),
++            parse_json(&invalid_constraint).unwrap(),
++            parse_json(&invalid_json).unwrap(),
++            parse_json(&valid).unwrap()
++        ]
++    );
++    let failures: Vec<_> = content
++        .iter()
++        .filter(|item| item["type"] == "tool_result" && item["is_error"] == true)
++        .collect();
++    assert_eq!(failures.len(), 2);
++    for (result, raw) in failures.into_iter().zip([malformed, rounded]) {
++        assert_eq!(
++            parse_json(result["content"].as_str().unwrap()).unwrap()["INVALID_JSON"],
++            raw
++        );
++    }
++    let thinking: Vec<_> = content
++        .iter()
++        .filter(|item| item["type"] == "thinking")
++        .collect();
++    assert_eq!(thinking.len(), 5);
++    assert!(
++        thinking
++            .iter()
++            .all(|block| block["signature"] == "signature-fixture")
++    );
++    assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 0);
++}
+diff --git a/crates/wickle-model-anthropic/tests/messages.rs b/crates/wickle-model-anthropic/tests/messages.rs
+index 262797b5616f2b60c4cf4d7ed628544cb21a48f2..bdb87f8c2998ecac01a5956ddddd000aefe73a81 100644
+--- a/crates/wickle-model-anthropic/tests/messages.rs
++++ b/crates/wickle-model-anthropic/tests/messages.rs
+@@ -98,6 +98,10 @@ async fn signed_empty_thinking_and_tool_inputs_are_replayed_once_with_results()
+     let response = collect_model_response(&request, model.generate(&request, &context(&request)))
+         .await
+         .unwrap();
++    assert_eq!(
++        response.continuation[0].data()["kind"],
++        "wickle.anthropic.messages.v1"
++    );
+     assert_eq!(response.tool_calls.len(), 1);
+     assert_eq!(response.tool_calls[0].model_inputs["query"], "alpha");
+     request.messages.push(ModelMessage {
+@@ -237,13 +241,8 @@ async fn truncated_unsigned_misordered_and_conflicting_streams_are_not_successes
+         "usage",
+         "double-stop",
+         "native-tool",
+-        "partial-json",
+     ] {
+-        let mut data = if case == "partial-json" {
+-            tool_events()
+-        } else {
+-            events("claude-opus-5", "answer")
+-        };
++        let mut data = events("claude-opus-5", "answer");
+         match case {
+             "truncated" => {
+                 data.pop();
+@@ -259,7 +258,6 @@ async fn truncated_unsigned_misordered_and_conflicting_streams_are_not_successes
+             "usage" => data[7]["usage"]["output_tokens"] = json!(0),
+             "double-stop" => data.push(json!({"type":"message_stop"})),
+             "native-tool" => data[4]["content_block"]["type"] = json!("server_tool_use"),
+-            "partial-json" => data[6]["delta"]["partial_json"] = json!("\"alpha\""),
+             _ => unreachable!(),
+         }
+         let server = Server::new(vec![Reply::sse(&data)]).await;
+@@ -567,3 +565,288 @@ async fn two_documented_release_ids_coexist_without_replacing_connection_state()
+         assert_eq!(request.body["model"], release);
+     }
+ }
++
++fn invalid_tool_reply(raw: &str, initial: bool) -> Reply {
++    let mut data = tool_events();
++    data[5]["delta"]["partial_json"] = json!(raw);
++    data.remove(6);
++    if initial {
++        data[4]["content_block"]["input"] = json!({"query":"initial"});
++        data.remove(5);
++    }
++    let mut reply = Reply::sse(&data);
++    if initial {
++        reply.body = String::from_utf8(reply.body)
++            .unwrap()
++            .replace(
++                r#""input":{"query":"initial"}"#,
++                &format!("\"input\":{raw}"),
++            )
++            .into_bytes();
++    }
++    reply
++}
++#[tokio::test]
++async fn complete_invalid_arguments_preserve_raw_evidence_and_signed_thinking_for_repair() {
++    for (raw, initial) in [
++        (r#"{"query":"unfinished""#, false),
++        (r#"{"query":0.12345678901234567890123456789}"#, false),
++        (r#"{"query":0.12345678901234567890123456789}"#, true),
++        (r#"{"query":"one","query":"two"}"#, false),
++        (r#"{"query":"one","query":"two"}"#, true),
++        (r#"{"query":1e400}"#, true),
++        (r#"["not an object"]"#, true),
++        (r#"["not an object"]"#, false),
++    ] {
++        let server = Server::new(vec![
++            invalid_tool_reply(raw, initial),
++            Reply::sse(&events("claude-opus-5", "repair acknowledged")),
++        ])
++        .await;
++        let connection = connection(&server);
++        let model = AnthropicModel::new(connection.clone());
++        let mut request = request(&connection, "claude-opus-5");
++        tool(&mut request);
++        let first = collect_model_response(&request, model.generate(&request, &context(&request)))
++            .await
++            .unwrap();
++        assert_eq!(first.finish, ModelFinish::ToolCalls);
++        assert_eq!(first.tool_calls[0].raw_arguments.as_deref(), Some(raw));
++        assert!(first.tool_calls[0].model_inputs.is_empty());
++        assert_eq!(
++            first.tool_calls[0].validation,
++            ToolCallValidation::InvalidArguments
++        );
++        assert_eq!(
++            first.continuation[0].data()["kind"],
++            "wickle.anthropic.messages.v2"
++        );
++        request.messages.push(ModelMessage {
++            role: ModelRole::Assistant,
++            content: vec![
++                ModelContent::ToolCall {
++                    provider_call_id: id("toolu_1"),
++                    name: id("lookup"),
++                    arguments: JsonObject::new(),
++                },
++                ModelContent::Opaque {
++                    continuation: first.continuation[0].clone(),
++                },
++            ],
++        });
++        request.messages.push(ModelMessage {
++            role: ModelRole::Tool,
++            content: vec![ModelContent::ToolResult {
++                provider_call_id: id("toolu_1"),
++                content: json!({"status":"failed","error":{"code":"invalid_arguments"}}),
++            }],
++        });
++        request.request_id = id("repair");
++        let second = collect_model_response(&request, model.generate(&request, &context(&request)))
++            .await
++            .unwrap();
++        assert_eq!(second.text, "repair acknowledged");
++        let requests = server.requests.lock().unwrap();
++        assert_eq!(requests.len(), 2);
++        let body = &requests[1].body;
++        assert_eq!(
++            body["messages"][1]["content"][0],
++            json!({"type":"thinking","thinking":"","signature":"signature-fixture"})
++        );
++        assert_eq!(
++            body["messages"][1]["content"][1]["input"],
++            json!({"INVALID_JSON":raw})
++        );
++        let result = &body["messages"][2]["content"][0];
++        assert_eq!(result["is_error"], true);
++        assert_eq!(
++            parse_json(result["content"].as_str().unwrap()).unwrap()["INVALID_JSON"],
++            raw
++        );
++        drop(requests);
++        for mode in ["valid-raw", "unknown-call", "changed-input", "extra-field"] {
++            let mut changed = first.continuation[0].data().clone();
++            match mode {
++                "valid-raw" => changed["invalid_arguments"]["toolu_1"] = json!("{}"),
++                "unknown-call" => changed["invalid_arguments"]["other"] = json!("{"),
++                "changed-input" => changed["blocks"][1]["input"] = json!({"query":"tampered"}),
++                _ => changed["extra"] = json!(true),
++            }
++            request.messages[1].content[1] = ModelContent::Opaque {
++                continuation: OpaqueContinuation::new(&request.route, changed),
++            };
++            assert!(
++                wickle_model_anthropic::protocol::encode_request(&request).is_err(),
++                "{mode}"
++            );
++        }
++        request.messages[1].content[1] = ModelContent::Opaque {
++            continuation: first.continuation[0].clone(),
++        };
++        if let ModelContent::ToolCall { arguments, .. } = &mut request.messages[1].content[0] {
++            arguments.insert("query".into(), json!("tampered"));
++        }
++        assert!(wickle_model_anthropic::protocol::encode_request(&request).is_err());
++        assert_eq!(server.requests.lock().unwrap().len(), 2);
++    }
++}
++
++#[tokio::test]
++async fn length_limited_tool_input_never_becomes_a_repairable_completed_proposal() {
++    let mut data = tool_events();
++    data[6]["delta"]["partial_json"] = json!("\"cut off");
++    data[8]["delta"]["stop_reason"] = json!("max_tokens");
++    let server = Server::new(vec![Reply::sse(&data)]).await;
++    let connection = connection(&server);
++    let model = AnthropicModel::new(connection.clone());
++    let mut request = request(&connection, "claude-opus-5");
++    tool(&mut request);
++    let result =
++        collect_model_response(&request, model.generate(&request, &context(&request))).await;
++    assert!(result.is_err());
++    assert_eq!(server.requests.lock().unwrap().len(), 1);
++}
++
++#[tokio::test]
++async fn opus_five_point_five_keeps_adaptive_thinking_and_rejects_disabled_or_manual_modes() {
++    let server = Server::new(vec![Reply::sse(&events("claude-opus-5-5", "done"))]).await;
++    let connection = connection(&server);
++    let model = AnthropicModel::new(connection.clone());
++    let mut request = request(&connection, "claude-opus-5-5");
++    request.max_output_tokens = 4096.try_into().unwrap();
++    for mode in ["disabled", "enabled"] {
++        request.options.insert("thinking_mode".into(), json!(mode));
++        if mode == "enabled" {
++            request
++                .options
++                .insert("thinking_budget_tokens".into(), json!(1024));
++        }
++        assert!(
++            collect_model_response(&request, model.generate(&request, &context(&request)))
++                .await
++                .is_err()
++        );
++        assert!(server.requests.lock().unwrap().is_empty());
++    }
++    request.options.remove("thinking_budget_tokens");
++    request
++        .options
++        .insert("thinking_mode".into(), json!("adaptive"));
++    collect_model_response(&request, model.generate(&request, &context(&request)))
++        .await
++        .unwrap();
++    let requests = server.requests.lock().unwrap();
++    assert_eq!(requests.len(), 1);
++    assert_eq!(requests[0].body["thinking"], json!({"type":"adaptive"}));
++    assert_eq!(requests[0].body["output_config"]["effort"], "medium");
++}
++
++#[tokio::test]
++async fn initial_input_exemption_never_hides_duplicate_or_malformed_envelope_fields() {
++    for mode in ["duplicate-index", "duplicate-input", "malformed-outer"] {
++        let mut reply = invalid_tool_reply(r#"{"query":1e400}"#, true);
++        let body = String::from_utf8(reply.body).unwrap();
++        reply.body = match mode {
++            "duplicate-index" => body.replacen("\"index\":1", "\"index\":1,\"index\":2", 1),
++            "duplicate-input" => body.replacen("\"input\":", "\"input\":{},\"input\":", 1),
++            _ => body.replacen("\"index\":1", "\"index\":1,\"unexpected\":", 1),
++        }
++        .into_bytes();
++        let server = Server::new(vec![reply]).await;
++        let connection = connection(&server);
++        let model = AnthropicModel::new(connection.clone());
++        let mut request = request(&connection, "claude-opus-5");
++        tool(&mut request);
++        assert!(
++            collect_model_response(&request, model.generate(&request, &context(&request)))
++                .await
++                .is_err(),
++            "{mode}"
++        );
++        assert_eq!(server.requests.lock().unwrap().len(), 1);
++    }
++}
++
++#[tokio::test]
++async fn mixed_valid_and_invalid_calls_keep_each_result_and_error_marker_with_its_call() {
++    let mut data = tool_events();
++    data[5]["delta"]["partial_json"] = json!("{");
++    data.remove(6);
++    data.truncate(7);
++    data.extend([
++        json!({"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"toolu_2","name":"lookup","input":{}}}),
++        json!({"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"query\":\"beta\"}"}}),
++        json!({"type":"content_block_stop","index":2}),
++        json!({"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":20}}),
++        json!({"type":"message_stop"}),
++    ]);
++    let server = Server::new(vec![
++        Reply::sse(&data),
++        Reply::sse(&events("claude-opus-5", "done")),
++    ])
++    .await;
++    let connection = connection(&server);
++    let model = AnthropicModel::new(connection.clone());
++    let mut request = request(&connection, "claude-opus-5");
++    tool(&mut request);
++    let first = collect_model_response(&request, model.generate(&request, &context(&request)))
++        .await
++        .unwrap();
++    assert_eq!(first.tool_calls.len(), 2);
++    assert_eq!(
++        first.tool_calls[0].validation,
++        ToolCallValidation::InvalidArguments
++    );
++    let mut content: Vec<_> = first
++        .tool_calls
++        .iter()
++        .map(|call| ModelContent::ToolCall {
++            provider_call_id: call.provider_call_id.clone(),
++            name: call.name.clone(),
++            arguments: call.model_inputs.clone(),
++        })
++        .collect();
++    content.push(ModelContent::Opaque {
++        continuation: first.continuation[0].clone(),
++    });
++    request.messages.push(ModelMessage {
++        role: ModelRole::Assistant,
++        content,
++    });
++    request.messages.push(ModelMessage {
++        role: ModelRole::Tool,
++        content: vec![
++            ModelContent::ToolResult {
++                provider_call_id: id("toolu_1"),
++                content: json!({"error":"invalid_arguments"}),
++            },
++            ModelContent::ToolResult {
++                provider_call_id: id("toolu_2"),
++                content: json!({"answer":42}),
++            },
++        ],
++    });
++    request.request_id = id("second");
++    collect_model_response(&request, model.generate(&request, &context(&request)))
++        .await
++        .unwrap();
++    let requests = server.requests.lock().unwrap();
++    let body = &requests[1].body;
++    assert_eq!(
++        body["messages"][1]["content"][1]["input"],
++        json!({"INVALID_JSON":"{"})
++    );
++    assert_eq!(
++        body["messages"][1]["content"][2]["input"],
++        json!({"query":"beta"})
++    );
++    let results = &body["messages"][2]["content"];
++    assert_eq!(results[0]["tool_use_id"], "toolu_1");
++    assert_eq!(results[0]["is_error"], true);
++    assert_eq!(results[1]["tool_use_id"], "toolu_2");
++    assert!(results[1].get("is_error").is_none());
++    assert_eq!(
++        parse_json(results[1]["content"].as_str().unwrap()).unwrap(),
++        json!({"answer":42})
++    );
++}
+diff --git a/docs/anthropic.md b/docs/anthropic.md
+index d7b5cf589c99cf97aae1c8d38c481bf2a76cfa6b..03addabd29511c0e4a59f7b1e60115a8f3a5e674 100644
+--- a/docs/anthropic.md
++++ b/docs/anthropic.md
+@@ -25,7 +25,11 @@ POST, with redirects and transport retries disabled. [Authentication](https://pl
+ 
+ Initial system messages become the top-level `system` field. User content is text
+ or serialized JSON. Client tools use `input_schema`; their results become user
+-`tool_result` blocks. The original schema and optional model parameters are retained.
++`tool_result` blocks. The default native Tool compiler retains the complete model-owned JSON Schema,
++including optional parameters, under non-strict tool use. System-bound fields stay
++outside it. The core validates the original contract before binding system inputs
++and executing a Tool; provider schema acceptance is not execution authorization.
++[Tool definitions](https://platform.claude.com/docs/en/agents-and-tools/tool-use/define-tools).
+ The adapter does not enable server tools, server-side fallback, or assistant prefill.
+ 
+ Supported logical options are `effort`, `thinking_mode`, and
+@@ -35,6 +39,10 @@ binding schemas must restrict options for the selected release. `adaptive` is a
+ thinking mode, not an effort. Opus 5 runs with thinking by default; omitting the
+ thinking option preserves that behavior. Unsupported combinations, including manual
+ thinking on Opus 5 and disabled thinking with its highest effort levels, are rejected.
++Opus 5.5 accepts adaptive thinking or omission of the thinking option; disabled
++thinking and manual budgets are rejected at every effort level. The adapter does
++not replace an omitted effort with a model-independent default.
++[Opus 5.5 changes](https://platform.claude.com/docs/en/models/opus-5-5/whats-new-opus-5-5),
+ [Effort](https://platform.claude.com/docs/en/build-with-claude/effort),
+ [Opus 5 behavior](https://platform.claude.com/docs/en/models/opus-5/whats-new-opus-5).
+ 
+@@ -55,13 +63,27 @@ Direct tool-caller metadata is retained; server callers and toolset members are
+ converted into local tool requests. [Streaming](https://platform.claude.com/docs/en/build-with-claude/streaming),
+ [Tool-use response type](https://github.com/anthropics/anthropic-sdk-python/blob/main/src/anthropic/types/tool_use_block.py).
+ 
+-Completion is emitted only after a valid terminal and clean transport EOF. Partial
+-JSON, duplicate terminals, unsigned completed thinking, open or misordered blocks,
++Completion is emitted only after a valid terminal and clean transport EOF.
++Duplicate terminals, unsigned completed thinking, open or misordered blocks,
+ unknown native tools, and exceeded limits cannot become completed Tool plans.
++A length-limited or transport-truncated Tool input remains incomplete.
+ Cancellation and deadlines drop the HTTP response. Provider error messages are not
+ exposed as model text. Length limits, refusals and unsupported continuation modes
+ remain distinct from successful completion.
+ 
++A complete Tool proposal with malformed JSON, duplicate keys, a non-object value,
++or precision-losing numbers reaches the bounded core repair loop without execution.
++Both accumulated deltas and populated initial inputs retain their raw argument
++text. The surrounding SSE envelope still undergoes strict validation.
++
++Normal stored continuations keep their existing format. Invalid arguments use a
++versioned protected replay record that checks call identity and empty normalized
++placeholders before encoding an `INVALID_JSON` wrapper. The matching `tool_result`
++sets `is_error: true` and includes the original argument text with the core feedback.
++Thinking signatures and unrelated valid calls are preserved. This supports invalid
++input recovery without enabling eager streaming or running invalid Tool handlers.
++[Invalid Tool input handling](https://platform.claude.com/docs/en/agents-and-tools/tool-use/fine-grained-tool-streaming#handling-invalid-json-in-tool-responses).
++
+ Usage updates are cumulative, not per-event increments. The adapter records the
+ reported input/output counts and actual model ID. It does not fill in a separate
+ unreported model version. Additional cache accounting fields are not normalized into

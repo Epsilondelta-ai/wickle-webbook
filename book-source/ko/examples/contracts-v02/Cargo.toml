@@ -1,0 +1,11 @@
+[package]
+name = "wickle-v02-contract-lab"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+wickle = { path = "../../../reference/crates/wickle" }
+serde_json = "=1.0.151"

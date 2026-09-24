@@ -1,0 +1,4112 @@
+diff --git a/README.de.md b/README.de.md
+index 52feca90638f47b3f87d6a3a9c0bbcb7d8d746ea..33f4ac4ca325947b7a228e092ad0160a98dedd92 100644
+--- a/README.de.md
++++ b/README.de.md
+@@ -12,4 +12,4 @@ Wickle ist eine Agenten-Engine, die EpsilonDelta in Rust entwickelt. Ziel ist ei
+ 
+ Der Entwurf verwendet Agentenprofile (Agent Profiles) zur Konfiguration des Agentenverhaltens und Adapter zur Anbindung verschiedener Modelle und Werkzeuge.
+ 
+-**Status:** In Entwicklung. Profilvalidierung und Verträge für Ausführungsdaten sind verfügbar; die Ausführung von Agenten ist noch nicht implementiert. [Datenverträge](docs/contracts.md).
++**Status:** In Entwicklung. Textagenten können Anfragen ausführen, Ergebnisse speichern, Ereignisse erneut abrufen und Ausführungen ausdrücklich abbrechen. Werkzeugausführung und weitere Laufzeiterweiterungen werden noch entwickelt. [Agenten ausführen](docs/agents.md) · [Datenverträge](docs/contracts.md).
+diff --git a/README.es.md b/README.es.md
+index 8f6ded80a836ce4430a20fe2db5217065d86ca7f..aa7175d82dc133f349a162ac5bdef9dbd8487af0 100644
+--- a/README.es.md
++++ b/README.es.md
+@@ -12,4 +12,4 @@ Wickle es un motor de agentes que EpsilonDelta está desarrollando en Rust. Su o
+ 
+ Su diseño utiliza perfiles de agente (Agent Profiles) para configurar el comportamiento de los agentes y adaptadores para conectar distintos modelos y herramientas.
+ 
+-**Estado:** En desarrollo. Ya están disponibles la validación de perfiles y los contratos de datos de ejecución; la ejecución de agentes aún no está implementada. [Contratos de datos](docs/contracts.md).
++**Estado:** En desarrollo. Los agentes de texto permiten ejecutar solicitudes, guardar resultados, reproducir eventos y cancelar explícitamente la ejecución. La ejecución de herramientas y otras extensiones siguen en desarrollo. [Ejecutar un agente](docs/agents.md) · [Contratos de datos](docs/contracts.md).
+diff --git a/README.fr.md b/README.fr.md
+index 782bd272aba25aeb02dd86ea7105d2d06cca773e..2f7bf73e59004998284a2f6439bcabd5495770d3 100644
+--- a/README.fr.md
++++ b/README.fr.md
+@@ -12,4 +12,4 @@ Wickle est un moteur d’agents qu’EpsilonDelta développe en Rust. Il vise à
+ 
+ Sa conception repose sur des profils d’agent (Agent Profiles) pour configurer le comportement des agents et sur des adaptateurs pour connecter différents modèles et outils.
+ 
+-**État actuel :** En développement. La validation des profils et les contrats de données d’exécution sont disponibles ; l’exécution des agents n’est pas encore implémentée. [Contrats de données](docs/contracts.md).
++**État :** En développement. Les agents textuels peuvent exécuter des requêtes, conserver les résultats, relire les événements et annuler explicitement une exécution. L’exécution des outils et les autres extensions sont en cours de développement. [Exécuter un agent](docs/agents.md) · [Contrats de données](docs/contracts.md).
+diff --git a/README.ja.md b/README.ja.md
+index b490dbf453bc226d4c5a1ac68ade430af87153db..badaabdf020829a9786f59258b5cdc4bcfee973f 100644
+--- a/README.ja.md
++++ b/README.ja.md
+@@ -12,4 +12,4 @@ Wickle は、EpsilonDelta が Rust で開発しているエージェントエン
+ 
+ Agent Profile でエージェントの振る舞いを設定し、アダプターを通じてさまざまなモデルやツールに接続する構成を設計しています。
+ 
+-**現在の状況:** 開発中です。Profile の検証と実行データの契約を提供しています。エージェントの実行機能はまだ実装されていません。[データ契約のドキュメント](docs/contracts.md)。
++**開発状況:** テキストエージェントの実行、結果の保存、イベントの再取得、明示的なキャンセルに対応しています。ツール実行と追加のランタイム拡張は開発中です。[エージェントの実行](docs/agents.md) · [データ契約](docs/contracts.md)。
+diff --git a/README.ko.md b/README.ko.md
+index 9a47d41901107f220d426e80936763c44a0ecb2f..057fcaabeb8e4dda5ebf8fa4c31e2b1e813862a0 100644
+--- a/README.ko.md
++++ b/README.ko.md
+@@ -12,4 +12,4 @@ Wickle은 엡실론델타가 Rust로 개발하는 에이전트 엔진입니다.
+ 
+ Agent Profile로 에이전트의 동작을 구성하고, 어댑터를 통해 다양한 모델과 도구를 연결하는 구조로 설계하고 있습니다.
+ 
+-**현재 상태:** 개발 중입니다. Profile 검증과 실행 데이터 계약을 제공하며, 에이전트 실행 기능은 아직 구현되지 않았습니다. [데이터 계약 문서](docs/contracts.md).
++**개발 상태:** 텍스트 에이전트 실행, 결과 저장, 이벤트 재조회와 명시적 취소를 지원합니다. 도구 실행과 추가 런타임 확장 기능은 개발 중입니다. [에이전트 실행](docs/agents.md) · [데이터 계약](docs/contracts.md).
+diff --git a/README.md b/README.md
+index 6bd525eca9111187e79a3dfe0c5f5071baf5f427..374013487c1e47ac0b38445045c7c8edca7abb13 100644
+--- a/README.md
++++ b/README.md
+@@ -12,4 +12,4 @@ Wickle is an agent engine being developed in Rust by EpsilonDelta. It aims to pr
+ 
+ Its design uses Agent Profiles to configure agent behavior and adapters to connect different models and tools.
+ 
+-**Status:** In development. Profile validation and execution data contracts are available; agent execution is not yet implemented. [Data contracts](docs/contracts.md).
++**Status:** In development. Text agents can execute requests with persisted outcomes, event replay, and explicit cancellation. Tool execution and additional runtime extensions are in development. [Run an agent](docs/agents.md) · [Data contracts](docs/contracts.md).
+diff --git a/README.ru.md b/README.ru.md
+index 967f73427786e9ae24d6a253c2a68a1942f7ebeb..2a4f7b053d7f2e1125b9dee950b1d473f62d9844 100644
+--- a/README.ru.md
++++ b/README.ru.md
+@@ -12,4 +12,4 @@ Wickle — движок агентов, который EpsilonDelta разраб
+ 
+ В основе архитектуры — профили агентов (Agent Profiles) для настройки их поведения и адаптеры для подключения различных моделей и инструментов.
+ 
+-**Состояние:** В разработке. Доступны проверка профилей и контракты данных выполнения; выполнение агентов пока не реализовано. [Контракты данных](docs/contracts.md).
++**Статус:** В разработке. Текстовые агенты поддерживают выполнение запросов, сохранение результатов, повторное чтение событий и явную отмену. Выполнение инструментов и дополнительные расширения среды исполнения разрабатываются. [Запуск агента](docs/agents.md) · [Контракты данных](docs/contracts.md).
+diff --git a/README.zh-CN.md b/README.zh-CN.md
+index 6db6a3de91fe994d36b897956d58769cd6fdd7aa..af3a5b5d37517698b06585f4c7925d7334f85164 100644
+--- a/README.zh-CN.md
++++ b/README.zh-CN.md
+@@ -12,4 +12,4 @@ Wickle 是 EpsilonDelta 正在使用 Rust 开发的智能体引擎，旨在以
+ 
+ 其设计通过 Agent Profile 配置智能体行为，并通过适配器连接不同的模型和工具。
+ 
+-**当前状态：** 开发中。已提供 Profile 验证和执行数据契约，尚未实现智能体执行功能。[数据契约文档](docs/contracts.md)。
++**开发状态：** 已支持文本智能体执行、结果持久化、事件重放和显式取消。工具执行和其他运行时扩展仍在开发中。[运行智能体](docs/agents.md) · [数据契约](docs/contracts.md)。
+diff --git a/crates/wickle-state-sqlite/src/lib.rs b/crates/wickle-state-sqlite/src/lib.rs
+index ff93a5a56ccce10e87fa3bcc6254571bbd92ec1a..79d10f6601c0e99f3b7c4fba77a37e9112a219ab 100644
+--- a/crates/wickle-state-sqlite/src/lib.rs
++++ b/crates/wickle-state-sqlite/src/lib.rs
+@@ -225,6 +225,19 @@ impl SqliteStateStore {
+ }
+ 
+ impl StateStore for SqliteStateStore {
++    fn find_request<'a>(
++        &'a self,
++        scope: &'a Scope,
++        session_id: &'a Id,
++        request_id: &'a Id,
++    ) -> PortFuture<'a, Option<StoredRun>> {
++        let session_id = session_id.clone();
++        let request_id = request_id.clone();
++        self.transact(scope, false, move |state, scope, runtime| {
++            runtime.block_on(state.find_request(scope, &session_id, &request_id))
++        })
++    }
++
+     fn capabilities(&self) -> StateStoreCapabilities {
+         StateStoreCapabilities {
+             durable: true,
+diff --git a/crates/wickle-state-sqlite/tests/state_store.rs b/crates/wickle-state-sqlite/tests/state_store.rs
+index ada68a7fc3223a4f8f021867d246ca5b95fbf0f9..12ea82a3341dbbc4a11e637c2b7065559eef8efa 100644
+--- a/crates/wickle-state-sqlite/tests/state_store.rs
++++ b/crates/wickle-state-sqlite/tests/state_store.rs
+@@ -44,6 +44,27 @@ async fn durable_admission_replays_the_original_run_and_releases_a_finished_sess
+         .unwrap();
+     assert!(!replay.created);
+     assert_eq!(replay.state, first.state);
++    assert_eq!(
++        store
++            .find_request(&scope(), &id("session"), &id("request"))
++            .await
++            .unwrap(),
++        Some(first.state.clone())
++    );
++    assert!(
++        store
++            .find_request(
++                &Scope {
++                    workspace_id: id("foreign"),
++                    ..scope()
++                },
++                &id("session"),
++                &id("request")
++            )
++            .await
++            .unwrap()
++            .is_none()
++    );
+     let mut changed = durable_admission("changed", "request", "session").await;
+     changed.snapshot.request.input = vec![InputContent::Text {
+         text: "Different input".into(),
+@@ -80,6 +101,16 @@ async fn durable_admission_replays_the_original_run_and_releases_a_finished_sess
+     drop(store);
+     let store = SqliteStateStore::open(database.path()).unwrap();
+     let mut second = durable_admission("second", "second", "session").await;
++    assert_eq!(
++        store
++            .find_request(&scope(), &id("session"), &id("request"))
++            .await
++            .unwrap()
++            .unwrap()
++            .snapshot
++            .status,
++        RunStatus::Succeeded
++    );
+     second.messages[0].sequence = 2.try_into().unwrap();
+     assert!(store.admit(&scope(), second).await.unwrap().created);
+     assert_eq!(
+diff --git a/crates/wickle/src/agent.rs b/crates/wickle/src/agent.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..90fe0fc29f6735e78bfd59dc9c9e9f6f725839da
+--- /dev/null
++++ b/crates/wickle/src/agent.rs
+@@ -0,0 +1,521 @@
++use crate::*;
++use futures_util::{FutureExt, stream};
++use std::{
++    collections::BTreeMap,
++    fmt,
++    num::NonZeroU64,
++    sync::{
++        Arc, Mutex,
++        atomic::{AtomicBool, Ordering},
++    },
++    time::Duration,
++};
++use tokio::sync::Notify;
++use tokio_util::sync::CancellationToken;
++
++mod admission;
++mod driver;
++
++/// Host tokenizer or conservative estimator. This synchronous callback must not
++/// perform I/O; returned tokens are estimates, not provider-reported usage.
++pub trait ModelTokenEstimator: Send + Sync {
++    /// Estimate the complete prepared request for its exact route.
++    fn estimate(&self, request: &ModelRequest) -> Result<u64, ContractError>;
++}
++
++/// Finite runtime bounds, independent of the profile's total execution budgets.
++#[derive(Debug, Clone)]
++pub struct AgentSettings {
++    /// Lease duration renewed by the detached driver.
++    pub lease_ttl_ms: u64,
++    /// Renewal interval; at most one third of the lease duration.
++    pub heartbeat_interval_ms: u64,
++    /// Maximum delay between durable observer polls.
++    pub observer_poll_ms: u64,
++    /// Maximum events read per page.
++    pub event_page_size: usize,
++    /// Deadline for admission preparation callbacks, before durable admission.
++    pub start_timeout_ms: u64,
++    /// Maximum serialized RunRequest bytes.
++    pub max_request_bytes: usize,
++    /// Reserved output-token limit for the initial text-model call.
++    pub max_output_tokens: NonZeroU64,
++    /// Model request and response bounds.
++    pub response_limits: ModelResponseLimits,
++    /// Context byte/item bounds, distinct from token estimates.
++    pub projection_limits: ProjectionLimits,
++    /// Require a durable StateStore at admission.
++    pub require_durable: bool,
++}
++impl Default for AgentSettings {
++    fn default() -> Self {
++        Self {
++            lease_ttl_ms: 30_000,
++            heartbeat_interval_ms: 5_000,
++            observer_poll_ms: 100,
++            event_page_size: 64,
++            start_timeout_ms: 30_000,
++            max_request_bytes: 1_048_576,
++            max_output_tokens: NonZeroU64::new(1024).expect("positive default"),
++            response_limits: ModelResponseLimits {
++                max_input_bytes: 1_048_576,
++                max_response_bytes: 262_144,
++                max_delta_bytes: 65_536,
++                max_events: 4096,
++                max_tool_calls: 16,
++            },
++            projection_limits: ProjectionLimits {
++                max_bytes: 1_048_576,
++                max_items: 1024,
++            },
++            require_durable: false,
++        }
++    }
++}
++impl AgentSettings {
++    /// Validate finite bounds without calling a runtime component.
++    pub fn validate(&self) -> Result<(), ContractError> {
++        if self.lease_ttl_ms == 0
++            || self.lease_ttl_ms > 86_400_000
++            || self.heartbeat_interval_ms == 0
++            || self.heartbeat_interval_ms > self.lease_ttl_ms / 3
++            || self.observer_poll_ms == 0
++            || self.observer_poll_ms > 60_000
++            || self.start_timeout_ms == 0
++            || self.start_timeout_ms > 86_400_000
++            || self.event_page_size == 0
++            || self.event_page_size > MAX_EVENT_PAGE_SIZE
++            || self.max_request_bytes == 0
++            || self.projection_limits.max_bytes == 0
++            || self.projection_limits.max_items == 0
++            || self.response_limits.max_input_bytes == 0
++            || self.response_limits.max_response_bytes == 0
++            || self.response_limits.max_delta_bytes == 0
++            || self.response_limits.max_events == 0
++        {
++            return Err(fail(ErrorCode::InvalidConfiguration, "agent.settings"));
++        }
++        Ok(())
++    }
++}
++
++/// Already-created Host components for one exact scope. Creating an Agent does
++/// not invoke these ports, open connections, start tasks or read environment data.
++pub struct AgentBindings {
++    /// Fixed tenant/workspace/user namespace; validated against routing at start.
++    pub scope: Scope,
++    /// Durable or explicitly process-local state implementation.
++    pub state: Arc<dyn StateStore>,
++    /// Current authorization gate.
++    pub policy: Arc<PolicyGate>,
++    /// Approved profile metadata resolver, called only for new requests.
++    pub profile_resolver: Arc<dyn ProfileResolver>,
++    /// Configured model exchange with dispatcher and route inspector.
++    pub model_exchange: Arc<ModelExchange>,
++    /// Exact catalog and policy snapshot for newly admitted runs.
++    pub router: Arc<dyn ModelRouter>,
++    /// Trusted instructions pinned in the session prefix.
++    pub host_instructions: Vec<String>,
++    /// Registered system-input metadata; values arrive through ExecutionContext.
++    pub system_inputs: SystemInputRegistry,
++    /// Time source and timers.
++    pub clock: Arc<dyn Clock>,
++    /// New internal run/message/event identities, never business foreign keys.
++    pub ids: Arc<dyn IdSource>,
++    /// Route-specific token estimate callback.
++    pub token_estimator: Arc<dyn ModelTokenEstimator>,
++    /// Finite runtime limits.
++    pub settings: AgentSettings,
++}
++
++/// Scope-bound Agent facade. Clone shares local driver ownership and observations.
++#[derive(Clone)]
++pub struct Agent {
++    inner: Arc<Inner>,
++}
++struct Inner {
++    profile: AgentProfile,
++    bindings: AgentBindings,
++    runs: Mutex<BTreeMap<Id, Arc<LocalRun>>>,
++}
++struct LocalRun {
++    cancel: CancellationToken,
++    reason: Mutex<Option<Id>>,
++    error: Mutex<Option<ContractError>>,
++    done: AtomicBool,
++    notify: Notify,
++}
++impl LocalRun {
++    fn new() -> Self {
++        Self {
++            cancel: CancellationToken::new(),
++            reason: Mutex::new(None),
++            error: Mutex::new(None),
++            done: AtomicBool::new(false),
++            notify: Notify::new(),
++        }
++    }
++}
++impl fmt::Debug for Agent {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_struct("Agent")
++            .field("agent_id", &self.inner.profile.agent_id)
++            .finish_non_exhaustive()
++    }
++}
++
++/// Validate the initial text/turn-end runtime without invoking any Host callback.
++/// Tools, asset loaders, verifiers and extension execution require later runtime bindings.
++pub fn create_agent(
++    profile: AgentProfile,
++    bindings: AgentBindings,
++) -> Result<Agent, ContractError> {
++    profile.validate_structure()?;
++    bindings.settings.validate()?;
++    if !matches!(profile.instructions, Instructions::Text(_))
++        || !matches!(profile.output_contract, OutputContract::Text {})
++        || !matches!(profile.completion_policy, CompletionPolicy::TurnEnd {})
++        || !profile.tools.is_empty()
++        || !profile.skills.is_empty()
++        || !profile.connectors.is_empty()
++        || profile.adapters.as_ref().is_some_and(|v| !v.is_empty())
++        || profile.hooks.as_ref().is_some_and(|v| !v.is_empty())
++        || profile
++            .context_sources
++            .as_ref()
++            .is_some_and(|v| !v.is_empty())
++        || profile.extensions.as_ref().is_some_and(|v| !v.is_empty())
++        || profile.context_policy.strategy.as_str() != "bounded"
++    {
++        return Err(fail(ErrorCode::CapabilityUnsupported, "agent.profile"));
++    }
++    Ok(Agent {
++        inner: Arc::new(Inner {
++            profile,
++            bindings,
++            runs: Mutex::new(BTreeMap::new()),
++        }),
++    })
++}
++
++/// A durable observer. Dropping this value or its streams does not cancel the driver.
++#[derive(Clone)]
++pub struct RunHandle {
++    agent: Agent,
++    run_id: Id,
++    local: Option<Arc<LocalRun>>,
++}
++impl fmt::Debug for RunHandle {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_struct("RunHandle")
++            .field("run_id", &self.run_id)
++            .finish_non_exhaustive()
++    }
++}
++
++/// Result of an authorized cancellation request, separate from stored RunOutcome.
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub enum CancelReceipt {
++    /// Signalled this process's live driver. Cancellation is not yet committed.
++    Requested,
++    /// The saved run is already terminal; its outcome was not changed.
++    AlreadyTerminal,
++    /// No local driver is owned here. No remote cancellation was accepted or sent.
++    NotLocal,
++}
++
++impl Agent {
++    /// Admit through an owned coordinator. Caller-future disconnection after polling
++    /// does not abort durable admission or its detached driver.
++    pub async fn start(
++        &self,
++        request: RunRequest,
++        context: ExecutionContext,
++    ) -> Result<Guarded<RunHandle>, ContractError> {
++        let runtime = tokio::runtime::Handle::try_current()
++            .map_err(|_| fail(ErrorCode::RuntimeUnavailable, "agent.runtime"))?;
++        let agent = self.clone();
++        runtime
++            .spawn(async move { agent.admit(request, context).await })
++            .await
++            .map_err(|_| fail(ErrorCode::InvalidContract, "agent.coordinator"))?
++    }
++    /// Read minimal saved metadata under current permission.
++    pub async fn get_run(
++        &self,
++        run_id: &Id,
++        context: &ExecutionContext,
++    ) -> Result<Guarded<RunView>, ContractError> {
++        self.check_scope(context)?;
++        let saved = caller_read(
++            context,
++            None,
++            self.inner
++                .bindings
++                .state
++                .load(&self.inner.bindings.scope, run_id),
++        )
++        .await?;
++        self.inner
++            .bindings
++            .policy
++            .run_view(&saved.snapshot, context, None)
++            .await
++    }
++    /// Read protected saved state under the separate details permission.
++    pub async fn get_run_details(
++        &self,
++        run_id: &Id,
++        context: &ExecutionContext,
++    ) -> Result<Guarded<RunSnapshot>, ContractError> {
++        self.check_scope(context)?;
++        let saved = caller_read(
++            context,
++            None,
++            self.inner
++                .bindings
++                .state
++                .load(&self.inner.bindings.scope, run_id),
++        )
++        .await?;
++        self.inner
++            .bindings
++            .policy
++            .run_details(&saved.snapshot, context, None)
++            .await
++    }
++    /// Command consumption is unsupported until the explicit waiting/resume runtime is connected.
++    pub async fn resume(
++        &self,
++        _command: ResumeCommand,
++        context: ExecutionContext,
++    ) -> Result<Guarded<RunHandle>, ContractError> {
++        self.check_scope(&context)?;
++        Err(fail(ErrorCode::CapabilityUnsupported, "agent.resume"))
++    }
++    fn check_scope(&self, context: &ExecutionContext) -> Result<(), ContractError> {
++        if context.data.scope != self.inner.bindings.scope {
++            return Err(fail(ErrorCode::AccessDenied, "scope"));
++        }
++        Ok(())
++    }
++    fn handle(&self, run_id: Id) -> Result<RunHandle, ContractError> {
++        let local = self
++            .inner
++            .runs
++            .lock()
++            .map_err(|_| fail(ErrorCode::InvalidContract, "agent.local_state"))?
++            .get(&run_id)
++            .cloned();
++        Ok(RunHandle {
++            agent: self.clone(),
++            run_id,
++            local,
++        })
++    }
++}
++
++impl RunHandle {
++    /// Stable saved run identity.
++    pub fn run_id(&self) -> &Id {
++        &self.run_id
++    }
++    /// Wait for an authorized saved outcome. Observer cancellation never cancels execution.
++    pub async fn outcome(
++        &self,
++        context: &ExecutionContext,
++    ) -> Result<Guarded<RunOutcome>, ContractError> {
++        loop {
++            let snapshot = match self.agent.get_run_details(&self.run_id, context).await? {
++                Guarded::Completed(snapshot) => snapshot,
++                Guarded::ApprovalRequired(challenge) => {
++                    return Ok(Guarded::ApprovalRequired(challenge));
++                }
++            };
++            if let Some(outcome) = snapshot.outcome {
++                return Ok(Guarded::Completed(outcome));
++            }
++            self.local_error()?;
++            self.wait(context).await?;
++        }
++    }
++    /// Replay durable event metadata with fresh permission checks on every page
++    /// and event. Polling has no channel backpressure on execution.
++    pub fn events(
++        &self,
++        after_seq: u64,
++        context: ExecutionContext,
++    ) -> PortStream<'static, EventView> {
++        let handle = self.clone();
++        Box::pin(stream::try_unfold(
++            (handle, context, after_seq, Vec::<RunEvent>::new()),
++            |(handle, context, mut cursor, mut pending)| async move {
++                loop {
++                    if !pending.is_empty() {
++                        let event = pending.remove(0);
++                        let event = match handle
++                            .agent
++                            .inner
++                            .bindings
++                            .policy
++                            .event_view(&event, &context, None)
++                            .await?
++                        {
++                            Guarded::Completed(event) => event,
++                            Guarded::ApprovalRequired(_) => {
++                                return Err(fail(ErrorCode::AccessDenied, "agent.events.approval"));
++                            }
++                        };
++                        cursor = event.seq.get();
++                        return Ok(Some((event, (handle, context, cursor, pending))));
++                    }
++                    handle.agent.check_scope(&context)?;
++                    let bindings = &handle.agent.inner.bindings;
++                    let policy = PolicyRequest {
++                        owner_scope: bindings.scope.clone(),
++                        resource_id: handle.run_id.clone(),
++                        action: PolicyAction::ReadEvents {},
++                    };
++                    match bindings
++                        .policy
++                        .guard(&policy, &context, None, None, || {
++                            caller_read(
++                                &context,
++                                None,
++                                bindings.state.read_events(
++                                    &bindings.scope,
++                                    &handle.run_id,
++                                    cursor,
++                                    bindings.settings.event_page_size,
++                                ),
++                            )
++                        })
++                        .await?
++                    {
++                        Guarded::ApprovalRequired(_) => {
++                            return Err(fail(ErrorCode::AccessDenied, "agent.events.approval"));
++                        }
++                        Guarded::Completed(page) => {
++                            pending = page.events;
++                        }
++                    }
++                    if !pending.is_empty() {
++                        continue;
++                    }
++                    let saved = caller_read(
++                        &context,
++                        None,
++                        bindings.state.load(&bindings.scope, &handle.run_id),
++                    )
++                    .await?;
++                    if saved.snapshot.status.is_terminal() {
++                        if cursor >= saved.snapshot.last_event_seq {
++                            return Ok(None);
++                        }
++                        continue;
++                    }
++                    handle.local_error()?;
++                    handle.wait(&context).await?;
++                }
++            },
++        ))
++    }
++    /// Signal only a locally owned driver after current CancelRun authorization.
++    pub async fn cancel(
++        &self,
++        reason: Id,
++        context: &ExecutionContext,
++    ) -> Result<Guarded<CancelReceipt>, ContractError> {
++        self.agent.check_scope(context)?;
++        let bindings = &self.agent.inner.bindings;
++        let saved = caller_read(
++            context,
++            None,
++            bindings.state.load(&bindings.scope, &self.run_id),
++        )
++        .await?;
++        let policy = PolicyRequest {
++            owner_scope: saved.snapshot.scope,
++            resource_id: self.run_id.clone(),
++            action: PolicyAction::CancelRun {},
++        };
++        bindings
++            .policy
++            .guard(&policy, context, None, None, || async {
++                if saved.snapshot.status.is_terminal() {
++                    return Ok(CancelReceipt::AlreadyTerminal);
++                }
++                if let Some(local) = self.current_local()? {
++                    if !local.done.load(Ordering::Acquire) {
++                        *local
++                            .reason
++                            .lock()
++                            .map_err(|_| fail(ErrorCode::InvalidContract, "agent.cancel"))? =
++                            Some(reason);
++                        local.cancel.cancel();
++                        return Ok(CancelReceipt::Requested);
++                    }
++                }
++                Ok(CancelReceipt::NotLocal)
++            })
++            .await
++    }
++    fn local_error(&self) -> Result<(), ContractError> {
++        if let Some(local) = self.current_local()? {
++            if local.done.load(Ordering::Acquire) {
++                if let Some(error) = local
++                    .error
++                    .lock()
++                    .map_err(|_| fail(ErrorCode::InvalidContract, "agent.local_state"))?
++                    .clone()
++                {
++                    return Err(error);
++                }
++            }
++        }
++        Ok(())
++    }
++    fn current_local(&self) -> Result<Option<Arc<LocalRun>>, ContractError> {
++        if let Some(local) = &self.local {
++            return Ok(Some(local.clone()));
++        }
++        Ok(self
++            .agent
++            .inner
++            .runs
++            .lock()
++            .map_err(|_| fail(ErrorCode::InvalidContract, "agent.local_state"))?
++            .get(&self.run_id)
++            .cloned())
++    }
++    async fn wait(&self, context: &ExecutionContext) -> Result<(), ContractError> {
++        tokio::select! { biased;
++            _ = context.cancellation.cancelled() => Err(fail(ErrorCode::Cancelled, "agent.observer")),
++            _ = tokio::time::sleep(Duration::from_millis(self.agent.inner.bindings.settings.observer_poll_ms)) => Ok(()),
++        }
++    }
++}
++
++fn fail(code: ErrorCode, path: &str) -> ContractError {
++    ContractError::new(code, path)
++}
++
++// Only read-only caller operations use this helper. Cancelling a read drops its
++// future without signalling the independent driver or cancelling a durable write.
++async fn caller_read<T>(
++    context: &ExecutionContext,
++    timeout: Option<Duration>,
++    future: impl std::future::Future<Output = Result<T, ContractError>>,
++) -> Result<T, ContractError> {
++    let deadline = async {
++        match timeout {
++            Some(timeout) => tokio::time::sleep(timeout).await,
++            None => std::future::pending::<()>().await,
++        }
++    };
++    tokio::select! { biased;
++        _ = context.cancellation.cancelled() => Err(fail(ErrorCode::Cancelled, "agent.read")),
++        _ = deadline => Err(fail(ErrorCode::DeadlineExceeded, "agent.read")),
++        result = future => result,
++    }
++}
+diff --git a/crates/wickle/src/agent/admission.rs b/crates/wickle/src/agent/admission.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..a33625983891c7aaabba40a3b9ae5e022b236b57
+--- /dev/null
++++ b/crates/wickle/src/agent/admission.rs
+@@ -0,0 +1,339 @@
++use super::*;
++use std::panic::AssertUnwindSafe;
++
++impl Agent {
++    pub(super) async fn admit(
++        &self,
++        request: RunRequest,
++        context: ExecutionContext,
++    ) -> Result<Guarded<RunHandle>, ContractError> {
++        self.check_scope(&context)?;
++        let bindings = &self.inner.bindings;
++        if serde_json::to_vec(&request)
++            .map_err(|_| fail(ErrorCode::InvalidJson, "agent.request"))?
++            .len()
++            > bindings.settings.max_request_bytes
++        {
++            return Err(fail(ErrorCode::InvalidContract, "agent.request_size"));
++        }
++        if request
++            .output_contract
++            .as_ref()
++            .is_some_and(|value| !matches!(value, OutputContract::Text {}))
++            || request
++                .input
++                .iter()
++                .any(|content| !matches!(content, InputContent::Text { .. }))
++        {
++            return Err(fail(ErrorCode::CapabilityUnsupported, "agent.request"));
++        }
++        let policy = PolicyRequest {
++            owner_scope: bindings.scope.clone(),
++            resource_id: request.request_id.clone(),
++            action: PolicyAction::StartRun {},
++        };
++        if let Guarded::ApprovalRequired(challenge) = bindings
++            .policy
++            .guard(&policy, &context, None, None, || async { Ok(()) })
++            .await?
++        {
++            return Ok(Guarded::ApprovalRequired(challenge));
++        }
++        let read_timeout = Some(Duration::from_millis(bindings.settings.start_timeout_ms));
++        if let Some(saved) = caller_read(
++            &context,
++            read_timeout,
++            bindings
++                .state
++                .find_request(&bindings.scope, &request.session_id, &request.request_id),
++        )
++        .await?
++        {
++            caller_read(
++                &context,
++                read_timeout,
++                self.validate_replay(&request, &context, &saved),
++            )
++            .await?;
++            return Ok(Guarded::Completed(self.handle(saved.snapshot.run_id)?));
++        }
++        // Preparation may be cancelled or time out. Once durable admission begins,
++        // this owned coordinator waits for its result even if the caller disconnects.
++        let prepared = AssertUnwindSafe(self.prepare(request.clone(), &context)).catch_unwind();
++        let (input, prompt) = tokio::select! { biased;
++            _ = context.cancellation.cancelled() => return Err(fail(ErrorCode::Cancelled, "agent.admission")),
++            _ = tokio::time::sleep(Duration::from_millis(bindings.settings.start_timeout_ms)) => return Err(fail(ErrorCode::DeadlineExceeded, "agent.admission")),
++            result = prepared => result.map_err(|_| fail(ErrorCode::InvalidContract, "agent.preparation"))??,
++        };
++        // Current admission permission is checked again after metadata preparation.
++        if let Guarded::ApprovalRequired(challenge) = bindings
++            .policy
++            .guard(&policy, &context, None, None, || async { Ok(()) })
++            .await?
++        {
++            return Ok(Guarded::ApprovalRequired(challenge));
++        }
++        let candidate_id = input.snapshot.run_id.clone();
++        let admission = match AssertUnwindSafe(bindings.state.admit(&bindings.scope, input))
++            .catch_unwind()
++            .await
++        {
++            Ok(result) => result,
++            Err(_) => Err(fail(ErrorCode::InvalidContract, "agent.admission")),
++        };
++        let result = match admission {
++            Ok(result) => result,
++            Err(original) => {
++                // A lost commit acknowledgement must not leave our admitted run
++                // without a driver or create a second request on retry.
++                match bindings
++                    .state
++                    .find_request(&bindings.scope, &request.session_id, &request.request_id)
++                    .await
++                {
++                    Ok(Some(saved)) => {
++                        self.validate_replay(&request, &context, &saved).await?;
++                        AdmissionResult {
++                            created: saved.snapshot.run_id == candidate_id,
++                            state: saved,
++                        }
++                    }
++                    _ => return Err(original),
++                }
++            }
++        };
++        if !result.created {
++            self.validate_replay(&request, &context, &result.state)
++                .await?;
++            return Ok(Guarded::Completed(
++                self.handle(result.state.snapshot.run_id)?,
++            ));
++        }
++        let run_id = result.state.snapshot.run_id;
++        let local = Arc::new(LocalRun::new());
++        self.inner
++            .runs
++            .lock()
++            .map_err(|_| fail(ErrorCode::InvalidContract, "agent.local_state"))?
++            .insert(run_id.clone(), local.clone());
++        let agent = self.clone();
++        let driver_id = run_id.clone();
++        let driver_local = local.clone();
++        let mut data = context.data;
++        // Runtime tool values remain in protected storage. The model driver has
++        // no reason to carry the admission map into model callbacks.
++        data.system_inputs = None;
++        let driver_context = ExecutionContext::new(data, local.cancel.clone());
++        tokio::spawn(async move {
++            let result =
++                AssertUnwindSafe(agent.drive(&driver_id, prompt, driver_context, &driver_local))
++                    .catch_unwind()
++                    .await;
++            let error = match result {
++                Ok(Ok(())) => None,
++                Ok(Err(error)) => Some(fail(error.code, "agent.driver")),
++                Err(_) => Some(fail(ErrorCode::InvalidContract, "agent.driver")),
++            };
++            let completed = error.is_none();
++            if let Ok(mut saved) = driver_local.error.lock() {
++                *saved = error;
++            }
++            driver_local.done.store(true, Ordering::Release);
++            driver_local.notify.notify_waiters();
++            if completed {
++                if let Ok(mut runs) = agent.inner.runs.lock() {
++                    runs.remove(&driver_id);
++                }
++            }
++        });
++        Ok(Guarded::Completed(RunHandle {
++            agent: self.clone(),
++            run_id,
++            local: Some(local),
++        }))
++    }
++
++    async fn validate_replay(
++        &self,
++        request: &RunRequest,
++        context: &ExecutionContext,
++        saved: &StoredRun,
++    ) -> Result<(), ContractError> {
++        if self.inner.profile.digest() != *saved.snapshot.profile.profile_digest()
++            || admission_digest(
++                request,
++                &saved.snapshot.profile,
++                saved.snapshot.system_inputs.as_ref(),
++            ) != saved.snapshot.request_digest
++        {
++            return Err(fail(ErrorCode::RequestConflict, "agent.request"));
++        }
++        if let Some(reference) = &saved.snapshot.system_inputs {
++            let record = self
++                .inner
++                .bindings
++                .state
++                .read_record(&self.inner.bindings.scope, &reference.snapshot_ref)
++                .await?;
++            let values =
++                RunSystemInputs::from_value(record.value(), reference, &saved.snapshot.scope)?;
++            // start omission means empty input. Only resume may reuse saved values
++            // through an omitted map, and this path handles start replay exclusively.
++            let empty = SystemInputs::default();
++            values.validate_resume(Some(context.data.system_inputs.as_ref().unwrap_or(&empty)))?;
++        } else if context
++            .data
++            .system_inputs
++            .as_ref()
++            .is_some_and(|values| !values.values().is_empty())
++        {
++            return Err(fail(ErrorCode::SystemInputsMismatch, "agent.system_inputs"));
++        }
++        Ok(())
++    }
++
++    async fn prepare(
++        &self,
++        request: RunRequest,
++        context: &ExecutionContext,
++    ) -> Result<(AdmissionInput, PromptSnapshot), ContractError> {
++        let bindings = &self.inner.bindings;
++        let routing = bindings.router.snapshot().clone();
++        if routing.scope() != &bindings.scope {
++            return Err(fail(ErrorCode::AccessDenied, "agent.router_scope"));
++        }
++        let profile = ProfileValidator::new(bindings.profile_resolver.as_ref())
++            .validate(&self.inner.profile, &bindings.scope)
++            .await?;
++        let session = match bindings
++            .state
++            .load_session(&bindings.scope, &request.session_id)
++            .await
++        {
++            Ok(session) => Some(session),
++            Err(error) if error.code == ErrorCode::StateNotFound => None,
++            Err(error) => return Err(error),
++        };
++        let (prompt, prompt_record, sequence) = if let Some(session) = session {
++            let record = bindings
++                .state
++                .read_record(&bindings.scope, &session.prompt_snapshot)
++                .await?;
++            let prompt = PromptSnapshot::restore(
++                &serde_json::to_string(record.value())
++                    .map_err(|_| fail(ErrorCode::InvalidJson, "agent.prompt"))?,
++                &record.reference().digest,
++                &profile,
++                &bindings.scope,
++            )?;
++            (
++                prompt,
++                record,
++                session.transcript_revision.checked_add(1).ok_or_else(|| {
++                    fail(ErrorCode::InvalidSnapshot, "session.transcript_revision")
++                })?,
++            )
++        } else {
++            let prompt = PromptSnapshot::create(
++                &profile,
++                bindings.host_instructions.clone(),
++                None,
++                vec![],
++                vec![],
++            )?;
++            let record = ProtectedRecord::new(
++                bindings.ids.next_id()?,
++                1,
++                serde_json::to_value(&prompt)
++                    .map_err(|_| fail(ErrorCode::InvalidJson, "agent.prompt"))?,
++            );
++            (prompt, record, 1)
++        };
++        let inputs = RunSystemInputs::capture(
++            bindings.scope.clone(),
++            context.data.system_inputs.clone(),
++            &bindings.system_inputs,
++        )?;
++        let inputs_record = inputs.to_record(bindings.ids.next_id()?, 1);
++        let inputs_ref = inputs.snapshot_ref(inputs_record.reference())?;
++        let request_record = ProtectedRecord::new(
++            bindings.ids.next_id()?,
++            1,
++            serde_json::to_value(&request)
++                .map_err(|_| fail(ErrorCode::InvalidJson, "agent.request"))?,
++        );
++        let routing_record = ProtectedRecord::new(
++            bindings.ids.next_id()?,
++            1,
++            serde_json::to_value(&routing)
++                .map_err(|_| fail(ErrorCode::InvalidJson, "agent.routing"))?,
++        );
++        let run_id = bindings.ids.next_id()?;
++        let now = bindings.clock.now()?.utc_ms;
++        let snapshot = RunSnapshot {
++            schema_version: RunSnapshotSchemaVersion::V1,
++            run_id: run_id.clone(),
++            request_digest: admission_digest(&request, &profile, Some(&inputs_ref)),
++            request: request.clone(),
++            scope: bindings.scope.clone(),
++            limits: profile.profile().limits.clone(),
++            timing: RunTiming::new(now, profile.profile().limits.max_elapsed_ms.get())?,
++            profile,
++            status: RunStatus::Running,
++            phase: RunPhase::Admission,
++            model_step_id: None,
++            usage: BudgetUsage::default(),
++            reservations: vec![],
++            model_ledger: vec![],
++            tool_ledger: vec![],
++            system_inputs: Some(inputs_ref),
++            wait: None,
++            outcome: None,
++            assembly_ref: None,
++            routing_snapshot_ref: Some(routing_record.reference().clone()),
++            context_batches: vec![],
++            source_states: vec![],
++            revision: 0,
++            last_event_seq: 1,
++        };
++        let message = Message {
++            message_id: bindings.ids.next_id()?,
++            run_id: run_id.clone(),
++            sequence: sequence
++                .try_into()
++                .map_err(|_| fail(ErrorCode::InvalidSnapshot, "message.sequence"))?,
++            role: MessageRole::User,
++            content: request
++                .input
++                .into_iter()
++                .map(|content| ContentBlock::Content { content })
++                .collect(),
++            origin: MessageOrigin::User,
++            visibility: Visibility::UserAndModel,
++        };
++        let event = RunEvent {
++            schema_version: RunEventSchemaVersion::V1,
++            event_id: bindings.ids.next_id()?,
++            scope: bindings.scope.clone(),
++            run_id,
++            session_id: snapshot.request.session_id.clone(),
++            seq: NonZeroU64::new(1).expect("initial sequence"),
++            timestamp_ms: now,
++            payload: RunEventPayload::RunStarted {
++                request_ref: request_record.reference().clone(),
++                profile_digest: snapshot.profile.profile_digest().clone(),
++            },
++        };
++        Ok((
++            AdmissionInput {
++                snapshot,
++                prompt_snapshot: prompt_record.reference().clone(),
++                require_durable: bindings.settings.require_durable,
++                messages: vec![message],
++                events: vec![event],
++                records: vec![request_record, prompt_record, inputs_record, routing_record],
++            },
++            prompt,
++        ))
++    }
++}
+diff --git a/crates/wickle/src/agent/driver.rs b/crates/wickle/src/agent/driver.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..b52a9302ad358f734fe5ee490a37f372339b5bbc
+--- /dev/null
++++ b/crates/wickle/src/agent/driver.rs
+@@ -0,0 +1,700 @@
++use super::*;
++use std::panic::AssertUnwindSafe;
++
++impl Agent {
++    pub(super) async fn drive(
++        &self,
++        run_id: &Id,
++        prompt: PromptSnapshot,
++        context: ExecutionContext,
++        local: &Arc<LocalRun>,
++    ) -> Result<(), ContractError> {
++        let bindings = &self.inner.bindings;
++        let now = bindings.clock.now()?.utc_ms;
++        let lease = bindings
++            .state
++            .acquire_lease(
++                &bindings.scope,
++                run_id,
++                &bindings.ids.next_id()?,
++                now,
++                bindings.settings.lease_ttl_ms,
++            )
++            .await?;
++        let budget = Arc::new(
++            RunBudget::attach(
++                bindings.state.clone(),
++                bindings.clock.clone(),
++                bindings.ids.clone(),
++                bindings.scope.clone(),
++                run_id.clone(),
++                lease.clone(),
++                local.cancel.clone(),
++            )
++            .await?,
++        );
++        let stop = CancellationToken::new();
++        let heartbeat_agent = self.clone();
++        let heartbeat_budget = budget.clone();
++        let heartbeat_lease = lease.clone();
++        let heartbeat_id = run_id.clone();
++        let heartbeat_stop = stop.clone();
++        let heartbeat_local = local.clone();
++        let heartbeat = tokio::spawn(async move {
++            let result = AssertUnwindSafe(heartbeat_agent.heartbeat(
++                &heartbeat_id,
++                heartbeat_lease,
++                &heartbeat_budget,
++                &heartbeat_stop,
++            ))
++            .catch_unwind()
++            .await
++            .unwrap_or_else(|_| Err(fail(ErrorCode::LeaseLost, "agent.heartbeat")));
++            if let Err(error) = &result {
++                if let Ok(mut slot) = heartbeat_local.error.lock() {
++                    *slot = Some(error.clone());
++                }
++                heartbeat_local.cancel.cancel();
++            }
++            result
++        });
++        let result =
++            AssertUnwindSafe(self.run_segment(run_id, prompt, &context, &budget, &lease, local))
++                .catch_unwind()
++                .await
++                .unwrap_or_else(|_| Err(fail(ErrorCode::InvalidContract, "agent.driver")));
++        stop.cancel();
++        let heartbeat_result = heartbeat
++            .await
++            .map_err(|_| fail(ErrorCode::LeaseLost, "agent.heartbeat"))?;
++        // Stored completion is authoritative even if an acknowledgement or the
++        // final heartbeat was lost after the terminal transaction succeeded.
++        if let Ok(saved) = bindings.state.load(&bindings.scope, run_id).await {
++            if saved.snapshot.status.is_terminal() {
++                return Ok(());
++            }
++        }
++        if let Ok((_, now)) = budget.settlement_time(0) {
++            let _ = bindings
++                .state
++                .release_lease(&bindings.scope, run_id, &lease, now)
++                .await;
++        }
++        result.and(heartbeat_result)
++    }
++
++    async fn heartbeat(
++        &self,
++        run_id: &Id,
++        mut lease: RunLease,
++        budget: &RunBudget,
++        stop: &CancellationToken,
++    ) -> Result<(), ContractError> {
++        let bindings = &self.inner.bindings;
++        loop {
++            let reading = bindings.clock.now()?;
++            let next = reading
++                .monotonic_ms
++                .checked_add(bindings.settings.heartbeat_interval_ms)
++                .ok_or_else(|| fail(ErrorCode::ClockUnavailable, "agent.heartbeat"))?;
++            tokio::select! { biased;
++                _ = stop.cancelled() => return Ok(()),
++                result = bindings.clock.sleep_until(next) => result?,
++            }
++            let (_, now) = budget.settlement_time(0)?;
++            let renewal = bindings.state.renew_lease(
++                &bindings.scope,
++                run_id,
++                &lease,
++                now,
++                bindings.settings.lease_ttl_ms,
++            );
++            let remaining = lease
++                .expires_at_ms
++                .checked_sub(now)
++                .and_then(|value| u64::try_from(value).ok())
++                .filter(|value| *value > 0)
++                .ok_or_else(|| fail(ErrorCode::LeaseLost, "agent.heartbeat"))?;
++            let result = tokio::select! { biased;
++                _ = stop.cancelled() => return Ok(()),
++                _ = tokio::time::sleep(Duration::from_millis(remaining)) => Err(fail(ErrorCode::LeaseLost, "agent.heartbeat")),
++                result = renewal => result,
++            };
++            match result {
++                Ok(current) => lease = current,
++                Err(error) => return Err(error),
++            }
++        }
++    }
++
++    async fn run_segment(
++        &self,
++        run_id: &Id,
++        prompt: PromptSnapshot,
++        context: &ExecutionContext,
++        budget: &RunBudget,
++        lease: &RunLease,
++        local: &Arc<LocalRun>,
++    ) -> Result<(), ContractError> {
++        let attempt = self.generate(run_id, prompt, context, budget, lease).await;
++        if let Some(error) = local
++            .error
++            .lock()
++            .map_err(|_| fail(ErrorCode::InvalidContract, "agent.local_state"))?
++            .clone()
++        {
++            return Err(error);
++        }
++        let mut continuation = vec![];
++        let (result, output) = match attempt {
++            Ok(Guarded::Completed(ModelExchangeOutcome::Completed { response }))
++                if response.finish == ModelFinish::Stop && response.tool_calls.is_empty() =>
++            {
++                continuation = response.continuation;
++                (
++                    OutcomeResult::Succeeded {
++                        completion_basis: CompletionBasis::TurnEnded,
++                    },
++                    vec![InputContent::Text {
++                        text: response.text,
++                    }],
++                )
++            }
++            Ok(Guarded::Completed(ModelExchangeOutcome::Completed { response })) => (
++                failed(if response.finish == ModelFinish::Refusal {
++                    "model_refusal"
++                } else {
++                    "tool_execution_unsupported"
++                }),
++                vec![],
++            ),
++            Ok(Guarded::Completed(ModelExchangeOutcome::Failed { failure })) => (
++                failed(&format!("model_{}", enum_name(&failure.kind))),
++                if failure.partial_text().is_empty() {
++                    vec![]
++                } else {
++                    vec![InputContent::Text {
++                        text: failure.partial_text().to_owned(),
++                    }]
++                },
++            ),
++            Ok(Guarded::ApprovalRequired(_)) => (failed("approval_runtime_unsupported"), vec![]),
++            Err(error)
++                if matches!(
++                    error.code,
++                    ErrorCode::LeaseLost
++                        | ErrorCode::RevisionConflict
++                        | ErrorCode::PersistenceUnavailable
++                        | ErrorCode::StateNotFound
++                        | ErrorCode::ClockUnavailable
++                        | ErrorCode::ClockRegression
++                ) =>
++            {
++                return Err(error);
++            }
++            Err(error) if error.code == ErrorCode::Cancelled => (
++                OutcomeResult::Cancelled {
++                    reason: local
++                        .reason
++                        .lock()
++                        .map_err(|_| fail(ErrorCode::InvalidContract, "agent.cancel"))?
++                        .as_ref()
++                        .map(ToString::to_string)
++                        .unwrap_or_else(|| "cancelled".into()),
++                },
++                vec![],
++            ),
++            Err(error) if error.code == ErrorCode::DeadlineExceeded => (
++                OutcomeResult::Exhausted {
++                    budget: BudgetKind::Elapsed,
++                },
++                vec![],
++            ),
++            Err(error) if error.code == ErrorCode::BudgetExceeded => {
++                let kind = match error.path.as_str() {
++                    "budget.model_calls" => BudgetKind::ModelCalls,
++                    "budget.tool_attempts" => BudgetKind::ToolAttempts,
++                    "budget.repair_attempts" => BudgetKind::RepairAttempts,
++                    "budget.recovery_attempts" => BudgetKind::RecoveryAttempts,
++                    _ => BudgetKind::Elapsed,
++                };
++                (OutcomeResult::Exhausted { budget: kind }, vec![])
++            }
++            Err(error) => (failed(&enum_name(&error.code)), vec![]),
++        };
++        self.finish(
++            run_id,
++            PreparedOutcome {
++                result,
++                output,
++                continuation,
++            },
++            budget,
++            lease,
++            local,
++        )
++        .await
++    }
++
++    async fn generate(
++        &self,
++        run_id: &Id,
++        prompt: PromptSnapshot,
++        context: &ExecutionContext,
++        budget: &RunBudget,
++        lease: &RunLease,
++    ) -> Result<Guarded<ModelExchangeOutcome>, ContractError> {
++        let bindings = &self.inner.bindings;
++        budget.check_boundary().await?;
++        let mut snapshot = bindings.state.load(&bindings.scope, run_id).await?.snapshot;
++        let expected_revision = snapshot.revision;
++        let step = bindings.ids.next_id()?;
++        let (elapsed, now) = budget.settlement_time(snapshot.usage.elapsed_ms)?;
++        snapshot.revision = snapshot
++            .revision
++            .checked_add(1)
++            .ok_or_else(|| fail(ErrorCode::RevisionConflict, "agent.prepare"))?;
++        snapshot.phase = RunPhase::Prepare;
++        snapshot.model_step_id = Some(step.clone());
++        snapshot.usage.elapsed_ms = elapsed;
++        snapshot.timing.last_observed_at_ms = now;
++        let saved = bindings
++            .state
++            .commit(
++                &bindings.scope,
++                run_id,
++                CommitInput {
++                    expected_revision,
++                    lease: lease.clone(),
++                    now_ms: now,
++                    snapshot,
++                    messages: vec![],
++                    events: vec![],
++                    records: vec![],
++                },
++            )
++            .await?;
++        let router = bindings.router.snapshot();
++        let rule = router
++            .policy()
++            .rules
++            .iter()
++            .find(|rule| {
++                rule.model_binding == saved.snapshot.profile.profile().model_binding
++                    && rule.purpose == ModelPurpose::Agent
++            })
++            .ok_or_else(|| fail(ErrorCode::ModelRouteDenied, "agent.routing"))?;
++        let input = RoutedModelInput {
++            model_step_id: step,
++            routing: RouteRequest {
++                model_binding: saved.snapshot.profile.profile().model_binding.clone(),
++                purpose: ModelPurpose::Agent,
++                required_capabilities: std::collections::BTreeSet::from([Id::new("text")?]),
++                input_tokens: 0,
++                max_output_tokens: bindings.settings.max_output_tokens,
++                options: saved.snapshot.request.model_options.clone(),
++                scope: bindings.scope.clone(),
++                allowed_bindings: std::iter::once(&rule.primary)
++                    .chain(&rule.fallbacks)
++                    .map(|binding| binding.id.clone())
++                    .collect(),
++                version_policy: rule.version_policy,
++                previous_route: None,
++                previous_failure: None,
++            },
++        };
++        let projector = Projector {
++            saved,
++            prompt,
++            settings: bindings.settings.clone(),
++            estimator: bindings.token_estimator.clone(),
++            state: bindings.state.clone(),
++        };
++        bindings
++            .model_exchange
++            .generate_routed(
++                bindings.router.as_ref(),
++                &input,
++                &projector,
++                context,
++                budget,
++            )
++            .await
++    }
++
++    async fn finish(
++        &self,
++        run_id: &Id,
++        candidate: PreparedOutcome,
++        budget: &RunBudget,
++        lease: &RunLease,
++        local: &Arc<LocalRun>,
++    ) -> Result<(), ContractError> {
++        let PreparedOutcome {
++            mut result,
++            mut output,
++            continuation,
++        } = candidate;
++        let bindings = &self.inner.bindings;
++        let saved = bindings.state.load(&bindings.scope, run_id).await?;
++        let mut snapshot = saved.snapshot;
++        if snapshot.status.is_terminal() {
++            return Ok(());
++        }
++        let (elapsed, now) = budget.settlement_time(snapshot.usage.elapsed_ms)?;
++        bindings
++            .state
++            .check_lease(&bindings.scope, run_id, lease, now)
++            .await?;
++        if local.cancel.is_cancelled() && matches!(result, OutcomeResult::Succeeded { .. }) {
++            result = OutcomeResult::Cancelled {
++                reason: local
++                    .reason
++                    .lock()
++                    .map_err(|_| fail(ErrorCode::InvalidContract, "agent.cancel"))?
++                    .as_ref()
++                    .map(ToString::to_string)
++                    .unwrap_or_else(|| "cancelled".into()),
++            };
++            output.clear();
++        }
++        if elapsed >= snapshot.limits.max_elapsed_ms.get()
++            && matches!(result, OutcomeResult::Succeeded { .. })
++        {
++            result = OutcomeResult::Exhausted {
++                budget: BudgetKind::Elapsed,
++            };
++            output.clear();
++        }
++        if output.is_empty() && !matches!(result, OutcomeResult::Succeeded { .. }) {
++            output = self.saved_partial_output(&snapshot).await?;
++        }
++        // Protected response reads may have waited. Refresh settlement time and
++        // the stored lease before the final transaction.
++        let (_, check_at) = budget.settlement_time(snapshot.usage.elapsed_ms)?;
++        let current_lease = bindings
++            .state
++            .check_lease(&bindings.scope, run_id, lease, check_at)
++            .await?;
++        let (elapsed, now) = budget.settlement_time(snapshot.usage.elapsed_ms)?;
++        if now >= current_lease.expires_at_ms {
++            return Err(fail(ErrorCode::LeaseLost, "agent.finish"));
++        }
++        if matches!(result, OutcomeResult::Succeeded { .. }) {
++            if local.cancel.is_cancelled() {
++                result = OutcomeResult::Cancelled {
++                    reason: local
++                        .reason
++                        .lock()
++                        .map_err(|_| fail(ErrorCode::InvalidContract, "agent.cancel"))?
++                        .as_ref()
++                        .map(ToString::to_string)
++                        .unwrap_or_else(|| "cancelled".into()),
++                };
++            } else if elapsed >= snapshot.limits.max_elapsed_ms.get() {
++                result = OutcomeResult::Exhausted {
++                    budget: BudgetKind::Elapsed,
++                };
++            }
++        }
++        let expected_revision = snapshot.revision;
++        snapshot.revision = snapshot
++            .revision
++            .checked_add(1)
++            .ok_or_else(|| fail(ErrorCode::RevisionConflict, "agent.finish"))?;
++        snapshot.last_event_seq = snapshot
++            .last_event_seq
++            .checked_add(1)
++            .ok_or_else(|| fail(ErrorCode::InvalidSnapshot, "agent.event"))?;
++        snapshot.usage.elapsed_ms = elapsed;
++        snapshot.timing.last_observed_at_ms = now;
++        snapshot.status = result.status();
++        snapshot.phase = RunPhase::Finish;
++        if let OutcomeResult::Failed { failure } = &mut result {
++            failure.diagnostic_ref = snapshot
++                .model_ledger
++                .last()
++                .and_then(|entry| entry.response_ref.clone());
++        }
++        let outcome = RunOutcome {
++            result,
++            output: output.clone(),
++            artifacts: vec![],
++            usage: snapshot.usage.clone(),
++            checkpoint_revision: snapshot.revision,
++            verification: None,
++            unresolved_effects: vec![],
++        };
++        let record = ProtectedRecord::new(
++            bindings.ids.next_id()?,
++            1,
++            serde_json::to_value(&outcome)
++                .map_err(|_| fail(ErrorCode::InvalidJson, "agent.outcome"))?,
++        );
++        let event = RunEvent {
++            schema_version: RunEventSchemaVersion::V1,
++            event_id: bindings.ids.next_id()?,
++            scope: bindings.scope.clone(),
++            run_id: run_id.clone(),
++            session_id: snapshot.request.session_id.clone(),
++            seq: snapshot
++                .last_event_seq
++                .try_into()
++                .map_err(|_| fail(ErrorCode::InvalidSnapshot, "agent.event"))?,
++            timestamp_ms: now,
++            payload: RunEventPayload::RunFinished {
++                outcome_ref: record.reference().clone(),
++            },
++        };
++        let mut records = vec![record];
++        let mut content: Vec<_> = output
++            .into_iter()
++            .map(|content| ContentBlock::Content { content })
++            .collect();
++        if snapshot.status == RunStatus::Succeeded {
++            for continuation in continuation {
++                let route = &snapshot
++                    .model_ledger
++                    .last()
++                    .ok_or_else(|| fail(ErrorCode::InvalidSnapshot, "agent.continuation"))?
++                    .route;
++                if continuation.route_digest() != &route.digest() {
++                    return Err(fail(
++                        ErrorCode::ModelContextIncompatible,
++                        "agent.continuation",
++                    ));
++                }
++                let record = ProtectedRecord::new(
++                    bindings.ids.next_id()?,
++                    1,
++                    serde_json::to_value(&continuation)
++                        .map_err(|_| fail(ErrorCode::InvalidJson, "agent.continuation"))?,
++                );
++                content.push(ContentBlock::ProviderOpaque {
++                    provider: route.provider.clone(),
++                    route_digest: route.digest(),
++                    data_ref: record.reference().clone(),
++                });
++                records.push(record);
++            }
++        }
++        let messages = if content.is_empty() || snapshot.status != RunStatus::Succeeded {
++            vec![]
++        } else {
++            vec![Message {
++                message_id: bindings.ids.next_id()?,
++                run_id: run_id.clone(),
++                sequence: saved
++                    .session
++                    .transcript_revision
++                    .checked_add(1)
++                    .and_then(NonZeroU64::new)
++                    .ok_or_else(|| fail(ErrorCode::InvalidSnapshot, "message.sequence"))?,
++                role: MessageRole::Assistant,
++                content,
++                origin: MessageOrigin::Model,
++                visibility: Visibility::UserAndModel,
++            }]
++        };
++        snapshot.outcome = Some(outcome);
++        bindings
++            .state
++            .commit(
++                &bindings.scope,
++                run_id,
++                CommitInput {
++                    expected_revision,
++                    lease: lease.clone(),
++                    now_ms: now,
++                    snapshot,
++                    messages,
++                    events: vec![event],
++                    records,
++                },
++            )
++            .await?;
++        local.notify.notify_waiters();
++        Ok(())
++    }
++
++    async fn saved_partial_output(
++        &self,
++        snapshot: &RunSnapshot,
++    ) -> Result<Vec<InputContent>, ContractError> {
++        let Some(step) = &snapshot.model_step_id else {
++            return Ok(vec![]);
++        };
++        let Some(invocation) = snapshot.model_ledger.iter().rev().find(|invocation| {
++            &invocation.model_step_id == step
++                && invocation.run_id == snapshot.run_id
++                && invocation.response_ref.is_some()
++        }) else {
++            return Ok(vec![]);
++        };
++        let reference = invocation
++            .response_ref
++            .as_ref()
++            .expect("filtered response reference");
++        let record = self
++            .inner
++            .bindings
++            .state
++            .read_record(&snapshot.scope, reference)
++            .await?;
++        if record.reference() != reference {
++            return Err(fail(ErrorCode::InvalidSnapshot, "agent.partial_response"));
++        }
++        let response: StoredModelResponse = serde_json::from_value(record.value().clone())
++            .map_err(|_| fail(ErrorCode::InvalidSnapshot, "agent.partial_response"))?;
++        if response.request_id != invocation.attempt_id
++            || response.route_digest != invocation.route.digest()
++        {
++            return Err(fail(ErrorCode::InvalidSnapshot, "agent.partial_response"));
++        }
++        let text = match response.outcome {
++            ModelExchangeOutcome::Completed { response } => response.text,
++            ModelExchangeOutcome::Failed { failure } => failure.partial_text().to_owned(),
++        };
++        Ok(if text.is_empty() {
++            vec![]
++        } else {
++            vec![InputContent::Text { text }]
++        })
++    }
++}
++
++struct PreparedOutcome {
++    result: OutcomeResult,
++    output: Vec<InputContent>,
++    continuation: Vec<OpaqueContinuation>,
++}
++
++struct Projector {
++    saved: StoredRun,
++    prompt: PromptSnapshot,
++    settings: AgentSettings,
++    estimator: Arc<dyn ModelTokenEstimator>,
++    state: Arc<dyn StateStore>,
++}
++impl ModelRequestProjector for Projector {
++    fn project<'a>(
++        &'a self,
++        selection: &'a RouteSelection,
++        input: &'a RoutedModelInput,
++        context: &'a ModelProjectionContext,
++    ) -> PortFuture<'a, ProjectedModelRequest> {
++        Box::pin(async move {
++            if context.cancellation.is_cancelled() {
++                return Err(fail(ErrorCode::Cancelled, "agent.projection"));
++            }
++            let request_message = self
++                .saved
++                .messages
++                .iter()
++                .find(|message| {
++                    message.run_id == self.saved.snapshot.run_id
++                        && message.role == MessageRole::User
++                })
++                .ok_or_else(|| fail(ErrorCode::InvalidSnapshot, "agent.request_message"))?;
++            let mut opaque_records: Vec<ScopedOpaque> = vec![];
++            for message in &self.saved.messages {
++                if !matches!(
++                    message.visibility,
++                    Visibility::Model | Visibility::UserAndModel
++                ) {
++                    continue;
++                }
++                for content in &message.content {
++                    if let ContentBlock::ProviderOpaque {
++                        provider,
++                        route_digest,
++                        data_ref,
++                    } = content
++                    {
++                        if provider != &selection.route.provider
++                            || route_digest != &selection.route.digest()
++                        {
++                            return Err(fail(
++                                ErrorCode::ModelContextIncompatible,
++                                "agent.opaque_route",
++                            ));
++                        }
++                        if opaque_records
++                            .iter()
++                            .any(|record| &record.reference == data_ref)
++                        {
++                            continue;
++                        }
++                        let record = self.state.read_record(&context.scope, data_ref).await?;
++                        if record.reference() != data_ref {
++                            return Err(fail(
++                                ErrorCode::ModelContextIncompatible,
++                                "agent.opaque_record",
++                            ));
++                        }
++                        let continuation: OpaqueContinuation =
++                            serde_json::from_value(record.value().clone()).map_err(|_| {
++                                fail(ErrorCode::ModelContextIncompatible, "agent.opaque_record")
++                            })?;
++                        if continuation.route_digest() != route_digest
++                            || canonical_digest(record.value()) != data_ref.digest
++                        {
++                            return Err(fail(
++                                ErrorCode::ModelContextIncompatible,
++                                "agent.opaque_record",
++                            ));
++                        }
++                        opaque_records.push(ScopedOpaque {
++                            scope: context.scope.clone(),
++                            reference: data_ref.clone(),
++                            provider: provider.clone(),
++                            continuation,
++                        });
++                    }
++                }
++            }
++            let projection = ContextAssembler::new().project(
++                &self.prompt,
++                ProjectionInput {
++                    profile: &self.saved.snapshot.profile,
++                    scope: &context.scope,
++                    run_id: &self.saved.snapshot.run_id,
++                    model_step_id: &input.model_step_id,
++                    current_request: &self.saved.snapshot.request,
++                    current_request_message_id: &request_message.message_id,
++                    transcript: &self.saved.messages,
++                    context_items: &[],
++                    opaque_records: &opaque_records,
++                    expected_prompt_digest: &self.saved.session.prompt_snapshot.digest,
++                    request_id: input.model_step_id.clone(),
++                    purpose: input.routing.purpose,
++                    route: selection.route.clone(),
++                    output: ModelOutput::Text {},
++                    max_output_tokens: self.settings.max_output_tokens,
++                    options: input.routing.options.clone(),
++                    response_limits: self.settings.response_limits.clone(),
++                    limits: self.settings.projection_limits,
++                },
++            )?;
++            let input_tokens = self.estimator.estimate(&projection.request)?;
++            Ok(ProjectedModelRequest {
++                request: projection.request,
++                input_tokens,
++            })
++        })
++    }
++}
++fn enum_name(value: &impl serde::Serialize) -> String {
++    serde_json::to_value(value)
++        .ok()
++        .and_then(|value| value.as_str().map(str::to_owned))
++        .unwrap_or_else(|| "invalid_contract".into())
++}
++fn failed(code: &str) -> OutcomeResult {
++    OutcomeResult::Failed {
++        failure: Failure {
++            code: Id::new(code).expect("nonempty static classification"),
++            diagnostic_ref: None,
++        },
++    }
++}
+diff --git a/crates/wickle/src/lib.rs b/crates/wickle/src/lib.rs
+index ce9ada006d15ebe4cbeea83a50420a17d3adafc8..dfd7fa1362fc81c04e785b2d109ee1216c10808e 100644
+--- a/crates/wickle/src/lib.rs
++++ b/crates/wickle/src/lib.rs
+@@ -12,6 +12,7 @@
+ //! use wickle::serialization::canonical_digest;
+ //! ```
+ 
++mod agent;
+ mod budget;
+ mod clock;
+ mod context;
+@@ -34,6 +35,10 @@ mod state;
+ mod tool_schema;
+ mod views;
+ 
++pub use agent::{
++    Agent, AgentBindings, AgentSettings, CancelReceipt, ModelTokenEstimator, RunHandle,
++    create_agent,
++};
+ pub use budget::{AttemptReservation, ReservationKind, RunBudget, RunTiming};
+ pub use clock::{Clock, ClockReading, IdSource, RandomIdSource, SystemClock};
+ pub use context_projection::{
+diff --git a/crates/wickle/src/state.rs b/crates/wickle/src/state.rs
+index 185df96ed040e6d921d29fada828a0eba40bc544..d595dab16fed3f3ec419b25e64f38e7ebce8b04f 100644
+--- a/crates/wickle/src/state.rs
++++ b/crates/wickle/src/state.rs
+@@ -179,6 +179,14 @@ pub const MAX_EVENT_PAGE_SIZE: usize = 1_000;
+ pub trait StateStore: Send + Sync {
+     /// Describe storage and coordination guarantees.
+     fn capabilities(&self) -> StateStoreCapabilities;
++    /// Find the original request before re-resolving current profile or routing metadata.
++    /// Missing scope/request returns None. Atomic admission remains the final deduplication boundary.
++    fn find_request<'a>(
++        &'a self,
++        scope: &'a Scope,
++        session_id: &'a Id,
++        request_id: &'a Id,
++    ) -> PortFuture<'a, Option<StoredRun>>;
+     /// Atomically deduplicate a request and reserve its session's active-run slot.
+     fn admit<'a>(
+         &'a self,
+@@ -309,6 +317,25 @@ impl StateStore for MemoryStateStore {
+         }
+     }
+ 
++    fn find_request<'a>(
++        &'a self,
++        scope: &'a Scope,
++        session_id: &'a Id,
++        request_id: &'a Id,
++    ) -> PortFuture<'a, Option<StoredRun>> {
++        Box::pin(async move {
++            let scopes = self.lock()?;
++            let Some(state) = scopes.get(&scope_key(scope)) else {
++                return Ok(None);
++            };
++            state
++                .requests
++                .get(&(session_id.clone(), request_id.clone()))
++                .map(|run_id| stored_run(state, run_id))
++                .transpose()
++        })
++    }
++
+     fn admit<'a>(
+         &'a self,
+         scope: &'a Scope,
+diff --git a/crates/wickle/tests/agent_runtime.rs b/crates/wickle/tests/agent_runtime.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..df9396a2ff5006712e03f1c5904296977171b39d
+--- /dev/null
++++ b/crates/wickle/tests/agent_runtime.rs
+@@ -0,0 +1,974 @@
++//! Agent lifecycle, saved outcomes, request identity, and detached execution.
++
++#[path = "support/agent.rs"]
++#[allow(dead_code)]
++mod support;
++use futures_util::StreamExt;
++use std::sync::atomic::Ordering;
++use support::*;
++use wickle::*;
++
++#[test]
++fn starting_without_a_tokio_runtime_returns_a_typed_error_before_callbacks() {
++    use std::{future::Future, task::Context};
++    let fixture = Fixture::new(Response::Text, false);
++    let agent = fixture.agent();
++    let future = agent.start(request("request"), context());
++    let mut future = std::pin::pin!(future);
++    let waker = futures_util::task::noop_waker();
++    let mut context = Context::from_waker(&waker);
++    let result = future.as_mut().poll(&mut context);
++    assert!(matches!(
++        result,
++        std::task::Poll::Ready(Err(ContractError {
++            code: ErrorCode::RuntimeUnavailable,
++            ..
++        }))
++    ));
++    assert_eq!(fixture.catalog.calls.load(Ordering::SeqCst), 0);
++    assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 0);
++}
++
++#[tokio::test]
++async fn dropping_a_polled_start_future_does_not_abort_its_owned_admission_or_driver() {
++    let fixture = Fixture::new(Response::Text, true);
++    let agent = fixture.agent();
++    {
++        let start = agent.start(request("request"), context());
++        tokio::pin!(start);
++        assert!(futures_util::poll!(start.as_mut()).is_pending());
++    }
++    fixture.model.entered.notified().await;
++    let saved = fixture
++        .store
++        .find_request(&scope(), &id("session"), &id("request"))
++        .await
++        .unwrap()
++        .unwrap();
++    fixture.model.release.add_permits(1);
++    let handle = fixture.started(&agent, "request").await;
++    assert_eq!(handle.run_id(), &saved.snapshot.run_id);
++    assert_eq!(
++        completed(handle.outcome(&context()).await.unwrap())
++            .result
++            .status(),
++        RunStatus::Succeeded
++    );
++    assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 1);
++}
++
++#[test]
++fn construction_does_not_resolve_metadata_authorize_generate_estimate_or_allocate_ids() {
++    let fixture = Fixture::new(Response::Text, false);
++    let _agent = fixture.agent();
++    assert_eq!(fixture.catalog.calls.load(Ordering::SeqCst), 0);
++    assert_eq!(fixture.policy.calls.load(Ordering::SeqCst), 0);
++    assert_eq!(fixture.router.queries.load(Ordering::SeqCst), 0);
++    assert_eq!(fixture.router.snapshots.load(Ordering::SeqCst), 0);
++    assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 0);
++    assert_eq!(fixture.inspector.calls.load(Ordering::SeqCst), 0);
++    assert_eq!(fixture.estimator.calls.load(Ordering::SeqCst), 0);
++    assert_eq!(fixture.ids.0.load(Ordering::SeqCst), 0);
++}
++
++#[tokio::test]
++async fn a_text_turn_finishes_with_the_stored_outcome_as_authority() {
++    let fixture = Fixture::new(Response::Text, false);
++    let agent = fixture.agent();
++    let handle = fixture.started(&agent, "request").await;
++    let outcome = completed(handle.outcome(&context()).await.unwrap());
++    assert_eq!(
++        outcome.result,
++        OutcomeResult::Succeeded {
++            completion_basis: CompletionBasis::TurnEnded
++        }
++    );
++    assert_eq!(
++        outcome.output,
++        vec![InputContent::Text {
++            text: "candidate answer".into()
++        }]
++    );
++    let saved = fixture.store.load(&scope(), handle.run_id()).await.unwrap();
++    assert_eq!(saved.snapshot.outcome, Some(outcome.clone()));
++    assert_eq!(saved.snapshot.revision, outcome.checkpoint_revision);
++    assert_eq!(saved.session.active_run_id, None);
++    assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 1);
++    let events = fixture
++        .store
++        .read_events(&scope(), handle.run_id(), 0, 100)
++        .await
++        .unwrap();
++    assert!(matches!(
++        events.events.last().unwrap().payload,
++        RunEventPayload::RunFinished { .. }
++    ));
++    let view = completed(agent.get_run(handle.run_id(), &context()).await.unwrap());
++    assert_eq!(view.status, RunStatus::Succeeded);
++}
++
++#[tokio::test]
++async fn dropping_the_handle_outcome_waiter_and_event_stream_does_not_cancel_the_driver() {
++    let fixture = Fixture::new(Response::Text, true);
++    let agent = fixture.agent();
++    let handle = fixture.started(&agent, "request").await;
++    fixture.model.entered.notified().await;
++    let run_id = handle.run_id().clone();
++    {
++        let context = context();
++        let outcome = handle.outcome(&context);
++        tokio::pin!(outcome);
++        assert!(futures_util::poll!(outcome.as_mut()).is_pending());
++    }
++    {
++        let mut events = handle.events(0, context());
++        let first = events.next().await.unwrap().unwrap();
++        assert_eq!(first.run_id, run_id);
++    }
++    drop(handle);
++    fixture.model.release.add_permits(1);
++    let replay = completed(agent.start(request("request"), context()).await.unwrap());
++    let outcome = completed(replay.outcome(&context()).await.unwrap());
++    assert_eq!(outcome.result.status(), RunStatus::Succeeded);
++    assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 1);
++}
++
++#[tokio::test]
++async fn duplicate_requests_reuse_the_run_before_new_metadata_resolution_and_changed_options_conflict()
++ {
++    let fixture = Fixture::new(Response::Text, false);
++    let agent = fixture.agent();
++    let first = fixture.started(&agent, "request").await;
++    completed(first.outcome(&context()).await.unwrap());
++    let resolutions = fixture.catalog.calls.load(Ordering::SeqCst);
++    fixture.catalog.revision.store(99, Ordering::SeqCst);
++    let duplicate = fixture.started(&agent, "request").await;
++    assert_eq!(duplicate.run_id(), first.run_id());
++    completed(duplicate.outcome(&context()).await.unwrap());
++    assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 1);
++    assert_eq!(fixture.catalog.calls.load(Ordering::SeqCst), resolutions);
++    let mut changed = request("request");
++    changed
++        .model_options
++        .insert("effort".into(), serde_json::json!("high"));
++    assert_eq!(
++        agent.start(changed, context()).await.unwrap_err().code,
++        ErrorCode::RequestConflict
++    );
++}
++
++#[tokio::test]
++async fn a_second_request_is_busy_until_the_active_run_finishes() {
++    let fixture = Fixture::new(Response::Text, true);
++    let agent = fixture.agent();
++    let first = fixture.started(&agent, "first").await;
++    fixture.model.entered.notified().await;
++    assert_eq!(
++        agent
++            .start(request("second"), context())
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::SessionBusy
++    );
++    fixture.model.release.add_permits(1);
++    completed(first.outcome(&context()).await.unwrap());
++    let original = fixture
++        .store
++        .load(&scope(), first.run_id())
++        .await
++        .unwrap()
++        .session
++        .prompt_snapshot;
++    let second = fixture.started(&agent, "second").await;
++    fixture.model.release.add_permits(1);
++    completed(second.outcome(&context()).await.unwrap());
++    assert_ne!(first.run_id(), second.run_id());
++    assert_eq!(
++        fixture
++            .store
++            .load(&scope(), second.run_id())
++            .await
++            .unwrap()
++            .session
++            .prompt_snapshot,
++        original
++    );
++    let requests = fixture.model.requests.lock().unwrap();
++    let systems = |request: &ModelRequest| {
++        request
++            .messages
++            .iter()
++            .filter(|message| message.role == ModelRole::System)
++            .cloned()
++            .collect::<Vec<_>>()
++    };
++    assert_eq!(systems(&requests[0]), systems(&requests[1]));
++}
++
++#[tokio::test]
++async fn foreign_scope_and_current_read_or_cancel_denials_do_not_control_an_existing_run() {
++    let fixture = Fixture::new(Response::Text, true);
++    let agent = fixture.agent();
++    let handle = fixture.started(&agent, "request").await;
++    fixture.model.entered.notified().await;
++    let mut foreign = context();
++    foreign.data.scope.tenant_id = id("foreign");
++    assert!(agent.get_run(handle.run_id(), &foreign).await.is_err());
++    assert!(handle.cancel(id("cancel"), &foreign).await.is_err());
++    fixture.policy.deny.store(1, Ordering::SeqCst);
++    assert!(agent.get_run(handle.run_id(), &context()).await.is_err());
++    assert!(handle.outcome(&context()).await.is_err());
++    fixture.policy.deny.store(2, Ordering::SeqCst);
++    assert!(handle.cancel(id("cancel"), &context()).await.is_err());
++    fixture.policy.deny.store(0, Ordering::SeqCst);
++    fixture.model.release.add_permits(1);
++    assert_eq!(
++        completed(handle.outcome(&context()).await.unwrap())
++            .result
++            .status(),
++        RunStatus::Succeeded
++    );
++}
++
++#[tokio::test]
++async fn cancelling_a_running_request_preserves_its_reserved_attempt_and_saves_cancellation() {
++    let fixture = Fixture::new(Response::Text, true);
++    let agent = fixture.agent();
++    let handle = fixture.started(&agent, "request").await;
++    fixture.model.entered.notified().await;
++    let receipt = completed(
++        handle
++            .cancel(id("user_cancelled"), &context())
++            .await
++            .unwrap(),
++    );
++    assert_eq!(receipt, CancelReceipt::Requested);
++    let outcome = completed(handle.outcome(&context()).await.unwrap());
++    assert_eq!(outcome.result.status(), RunStatus::Cancelled);
++    assert_eq!(outcome.usage.model_calls, 1);
++    let saved = fixture
++        .store
++        .load(&scope(), handle.run_id())
++        .await
++        .unwrap()
++        .snapshot;
++    assert_eq!(saved.status, RunStatus::Cancelled);
++    assert_eq!(saved.reservations.len(), 1);
++    assert_eq!(
++        completed(handle.cancel(id("again"), &context()).await.unwrap()),
++        CancelReceipt::AlreadyTerminal
++    );
++}
++
++#[tokio::test]
++async fn classified_model_failure_is_saved_with_its_partial_output_instead_of_success() {
++    let fixture = Fixture::new(Response::TransportFailure, false);
++    let agent = fixture.agent();
++    let handle = fixture.started(&agent, "request").await;
++    let outcome = completed(handle.outcome(&context()).await.unwrap());
++    assert_eq!(outcome.result.status(), RunStatus::Failed);
++    assert_eq!(
++        outcome.output,
++        vec![InputContent::Text {
++            text: "candidate answer".into()
++        }]
++    );
++    assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 1);
++    assert_eq!(
++        fixture
++            .store
++            .load(&scope(), handle.run_id())
++            .await
++            .unwrap()
++            .snapshot
++            .outcome,
++        Some(outcome)
++    );
++}
++
++#[tokio::test]
++async fn unsupported_profile_modes_are_rejected_before_any_callbacks_or_model_calls() {
++    let fixture = Fixture::new(Response::Text, false);
++    let mut verified = profile();
++    verified.completion_policy = CompletionPolicy::Verified {
++        verifier_ref: reference("verifier"),
++    };
++    assert!(create_agent(verified, fixture.bindings()).is_err());
++    let mut tools = profile();
++    tools.tools = vec![ToolBindingRef::Catalog(CatalogToolRef {
++        tool_id: id("search"),
++        version: id("1"),
++        bindings: None,
++        config: None,
++    })];
++    assert!(create_agent(tools, fixture.bindings()).is_err());
++    let mut hooks = profile();
++    hooks.hooks = Some(vec![HookRef::Catalog(CatalogHookRef {
++        hook_id: id("hook"),
++        version: id("1"),
++        position: HookPosition::BeforeModel,
++    })]);
++    assert_eq!(
++        create_agent(hooks, fixture.bindings()).unwrap_err().code,
++        ErrorCode::CapabilityUnsupported
++    );
++    let mut sources = profile();
++    sources.context_sources = Some(vec![ContextSourceBinding {
++        source: ContextSourceRef::Catalog(CatalogSourceRef {
++            source_id: id("source"),
++            version: id("1"),
++        }),
++        trigger: ContextTrigger::RunStart,
++        required: true,
++        timeout_ms: 1000.try_into().unwrap(),
++        max_items: 1.try_into().unwrap(),
++        max_bytes: 1024.try_into().unwrap(),
++        max_tokens: 128.try_into().unwrap(),
++    }]);
++    assert_eq!(
++        create_agent(sources, fixture.bindings()).unwrap_err().code,
++        ErrorCode::CapabilityUnsupported
++    );
++    assert_eq!(fixture.catalog.calls.load(Ordering::SeqCst), 0);
++    assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 0);
++}
++
++#[tokio::test]
++async fn a_changed_profile_cannot_replace_a_completed_sessions_pinned_prompt() {
++    let fixture = Fixture::new(Response::Text, false);
++    let agent = fixture.agent();
++    let first = fixture.started(&agent, "first").await;
++    completed(first.outcome(&context()).await.unwrap());
++    let mut changed = profile();
++    changed.version = id("2.0.0");
++    let other = create_agent(changed, fixture.bindings()).unwrap();
++    assert!(other.start(request("second"), context()).await.is_err());
++    assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 1);
++    assert!(
++        fixture
++            .store
++            .find_request(&scope(), &id("session"), &id("second"))
++            .await
++            .unwrap()
++            .is_none()
++    );
++}
++
++#[tokio::test]
++async fn cancellation_receipt_is_not_a_terminal_outcome_until_the_final_commit_succeeds() {
++    let fixture = Fixture::new(Response::Text, true);
++    let store = std::sync::Arc::new(FinalCommitStore::new(
++        fixture.store.clone(),
++        FinalCommitMode::Pause,
++    ));
++    let mut bindings = fixture.bindings();
++    bindings.state = store.clone();
++    let agent = create_agent(profile(), bindings).unwrap();
++    let handle = fixture.started(&agent, "request").await;
++    fixture.model.entered.notified().await;
++    assert_eq!(
++        completed(handle.cancel(id("cancel"), &context()).await.unwrap()),
++        CancelReceipt::Requested
++    );
++    store.final_entered.notified().await;
++    let saved = fixture.store.load(&scope(), handle.run_id()).await.unwrap();
++    assert_eq!(saved.snapshot.status, RunStatus::Running);
++    assert!(saved.snapshot.outcome.is_none());
++    assert!(
++        !fixture
++            .store
++            .read_events(&scope(), handle.run_id(), 0, 100)
++            .await
++            .unwrap()
++            .events
++            .iter()
++            .any(|event| matches!(event.payload, RunEventPayload::RunFinished { .. }))
++    );
++    store.release.add_permits(1);
++    assert_eq!(
++        completed(handle.outcome(&context()).await.unwrap())
++            .result
++            .status(),
++        RunStatus::Cancelled
++    );
++}
++
++#[tokio::test]
++async fn failed_final_storage_never_reports_a_successful_outcome_or_finished_event() {
++    let fixture = Fixture::new(Response::Text, false);
++    let store = std::sync::Arc::new(FinalCommitStore::new(
++        fixture.store.clone(),
++        FinalCommitMode::Reject,
++    ));
++    let mut bindings = fixture.bindings();
++    bindings.state = store.clone();
++    let agent = create_agent(profile(), bindings).unwrap();
++    let handle = fixture.started(&agent, "request").await;
++    assert_eq!(
++        handle.outcome(&context()).await.unwrap_err().code,
++        ErrorCode::PersistenceUnavailable
++    );
++    let saved = fixture.store.load(&scope(), handle.run_id()).await.unwrap();
++    assert!(saved.snapshot.outcome.is_none());
++    assert!(!saved.snapshot.status.is_terminal());
++    assert!(
++        !fixture
++            .store
++            .read_events(&scope(), handle.run_id(), 0, 100)
++            .await
++            .unwrap()
++            .events
++            .iter()
++            .any(|event| matches!(event.payload, RunEventPayload::RunFinished { .. }))
++    );
++    assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 1);
++}
++
++#[tokio::test]
++async fn a_lost_final_commit_ack_is_resolved_from_stored_success_without_reexecuting_the_model() {
++    let fixture = Fixture::new(Response::Text, false);
++    let store = std::sync::Arc::new(FinalCommitStore::new(
++        fixture.store.clone(),
++        FinalCommitMode::LoseAcknowledgement,
++    ));
++    let mut bindings = fixture.bindings();
++    bindings.state = store.clone();
++    let agent = create_agent(profile(), bindings).unwrap();
++    let handle = fixture.started(&agent, "request").await;
++    let outcome = completed(handle.outcome(&context()).await.unwrap());
++    assert_eq!(outcome.result.status(), RunStatus::Succeeded);
++    assert_eq!(
++        fixture
++            .store
++            .load(&scope(), handle.run_id())
++            .await
++            .unwrap()
++            .snapshot
++            .outcome,
++        Some(outcome)
++    );
++    let duplicate = fixture.started(&agent, "request").await;
++    assert_eq!(duplicate.run_id(), handle.run_id());
++    completed(duplicate.outcome(&context()).await.unwrap());
++    assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 1);
++    assert_eq!(store.final_attempts.load(Ordering::SeqCst), 1);
++}
++
++#[tokio::test(start_paused = true)]
++async fn heartbeat_keeps_a_long_running_model_attempt_owned_beyond_the_original_lease() {
++    let fixture = Fixture::new(Response::Text, true);
++    let agent = fixture.agent();
++    let handle = fixture.started(&agent, "request").await;
++    fixture.model.entered.notified().await;
++    for _ in 0..15 {
++        tokio::time::advance(std::time::Duration::from_millis(100)).await;
++        tokio::task::yield_now().await;
++    }
++    let now = fixture.clock.now().unwrap().utc_ms;
++    assert_eq!(
++        fixture
++            .store
++            .acquire_lease(&scope(), handle.run_id(), &id("competitor"), now, 1000)
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::LeaseBusy
++    );
++    fixture.model.release.add_permits(1);
++    assert_eq!(
++        completed(handle.outcome(&context()).await.unwrap())
++            .result
++            .status(),
++        RunStatus::Succeeded
++    );
++}
++
++#[tokio::test(start_paused = true)]
++async fn deadline_exhaustion_stops_an_incomplete_stream_and_preserves_the_attempt() {
++    let fixture = Fixture::new(Response::WaitAfterText, false);
++    let agent = fixture.agent();
++    let handle = fixture.started(&agent, "request").await;
++    fixture.model.entered.notified().await;
++    let outcome = completed(handle.outcome(&context()).await.unwrap());
++    assert_eq!(
++        outcome.result,
++        OutcomeResult::Exhausted {
++            budget: BudgetKind::Elapsed
++        }
++    );
++    assert_eq!(outcome.usage.model_calls, 1);
++    assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 1);
++    assert_eq!(
++        fixture
++            .store
++            .load(&scope(), handle.run_id())
++            .await
++            .unwrap()
++            .snapshot
++            .status,
++        RunStatus::Exhausted
++    );
++}
++
++#[tokio::test]
++async fn impossible_token_estimates_fail_before_model_dispatch() {
++    let fixture = Fixture::new(Response::Text, false);
++    fixture.estimator.tokens.store(8192, Ordering::SeqCst);
++    let agent = fixture.agent();
++    let handle = fixture.started(&agent, "request").await;
++    let outcome = completed(handle.outcome(&context()).await.unwrap());
++    assert_ne!(outcome.result.status(), RunStatus::Succeeded);
++    assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 0);
++    assert_eq!(outcome.usage.model_calls, 0);
++}
++
++#[tokio::test]
++async fn buffered_events_recheck_current_permission_and_observer_cancellation_before_delivery() {
++    for cancel in [false, true] {
++        let fixture = Fixture::new(Response::Text, true);
++        let agent = fixture.agent();
++        let handle = fixture.started(&agent, "request").await;
++        fixture.model.entered.notified().await;
++        let observer = context();
++        let mut events = handle.events(0, observer.clone());
++        let first = events.next().await.unwrap().unwrap();
++        assert_eq!(first.event_type, "run.started");
++        if cancel {
++            observer.cancellation.cancel();
++        } else {
++            fixture.policy.deny.store(1, Ordering::SeqCst);
++        }
++        let second = events
++            .next()
++            .await
++            .expect("observer receives a denial, not an event");
++        assert_eq!(
++            second.unwrap_err().code,
++            if cancel {
++                ErrorCode::Cancelled
++            } else {
++                ErrorCode::AccessDenied
++            }
++        );
++        fixture.policy.deny.store(0, Ordering::SeqCst);
++        fixture.model.release.add_permits(1);
++        assert_eq!(
++            completed(handle.outcome(&context()).await.unwrap())
++                .result
++                .status(),
++            RunStatus::Succeeded
++        );
++    }
++}
++
++#[tokio::test]
++async fn an_event_committed_between_empty_page_and_terminal_read_is_still_delivered() {
++    let fixture = Fixture::new(Response::Text, true);
++    let store = std::sync::Arc::new(FinalCommitStore::new(
++        fixture.store.clone(),
++        FinalCommitMode::PauseEmptyEventPage,
++    ));
++    let mut bindings = fixture.bindings();
++    bindings.state = store.clone();
++    let agent = create_agent(profile(), bindings).unwrap();
++    let handle = fixture.started(&agent, "request").await;
++    fixture.model.entered.notified().await;
++    let before = fixture
++        .store
++        .load(&scope(), handle.run_id())
++        .await
++        .unwrap()
++        .snapshot
++        .last_event_seq;
++    let mut events = handle.events(before, context());
++    let next = tokio::spawn(async move { events.next().await });
++    store.empty_page_entered.notified().await;
++    fixture.model.release.add_permits(1);
++    completed(handle.outcome(&context()).await.unwrap());
++    let terminal = fixture
++        .store
++        .load(&scope(), handle.run_id())
++        .await
++        .unwrap()
++        .snapshot;
++    assert!(terminal.last_event_seq > before);
++    store.empty_page_release.add_permits(1);
++    let delivered = next
++        .await
++        .unwrap()
++        .expect("final durable event must not be lost")
++        .unwrap();
++    assert_eq!(delivered.event_type, "run.finished");
++    assert_eq!(delivered.seq.get(), terminal.last_event_seq);
++}
++
++#[tokio::test]
++async fn concurrent_duplicate_starts_share_one_run_and_one_model_attempt() {
++    let fixture = Fixture::new(Response::Text, true);
++    let agent = fixture.agent();
++    let (first, second) = tokio::join!(
++        agent.start(request("request"), context()),
++        agent.start(request("request"), context())
++    );
++    let first = completed(first.unwrap());
++    let second = completed(second.unwrap());
++    assert_eq!(first.run_id(), second.run_id());
++    fixture.model.entered.notified().await;
++    assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 1);
++    fixture.model.release.add_permits(1);
++    let observer = context();
++    let (first_outcome, second_outcome) =
++        tokio::join!(first.outcome(&observer), second.outcome(&observer));
++    assert_eq!(
++        completed(first_outcome.unwrap()),
++        completed(second_outcome.unwrap())
++    );
++}
++
++#[tokio::test]
++async fn adapter_panic_and_unexpected_tool_proposals_are_saved_as_failure_without_an_extra_attempt()
++{
++    for response in [Response::Panic, Response::Tool] {
++        let fixture = Fixture::new(response, false);
++        let agent = fixture.agent();
++        let handle = fixture.started(&agent, "request").await;
++        let outcome = completed(handle.outcome(&context()).await.unwrap());
++        assert_eq!(outcome.result.status(), RunStatus::Failed);
++        assert_eq!(outcome.usage.model_calls, 1);
++        assert_eq!(outcome.usage.tool_attempts, 0);
++        assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 1);
++        assert!(
++            fixture
++                .store
++                .load(&scope(), handle.run_id())
++                .await
++                .unwrap()
++                .session
++                .active_run_id
++                .is_none()
++        );
++    }
++}
++
++#[tokio::test]
++async fn a_start_policy_denial_admits_no_run_and_calls_no_resolver_or_model() {
++    let fixture = Fixture::new(Response::Text, false);
++    fixture.policy.deny.store(3, Ordering::SeqCst);
++    let agent = fixture.agent();
++    assert_eq!(
++        agent
++            .start(request("request"), context())
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::AccessDenied
++    );
++    assert!(
++        fixture
++            .store
++            .find_request(&scope(), &id("session"), &id("request"))
++            .await
++            .unwrap()
++            .is_none()
++    );
++    assert_eq!(fixture.catalog.calls.load(Ordering::SeqCst), 0);
++    assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 0);
++}
++
++#[tokio::test]
++async fn a_later_run_replays_the_exact_committed_continuation_once_on_the_original_route() {
++    let fixture = Fixture::new(Response::WithContinuation, false);
++    let agent = fixture.agent();
++    let first = fixture.started(&agent, "first").await;
++    completed(first.outcome(&context()).await.unwrap());
++    let saved = fixture.store.load(&scope(), first.run_id()).await.unwrap();
++    let opaque: Vec<_> = saved
++        .messages
++        .iter()
++        .flat_map(|message| &message.content)
++        .filter_map(|content| match content {
++            ContentBlock::ProviderOpaque {
++                provider,
++                route_digest,
++                data_ref,
++            } => Some((provider, route_digest, data_ref)),
++            _ => None,
++        })
++        .collect();
++    assert_eq!(opaque.len(), 1);
++    assert_eq!(opaque[0].0, &id("fixture"));
++    let record = fixture
++        .store
++        .read_record(&scope(), opaque[0].2)
++        .await
++        .unwrap();
++    let expected: OpaqueContinuation = serde_json::from_value(record.value().clone()).unwrap();
++    assert_eq!(
++        expected.data(),
++        &serde_json::json!({"signature":"fixture-signature"})
++    );
++    assert_eq!(expected.route_digest(), opaque[0].1);
++    let second = fixture.started(&agent, "second").await;
++    completed(second.outcome(&context()).await.unwrap());
++    let requests = fixture.model.requests.lock().unwrap();
++    assert_eq!(requests.len(), 2);
++    let replayed: Vec<_> = requests[1]
++        .messages
++        .iter()
++        .flat_map(|message| &message.content)
++        .filter_map(|content| match content {
++            ModelContent::Opaque { continuation } => Some(continuation),
++            _ => None,
++        })
++        .collect();
++    assert_eq!(replayed, vec![&expected]);
++    assert_eq!(replayed[0].route_digest(), &requests[1].route.digest());
++    assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 2);
++}
++
++#[tokio::test]
++async fn changing_provider_for_the_same_session_does_not_forward_or_silently_discard_opaque_state()
++{
++    let fixture = Fixture::new(Response::WithContinuation, false);
++    let agent = fixture.agent();
++    let first = fixture.started(&agent, "first").await;
++    completed(first.outcome(&context()).await.unwrap());
++    let mut other = Fixture::new(Response::Text, false);
++    other.store = fixture.store.clone();
++    other.ids = fixture.ids.clone();
++    other.clock = fixture.clock.clone();
++    other.router = std::sync::Arc::new(Router::for_provider("different-provider"));
++    let selected = other
++        .router
++        .snapshot
++        .route_for_binding(&reference("route"))
++        .unwrap();
++    let mut port = Model::new(Response::Text, false);
++    port.port_binding = ModelPortBinding {
++        provider: selected.provider.clone(),
++        adapter: selected.adapter.clone(),
++        connection_ref: selected.connection_ref.clone(),
++    };
++    other.model = std::sync::Arc::new(port);
++    let other_agent = other.agent();
++    let second = other.started(&other_agent, "second").await;
++    let outcome = completed(second.outcome(&context()).await.unwrap());
++    assert!(
++        matches!(outcome.result,OutcomeResult::Failed{failure} if failure.code==id("model_context_incompatible"))
++    );
++    assert_eq!(other.model.calls.load(Ordering::SeqCst), 0);
++    assert!(other.model.requests.lock().unwrap().is_empty());
++    // A clean session proves the second provider configuration is usable: the
++    // earlier rejection is caused by incompatible continuation, not its binding.
++    let mut clean = request("clean-request");
++    clean.session_id = id("clean-session");
++    let clean = completed(other_agent.start(clean, context()).await.unwrap());
++    assert_eq!(
++        completed(clean.outcome(&context()).await.unwrap())
++            .result
++            .status(),
++        RunStatus::Succeeded
++    );
++    assert_eq!(other.model.calls.load(Ordering::SeqCst), 1);
++    assert!(
++        !other.model.requests.lock().unwrap()[0]
++            .messages
++            .iter()
++            .flat_map(|message| &message.content)
++            .any(|content| matches!(content, ModelContent::Opaque { .. }))
++    );
++}
++
++#[tokio::test]
++async fn start_replay_treats_omitted_system_inputs_as_empty_instead_of_reusing_saved_values() {
++    let fixture = Fixture::new(Response::Text, false);
++    let mut bindings = fixture.bindings();
++    bindings.system_inputs = SystemInputRegistry::new(vec![SystemInputDefinition {
++        key: id("workspace_id"),
++        version: id("1"),
++        value_schema: serde_json::json!({"type":"string","format":"uuid"}),
++        source: SystemInputSource::Run {},
++    }])
++    .unwrap();
++    let agent = create_agent(profile(), bindings).unwrap();
++    let mut supplied = context();
++    supplied.data.system_inputs = Some(SystemInputs::new(JsonObject::from([(
++        "workspace_id".into(),
++        serde_json::json!("11111111-1111-4111-8111-111111111111"),
++    )])));
++    let first = completed(
++        agent
++            .start(request("with-inputs"), supplied.clone())
++            .await
++            .unwrap(),
++    );
++    completed(first.outcome(&context()).await.unwrap());
++    let before = fixture.catalog.calls.load(Ordering::SeqCst);
++    let omitted = agent
++        .start(request("with-inputs"), context())
++        .await
++        .unwrap_err();
++    assert!(matches!(
++        omitted.code,
++        ErrorCode::SystemInputsMismatch | ErrorCode::RequestConflict
++    ));
++    let same = completed(agent.start(request("with-inputs"), supplied).await.unwrap());
++    assert_eq!(same.run_id(), first.run_id());
++    assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 1);
++    assert_eq!(fixture.catalog.calls.load(Ordering::SeqCst), before);
++
++    let mut empty_request = request("empty-inputs");
++    empty_request.session_id = id("empty-session");
++    let empty = completed(agent.start(empty_request.clone(), context()).await.unwrap());
++    completed(empty.outcome(&context()).await.unwrap());
++    let mut explicit_empty = context();
++    explicit_empty.data.system_inputs = Some(SystemInputs::default());
++    let same_empty = completed(agent.start(empty_request, explicit_empty).await.unwrap());
++    assert_eq!(same_empty.run_id(), empty.run_id());
++    assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 2);
++}
++
++#[tokio::test]
++async fn observer_cancellation_interrupts_pending_store_reads_without_cancelling_the_driver() {
++    for operation in 0..3 {
++        let fixture = Fixture::new(Response::Text, true);
++        let store = std::sync::Arc::new(FinalCommitStore::new(
++            fixture.store.clone(),
++            FinalCommitMode::PassThrough,
++        ));
++        let mut bindings = fixture.bindings();
++        bindings.state = store.clone();
++        let agent = create_agent(profile(), bindings).unwrap();
++        let handle = fixture.started(&agent, "request").await;
++        fixture.model.entered.notified().await;
++        let observer = context();
++        store
++            .block_read
++            .store(if operation == 1 { 2 } else { 1 }, Ordering::SeqCst);
++        let waiting_handle = handle.clone();
++        let waiting_agent = agent.clone();
++        let waiting_context = observer.clone();
++        let waiting = tokio::spawn(async move {
++            match operation {
++                0 => waiting_handle.outcome(&waiting_context).await.map(|_| ()),
++                1 => waiting_handle
++                    .events(0, waiting_context)
++                    .next()
++                    .await
++                    .expect("observer must report cancellation")
++                    .map(|_| ()),
++                _ => waiting_agent
++                    .get_run(waiting_handle.run_id(), &waiting_context)
++                    .await
++                    .map(|_| ()),
++            }
++        });
++        store.read_entered.notified().await;
++        observer.cancellation.cancel();
++        let result = tokio::time::timeout(std::time::Duration::from_secs(1), waiting)
++            .await
++            .expect("cancel must interrupt the pending store read")
++            .unwrap();
++        assert_eq!(result.unwrap_err().code, ErrorCode::Cancelled);
++        fixture.model.release.add_permits(1);
++        assert_eq!(
++            completed(handle.outcome(&context()).await.unwrap())
++                .result
++                .status(),
++            RunStatus::Succeeded
++        );
++        assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 1);
++    }
++}
++
++#[tokio::test]
++async fn initial_request_lookup_observes_cancellation_and_start_timeout_before_admission() {
++    for cancel in [true, false] {
++        let fixture = Fixture::new(Response::Text, false);
++        let store = std::sync::Arc::new(FinalCommitStore::new(
++            fixture.store.clone(),
++            FinalCommitMode::PassThrough,
++        ));
++        store.block_read.store(3, Ordering::SeqCst);
++        let mut bindings = fixture.bindings();
++        bindings.state = store.clone();
++        bindings.settings.start_timeout_ms = 30;
++        let agent = create_agent(profile(), bindings).unwrap();
++        let caller = context();
++        let task_context = caller.clone();
++        let start =
++            tokio::spawn(async move { agent.start(request("request"), task_context).await });
++        store.read_entered.notified().await;
++        if cancel {
++            caller.cancellation.cancel();
++        }
++        let result = tokio::time::timeout(std::time::Duration::from_secs(1), start)
++            .await
++            .expect("request lookup must be bounded by start control")
++            .unwrap();
++        assert_eq!(
++            result.unwrap_err().code,
++            if cancel {
++                ErrorCode::Cancelled
++            } else {
++                ErrorCode::DeadlineExceeded
++            }
++        );
++        assert!(
++            fixture
++                .store
++                .find_request(&scope(), &id("session"), &id("request"))
++                .await
++                .unwrap()
++                .is_none()
++        );
++        assert_eq!(fixture.catalog.calls.load(Ordering::SeqCst), 0);
++        assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 0);
++    }
++}
++
++#[tokio::test]
++async fn exhausting_a_retry_budget_preserves_the_partial_response_already_saved_for_this_step() {
++    let fixture = Fixture::new(Response::TransportFailure, false);
++    let mut profile = profile();
++    profile.limits.max_model_calls = 1.try_into().unwrap();
++    profile.limits.max_recovery_attempts = 1;
++    let gate = std::sync::Arc::new(
++        PolicyGate::new(fixture.policy.clone(), std::time::Duration::from_secs(1)).unwrap(),
++    );
++    let exchange = ModelExchange::new(fixture.model.clone(), gate)
++        .with_route_inspector(fixture.inspector.clone(), std::time::Duration::from_secs(1))
++        .unwrap()
++        .with_retry_policy(ModelRetryPolicy {
++            max_retries: 1,
++            backoff_ms: 0,
++        });
++    let mut bindings = fixture.bindings();
++    bindings.model_exchange = std::sync::Arc::new(exchange);
++    let agent = create_agent(profile, bindings).unwrap();
++    let handle = fixture.started(&agent, "request").await;
++    let outcome = completed(handle.outcome(&context()).await.unwrap());
++    assert_eq!(
++        outcome.result,
++        OutcomeResult::Exhausted {
++            budget: BudgetKind::ModelCalls
++        }
++    );
++    assert_eq!(
++        outcome.output,
++        vec![InputContent::Text {
++            text: "candidate answer".into()
++        }]
++    );
++    assert_eq!(outcome.usage.model_calls, 1);
++    assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 1);
++    let saved = fixture
++        .store
++        .load(&scope(), handle.run_id())
++        .await
++        .unwrap()
++        .snapshot;
++    assert_eq!(saved.outcome, Some(outcome));
++    assert!(saved.model_ledger[0].response_ref.is_some());
++}
+diff --git a/crates/wickle/tests/budget.rs b/crates/wickle/tests/budget.rs
+index 5e42b8d27e2557043044d8701a58119bb6c14dd4..d2fb05a9ef4f99e8f33bcfb0cd78fbf559626219 100644
+--- a/crates/wickle/tests/budget.rs
++++ b/crates/wickle/tests/budget.rs
+@@ -76,6 +76,14 @@ impl StateStore for ControlledStore {
+     fn capabilities(&self) -> StateStoreCapabilities {
+         self.inner.capabilities()
+     }
++    fn find_request<'a>(
++        &'a self,
++        scope: &'a Scope,
++        session_id: &'a Id,
++        request_id: &'a Id,
++    ) -> PortFuture<'a, Option<StoredRun>> {
++        self.inner.find_request(scope, session_id, request_id)
++    }
+     fn admit<'a>(&'a self, s: &'a Scope, input: AdmissionInput) -> PortFuture<'a, AdmissionResult> {
+         self.inner.admit(s, input)
+     }
+diff --git a/crates/wickle/tests/input_binding.rs b/crates/wickle/tests/input_binding.rs
+index 5ec12c68f699c8ff9ec834897d2d598807c9fc27..fde4f5bfc794a01f208cb90b49bd5c2586a75b4c 100644
+--- a/crates/wickle/tests/input_binding.rs
++++ b/crates/wickle/tests/input_binding.rs
+@@ -890,6 +890,14 @@ impl StateStore for FailingCommitStore {
+     fn capabilities(&self) -> StateStoreCapabilities {
+         self.inner.capabilities()
+     }
++    fn find_request<'a>(
++        &'a self,
++        scope: &'a Scope,
++        session_id: &'a Id,
++        request_id: &'a Id,
++    ) -> PortFuture<'a, Option<StoredRun>> {
++        self.inner.find_request(scope, session_id, request_id)
++    }
+     fn admit<'a>(&'a self, s: &'a Scope, input: AdmissionInput) -> PortFuture<'a, AdmissionResult> {
+         self.inner.admit(s, input)
+     }
+diff --git a/crates/wickle/tests/state.rs b/crates/wickle/tests/state.rs
+index 07f47bf8f3c76345990e7d9e4f0a29044682e489..d2c7cf617046be0f95540321ab4b90b9f88bcafa 100644
+--- a/crates/wickle/tests/state.rs
++++ b/crates/wickle/tests/state.rs
+@@ -7,6 +7,87 @@ use wickle::*;
+ mod support;
+ use support::*;
+ 
++#[tokio::test]
++async fn request_lookup_uses_scope_and_session_and_returns_current_state_after_restore() {
++    let store = MemoryStateStore::new();
++    assert!(
++        store
++            .find_request(&scope(), &id("first"), &id("request"))
++            .await
++            .unwrap()
++            .is_none()
++    );
++    let first = store
++        .admit(
++            &scope(),
++            admission("run-a", "request", "first", "input", "1").await,
++        )
++        .await
++        .unwrap()
++        .state;
++    store
++        .admit(
++            &scope(),
++            admission("run-b", "request", "second", "input", "1").await,
++        )
++        .await
++        .unwrap();
++    let lease = store
++        .acquire_lease(&scope(), &id("run-a"), &id("worker"), 0, 1000)
++        .await
++        .unwrap();
++    let finished = store
++        .commit(&scope(), &id("run-a"), finished(&first.snapshot, lease, 1))
++        .await
++        .unwrap();
++    assert_eq!(
++        store
++            .find_request(&scope(), &id("first"), &id("request"))
++            .await
++            .unwrap(),
++        Some(finished)
++    );
++    let checkpoint = store.export_checkpoint(&scope()).unwrap();
++    let restored = MemoryStateStore::from_checkpoint(
++        StateStoreCheckpoint::from_json(
++            &serde_json::to_string(&checkpoint).unwrap(),
++            &scope(),
++            &checkpoint.digest(),
++        )
++        .unwrap(),
++    );
++    let first = restored
++        .find_request(&scope(), &id("first"), &id("request"))
++        .await
++        .unwrap()
++        .unwrap();
++    let second = restored
++        .find_request(&scope(), &id("second"), &id("request"))
++        .await
++        .unwrap()
++        .unwrap();
++    assert_eq!(first.snapshot.status, RunStatus::Succeeded);
++    assert_eq!(second.snapshot.run_id, id("run-b"));
++    let foreign = Scope {
++        workspace_id: id("foreign"),
++        ..scope()
++    };
++    assert!(
++        restored
++            .find_request(&foreign, &id("first"), &id("request"))
++            .await
++            .unwrap()
++            .is_none()
++    );
++    assert!(
++        restored
++            .find_request(&scope(), &id("missing"), &id("request"))
++            .await
++            .unwrap()
++            .is_none()
++    );
++}
++
+ #[tokio::test]
+ async fn admitted_model_options_are_fixed_for_replay_and_later_commits() {
+     fn with_effort(mut input: AdmissionInput, effort: &str) -> AdmissionInput {
+diff --git a/crates/wickle/tests/support/agent.rs b/crates/wickle/tests/support/agent.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..5ee417909da38ae83445d8902cea555ef8bf2082
+--- /dev/null
++++ b/crates/wickle/tests/support/agent.rs
+@@ -0,0 +1,676 @@
++//! Deterministic Host components for agent runtime lifecycle tests.
++
++use futures_util::{StreamExt, stream};
++use serde_json::json;
++use std::{
++    collections::BTreeSet,
++    sync::{
++        Arc, Mutex,
++        atomic::{AtomicBool, AtomicUsize, Ordering},
++    },
++    time::Duration,
++};
++use tokio::sync::{Notify, Semaphore};
++use wickle::*;
++
++pub fn id(value: &str) -> Id {
++    Id::new(value).unwrap()
++}
++pub fn scope() -> Scope {
++    Scope {
++        tenant_id: id("tenant"),
++        workspace_id: id("workspace"),
++        user_id: None,
++    }
++}
++pub fn reference(name: &str) -> VersionedRef {
++    VersionedRef {
++        id: id(name),
++        version: id("1"),
++    }
++}
++pub fn profile() -> AgentProfile {
++    AgentProfile::from_json(r#"{
++        "schema_version":"wickle.agent-profile.v1","agent_id":"assistant","version":"1.0.0",
++        "name":"Assistant","description":"Runtime fixture","instructions":{"text":"Use supplied records"},
++        "model_binding":"primary","tools":[],"skills":[],"connectors":[],
++        "context_policy":{"strategy":"bounded"},"output_contract":{"type":"text"},
++        "limits":{"max_model_calls":4,"max_tool_attempts":0,"max_repair_attempts":0,"max_recovery_attempts":0,"max_elapsed_ms":10000}
++    }"#).unwrap()
++}
++pub fn request(name: &str) -> RunRequest {
++    RunRequest {
++        request_id: id(name),
++        session_id: id("session"),
++        input: vec![InputContent::Text {
++            text: "Retrieve the requested information".into(),
++        }],
++        trigger: RunTrigger::User {},
++        model_options: JsonObject::new(),
++        output_contract: None,
++    }
++}
++pub fn context() -> ExecutionContext {
++    ExecutionContext::new(
++        ExecutionContextData {
++            scope: scope(),
++            principal_ref: id("caller"),
++            capability_grant_ref: id("grant"),
++            trace_context: None,
++            system_inputs: None,
++        },
++        Default::default(),
++    )
++}
++pub fn completed<T>(result: Guarded<T>) -> T {
++    match result {
++        Guarded::Completed(value) => value,
++        Guarded::ApprovalRequired(_) => panic!("unexpected approval"),
++    }
++}
++
++pub struct TestClock {
++    origin: tokio::time::Instant,
++}
++impl TestClock {
++    pub fn new() -> Self {
++        Self {
++            origin: tokio::time::Instant::now(),
++        }
++    }
++}
++impl Clock for TestClock {
++    fn now(&self) -> Result<ClockReading, ContractError> {
++        let elapsed = self.origin.elapsed().as_millis() as u64;
++        Ok(ClockReading {
++            utc_ms: 1000 + elapsed as i64,
++            monotonic_ms: elapsed,
++        })
++    }
++    fn sleep_until<'a>(&'a self, deadline: u64) -> PortFuture<'a, ()> {
++        Box::pin(async move {
++            tokio::time::sleep_until(self.origin + Duration::from_millis(deadline)).await;
++            Ok(())
++        })
++    }
++}
++#[derive(Default)]
++pub struct Ids(pub AtomicUsize);
++impl IdSource for Ids {
++    fn next_id(&self) -> Result<Id, ContractError> {
++        Ok(id(&format!("id-{}", self.0.fetch_add(1, Ordering::SeqCst))))
++    }
++}
++
++#[derive(Default)]
++pub struct Catalog {
++    pub calls: AtomicUsize,
++    pub revision: AtomicUsize,
++}
++impl ProfileResolver for Catalog {
++    fn resolve<'a>(
++        &'a self,
++        reference: &'a ComponentRef,
++        _: &'a Scope,
++    ) -> PortFuture<'a, ComponentMetadata> {
++        Box::pin(async move {
++            self.calls.fetch_add(1, Ordering::SeqCst);
++            Ok(ComponentMetadata {
++                reference: ComponentRef {
++                    version: Some(id(&format!(
++                        "revision-{}",
++                        self.revision.load(Ordering::SeqCst)
++                    ))),
++                    ..reference.clone()
++                },
++                contract_version: 1,
++                manifest_digest: canonical_digest(&json!(self.revision.load(Ordering::SeqCst))),
++                config_schema: json!({"type":"object","additionalProperties":false}),
++                dependencies: vec![],
++                capabilities: BTreeSet::new(),
++                required_capabilities: BTreeSet::new(),
++                required_connections: BTreeSet::new(),
++                model_name: None,
++                hook_position: None,
++                exports: vec![],
++            })
++        })
++    }
++}
++
++#[derive(Default)]
++pub struct Policy {
++    pub calls: AtomicUsize,
++    pub deny: AtomicUsize,
++}
++impl PolicyPort for Policy {
++    fn authorize<'a>(
++        &'a self,
++        request: &'a PolicyRequest,
++        _: PolicyContext<'a>,
++    ) -> PortFuture<'a, PolicyDecision> {
++        Box::pin(async move {
++            self.calls.fetch_add(1, Ordering::SeqCst);
++            let deny = match self.deny.load(Ordering::SeqCst) {
++                1 => matches!(
++                    request.action,
++                    PolicyAction::ReadRun {}
++                        | PolicyAction::ReadRunDetails {}
++                        | PolicyAction::ReadEvents {}
++                ),
++                2 => matches!(request.action, PolicyAction::CancelRun {}),
++                3 => matches!(request.action, PolicyAction::StartRun {}),
++                _ => false,
++            };
++            Ok(if deny {
++                PolicyDecision::Deny {
++                    reason: id("denied"),
++                }
++            } else {
++                PolicyDecision::Allow {}
++            })
++        })
++    }
++}
++
++pub struct Router {
++    pub snapshot: RoutingSnapshot,
++    pub queries: AtomicUsize,
++    pub snapshots: AtomicUsize,
++}
++impl Router {
++    pub fn new() -> Self {
++        Self::for_provider("fixture")
++    }
++    pub fn for_provider(provider: &str) -> Self {
++        let capabilities = ModelCapabilities {
++            revision: id("capabilities"),
++            features: [id("text")].into_iter().collect(),
++            options_schema: json!({"type":"object","properties":{"effort":{"enum":["low","high"]}},"additionalProperties":false}),
++            context_window: 8192.try_into().unwrap(),
++            max_output_tokens: 2048.try_into().unwrap(),
++        };
++        let model = ModelDefinition {
++            model_key: id("model"),
++            family: id("fixture"),
++            provider: id(provider),
++            model_id: id("fixture-model"),
++            model_version: id("release"),
++            version_semantics: VersionSemantics::Pinned,
++            lifecycle: ModelLifecycle::Active,
++            capabilities: capabilities.clone(),
++            evidence: vec![],
++        };
++        let mut binding = ModelBinding {
++            binding: reference("route"),
++            model: model.reference(),
++            requested_model: model.model_id.clone(),
++            adapter: reference("adapter"),
++            connection_ref: reference("connection"),
++            target: JsonObject::new(),
++            target_schema: json!({"type":"object","additionalProperties":false}),
++            api_contract: ApiContract {
++                operation: id("messages"),
++                version: id("v1"),
++            },
++            deployment_revision: None,
++            version_semantics: VersionSemantics::Pinned,
++            capabilities,
++            support: ModelSupportStatus::ContractTested,
++            evidence: vec![],
++        };
++        binding.evidence.push(ModelValidationEvidence {
++            kind: ModelValidationKind::ContractTest,
++            binding_digest: binding.contract_digest(&model).unwrap(),
++            checked_at_ms: 1000,
++            evidence_ref: id("fixture-proof"),
++            passed: true,
++        });
++        let snapshot = RoutingSnapshot::new(
++            ModelCatalogSnapshot {
++                revision: id("catalog"),
++                scope: scope(),
++                models: vec![model],
++                bindings: vec![binding],
++                aliases: vec![],
++            },
++            RoutingPolicy {
++                revision: id("policy"),
++                scope: scope(),
++                rules: vec![RoutingRule {
++                    model_binding: id("primary"),
++                    purpose: ModelPurpose::Agent,
++                    primary: reference("route"),
++                    fallbacks: vec![],
++                    fallback_on: vec![],
++                    version_policy: VersionPolicy::RequirePinned,
++                    min_support: ModelSupportStatus::ContractTested,
++                }],
++            },
++        )
++        .unwrap();
++        Self {
++            snapshot,
++            queries: AtomicUsize::new(0),
++            snapshots: AtomicUsize::new(0),
++        }
++    }
++}
++impl ModelRouter for Router {
++    fn snapshot(&self) -> &RoutingSnapshot {
++        self.snapshots.fetch_add(1, Ordering::SeqCst);
++        &self.snapshot
++    }
++    fn resolve<'a>(&'a self, request: &'a RouteRequest) -> PortFuture<'a, RouteSelection> {
++        Box::pin(async move {
++            self.queries.fetch_add(1, Ordering::SeqCst);
++            let selected = RouteSelection {
++                route: self.snapshot.route_for_binding(&reference("route"))?,
++                reason: if request.previous_route.is_some() {
++                    RouteSelectionReason::Reuse
++                } else {
++                    RouteSelectionReason::Initial
++                },
++                candidate_index: 0,
++                routing_snapshot_digest: self.snapshot.digest(),
++                request_digest: request.digest(),
++            };
++            self.snapshot.validate_selection(request, &selected)?;
++            Ok(selected)
++        })
++    }
++}
++
++pub struct Inspector {
++    pub calls: AtomicUsize,
++}
++impl ModelRouteInspector for Inspector {
++    fn inspect<'a>(
++        &'a self,
++        route: &'a ResolvedModelRoute,
++        _: &'a ModelInspectionContext,
++    ) -> PortFuture<'a, ModelRouteObservation> {
++        Box::pin(async move {
++            self.calls.fetch_add(1, Ordering::SeqCst);
++            Ok(ModelRouteObservation {
++                route_digest: route.digest(),
++                availability: ModelRouteAvailability::Available,
++                model_id: Some(id("fixture-model")),
++                model_version: Some(id("release")),
++                deployment_revision: None,
++                version_semantics: VersionSemantics::Pinned,
++                evidence_ref: id("synthetic-inspection"),
++            })
++        })
++    }
++}
++pub struct Estimator {
++    pub calls: AtomicUsize,
++    pub tokens: AtomicUsize,
++}
++impl ModelTokenEstimator for Estimator {
++    fn estimate(&self, _: &ModelRequest) -> Result<u64, ContractError> {
++        self.calls.fetch_add(1, Ordering::SeqCst);
++        Ok(self.tokens.load(Ordering::SeqCst) as u64)
++    }
++}
++
++#[derive(Clone, Copy)]
++pub enum Response {
++    Text,
++    WithContinuation,
++    TransportFailure,
++    Truncated,
++    WaitAfterText,
++    Panic,
++    Tool,
++}
++pub struct Model {
++    pub calls: AtomicUsize,
++    pub entered: Notify,
++    pub release: Semaphore,
++    pub response: Response,
++    pub requests: Mutex<Vec<ModelRequest>>,
++    pub gated: bool,
++    pub port_binding: ModelPortBinding,
++}
++impl Model {
++    pub fn new(response: Response, gated: bool) -> Self {
++        Self {
++            calls: AtomicUsize::new(0),
++            entered: Notify::new(),
++            release: Semaphore::new(0),
++            response,
++            requests: Mutex::new(vec![]),
++            gated,
++            port_binding: ModelPortBinding {
++                provider: id("fixture"),
++                adapter: reference("adapter"),
++                connection_ref: reference("connection"),
++            },
++        }
++    }
++}
++impl ModelPort for Model {
++    fn binding(&self) -> ModelPortBinding {
++        self.port_binding.clone()
++    }
++    fn generate<'a>(
++        &'a self,
++        request: &'a ModelRequest,
++        _: &'a ModelCallContext,
++    ) -> PortStream<'a, ModelEvent> {
++        self.calls.fetch_add(1, Ordering::SeqCst);
++        self.requests.lock().unwrap().push(request.clone());
++        self.entered.notify_one();
++        Box::pin(
++            stream::once(async move {
++                if self.gated {
++                    self.release.acquire().await.unwrap().forget();
++                }
++                if matches!(self.response, Response::Panic) {
++                    panic!("synthetic adapter panic");
++                }
++                let mut events = vec![Ok(ModelEvent::TextDelta {
++                    text: "candidate answer".into(),
++                })];
++                match self.response {
++                    Response::Text | Response::Panic | Response::WithContinuation => {
++                        events.push(Ok(ModelEvent::ResponseCompleted {
++                            finish: ModelFinish::Stop,
++                            metadata: ModelResponseMetadata::default(),
++                            continuation: if matches!(self.response, Response::WithContinuation) {
++                                vec![OpaqueContinuation::new(
++                                    &request.route,
++                                    json!({"signature":"fixture-signature"}),
++                                )]
++                            } else {
++                                vec![]
++                            },
++                        }))
++                    }
++                    Response::TransportFailure => events.push(Ok(ModelEvent::ResponseError {
++                        kind: ModelFailureKind::Transport,
++                        metadata: ModelResponseMetadata::default(),
++                    })),
++                    Response::Truncated => events.push(Ok(ModelEvent::ResponseCompleted {
++                        finish: ModelFinish::Length,
++                        metadata: ModelResponseMetadata::default(),
++                        continuation: vec![],
++                    })),
++                    Response::Tool => {
++                        events.push(Ok(ModelEvent::ToolArgumentsDelta {
++                            index: 0,
++                            provider_call_id: Some("call".into()),
++                            name: Some("unregistered".into()),
++                            delta: "{}".into(),
++                        }));
++                        events.push(Ok(ModelEvent::ResponseCompleted {
++                            finish: ModelFinish::ToolCalls,
++                            metadata: ModelResponseMetadata::default(),
++                            continuation: vec![],
++                        }));
++                    }
++                    Response::WaitAfterText => {}
++                }
++                let trailing = if matches!(self.response, Response::WaitAfterText) {
++                    stream::pending().boxed()
++                } else {
++                    stream::empty().boxed()
++                };
++                stream::iter(events).chain(trailing)
++            })
++            .flatten(),
++        )
++    }
++}
++
++pub struct Fixture {
++    pub store: Arc<MemoryStateStore>,
++    pub policy: Arc<Policy>,
++    pub catalog: Arc<Catalog>,
++    pub router: Arc<Router>,
++    pub inspector: Arc<Inspector>,
++    pub estimator: Arc<Estimator>,
++    pub model: Arc<Model>,
++    pub clock: Arc<TestClock>,
++    pub ids: Arc<Ids>,
++}
++
++#[derive(Clone, Copy)]
++pub enum FinalCommitMode {
++    PassThrough,
++    Reject,
++    LoseAcknowledgement,
++    Pause,
++    PauseEmptyEventPage,
++}
++pub struct FinalCommitStore {
++    pub inner: Arc<MemoryStateStore>,
++    pub mode: FinalCommitMode,
++    pub final_entered: Notify,
++    pub release: Semaphore,
++    pub final_attempts: AtomicUsize,
++    pub empty_page_entered: Notify,
++    pub empty_page_release: Semaphore,
++    paused_empty_page: AtomicBool,
++    pub block_read: AtomicUsize,
++    pub read_entered: Notify,
++}
++impl FinalCommitStore {
++    pub fn new(inner: Arc<MemoryStateStore>, mode: FinalCommitMode) -> Self {
++        Self {
++            inner,
++            mode,
++            final_entered: Notify::new(),
++            release: Semaphore::new(0),
++            final_attempts: AtomicUsize::new(0),
++            empty_page_entered: Notify::new(),
++            empty_page_release: Semaphore::new(0),
++            paused_empty_page: AtomicBool::new(false),
++            block_read: AtomicUsize::new(0),
++            read_entered: Notify::new(),
++        }
++    }
++}
++impl StateStore for FinalCommitStore {
++    fn capabilities(&self) -> StateStoreCapabilities {
++        self.inner.capabilities()
++    }
++    fn find_request<'a>(
++        &'a self,
++        s: &'a Scope,
++        session: &'a Id,
++        request: &'a Id,
++    ) -> PortFuture<'a, Option<StoredRun>> {
++        Box::pin(async move {
++            if self
++                .block_read
++                .compare_exchange(3, 0, Ordering::SeqCst, Ordering::SeqCst)
++                .is_ok()
++            {
++                self.read_entered.notify_one();
++                std::future::pending::<()>().await;
++            }
++            self.inner.find_request(s, session, request).await
++        })
++    }
++    fn admit<'a>(&'a self, s: &'a Scope, input: AdmissionInput) -> PortFuture<'a, AdmissionResult> {
++        self.inner.admit(s, input)
++    }
++    fn load<'a>(&'a self, s: &'a Scope, r: &'a Id) -> PortFuture<'a, StoredRun> {
++        Box::pin(async move {
++            if self
++                .block_read
++                .compare_exchange(1, 0, Ordering::SeqCst, Ordering::SeqCst)
++                .is_ok()
++            {
++                self.read_entered.notify_one();
++                std::future::pending::<()>().await;
++            }
++            self.inner.load(s, r).await
++        })
++    }
++    fn load_session<'a>(&'a self, s: &'a Scope, r: &'a Id) -> PortFuture<'a, SessionSnapshot> {
++        self.inner.load_session(s, r)
++    }
++    fn check_lease<'a>(
++        &'a self,
++        s: &'a Scope,
++        r: &'a Id,
++        l: &'a RunLease,
++        n: i64,
++    ) -> PortFuture<'a, RunLease> {
++        self.inner.check_lease(s, r, l, n)
++    }
++    fn acquire_lease<'a>(
++        &'a self,
++        s: &'a Scope,
++        r: &'a Id,
++        o: &'a Id,
++        n: i64,
++        t: u64,
++    ) -> PortFuture<'a, RunLease> {
++        self.inner.acquire_lease(s, r, o, n, t)
++    }
++    fn renew_lease<'a>(
++        &'a self,
++        s: &'a Scope,
++        r: &'a Id,
++        l: &'a RunLease,
++        n: i64,
++        t: u64,
++    ) -> PortFuture<'a, RunLease> {
++        self.inner.renew_lease(s, r, l, n, t)
++    }
++    fn release_lease<'a>(
++        &'a self,
++        s: &'a Scope,
++        r: &'a Id,
++        l: &'a RunLease,
++        n: i64,
++    ) -> PortFuture<'a, ()> {
++        self.inner.release_lease(s, r, l, n)
++    }
++    fn read_events<'a>(
++        &'a self,
++        s: &'a Scope,
++        r: &'a Id,
++        after: u64,
++        limit: usize,
++    ) -> PortFuture<'a, EventPage> {
++        Box::pin(async move {
++            if self
++                .block_read
++                .compare_exchange(2, 0, Ordering::SeqCst, Ordering::SeqCst)
++                .is_ok()
++            {
++                self.read_entered.notify_one();
++                std::future::pending::<()>().await;
++            }
++            let page = self.inner.read_events(s, r, after, limit).await?;
++            if matches!(self.mode, FinalCommitMode::PauseEmptyEventPage)
++                && page.events.is_empty()
++                && !self.paused_empty_page.swap(true, Ordering::SeqCst)
++            {
++                self.empty_page_entered.notify_one();
++                self.empty_page_release.acquire().await.unwrap().forget();
++            }
++            Ok(page)
++        })
++    }
++    fn read_record<'a>(
++        &'a self,
++        s: &'a Scope,
++        r: &'a RecordRef,
++    ) -> PortFuture<'a, ProtectedRecord> {
++        self.inner.read_record(s, r)
++    }
++    fn commit<'a>(
++        &'a self,
++        s: &'a Scope,
++        r: &'a Id,
++        input: CommitInput,
++    ) -> PortFuture<'a, StoredRun> {
++        Box::pin(async move {
++            if !input.snapshot.status.is_terminal() {
++                return self.inner.commit(s, r, input).await;
++            }
++            self.final_attempts.fetch_add(1, Ordering::SeqCst);
++            self.final_entered.notify_one();
++            match self.mode {
++                FinalCommitMode::Reject => Err(ContractError::new(
++                    ErrorCode::PersistenceUnavailable,
++                    "final.commit",
++                )),
++                FinalCommitMode::LoseAcknowledgement => {
++                    self.inner.commit(s, r, input).await?;
++                    Err(ContractError::new(
++                        ErrorCode::PersistenceUnavailable,
++                        "final.ack",
++                    ))
++                }
++                FinalCommitMode::Pause => {
++                    self.release.acquire().await.unwrap().forget();
++                    self.inner.commit(s, r, input).await
++                }
++                FinalCommitMode::PauseEmptyEventPage | FinalCommitMode::PassThrough => {
++                    self.inner.commit(s, r, input).await
++                }
++            }
++        })
++    }
++}
++impl Fixture {
++    pub fn new(response: Response, gated: bool) -> Self {
++        Self {
++            store: Arc::new(MemoryStateStore::new()),
++            policy: Arc::new(Policy::default()),
++            catalog: Arc::new(Catalog::default()),
++            router: Arc::new(Router::new()),
++            inspector: Arc::new(Inspector {
++                calls: AtomicUsize::new(0),
++            }),
++            estimator: Arc::new(Estimator {
++                calls: AtomicUsize::new(0),
++                tokens: AtomicUsize::new(32),
++            }),
++            model: Arc::new(Model::new(response, gated)),
++            clock: Arc::new(TestClock::new()),
++            ids: Arc::new(Ids::default()),
++        }
++    }
++    pub fn bindings(&self) -> AgentBindings {
++        let gate = Arc::new(PolicyGate::new(self.policy.clone(), Duration::from_secs(1)).unwrap());
++        AgentBindings {
++            scope: scope(),
++            state: self.store.clone(),
++            policy: gate.clone(),
++            profile_resolver: self.catalog.clone(),
++            model_exchange: Arc::new(
++                ModelExchange::new(self.model.clone(), gate)
++                    .with_route_inspector(self.inspector.clone(), Duration::from_secs(1))
++                    .unwrap(),
++            ),
++            router: self.router.clone(),
++            host_instructions: vec!["Trusted host rules".into()],
++            system_inputs: SystemInputRegistry::new(vec![]).unwrap(),
++            clock: self.clock.clone(),
++            ids: self.ids.clone(),
++            token_estimator: self.estimator.clone(),
++            settings: AgentSettings {
++                observer_poll_ms: 1,
++                heartbeat_interval_ms: 100,
++                lease_ttl_ms: 1000,
++                max_output_tokens: 128.try_into().unwrap(),
++                ..AgentSettings::default()
++            },
++        }
++    }
++    pub fn agent(&self) -> Agent {
++        create_agent(profile(), self.bindings()).unwrap()
++    }
++    pub async fn started(&self, agent: &Agent, name: &str) -> RunHandle {
++        completed(agent.start(request(name), context()).await.unwrap())
++    }
++}
+diff --git a/docs/agents.md b/docs/agents.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..d1c0a1dc7b911fba8406194d732d3797a4c957c8
+--- /dev/null
++++ b/docs/agents.md
+@@ -0,0 +1,99 @@
++# Run a text agent
++
++`create_agent` builds a scope-bound facade from an `AgentProfile` and existing
++Host components. The current runtime executes text requests through admission,
++context preparation, model routing, and a persisted turn-ended outcome. It also
++provides event replay and explicit cancellation.
++
++```rust,ignore
++let agent = create_agent(profile, bindings)?;
++let handle = match agent.start(request, context.clone()).await? {
++    Guarded::Completed(handle) => handle,
++    Guarded::ApprovalRequired(challenge) => return handle_approval(challenge),
++};
++let outcome = handle.outcome(&context).await?;
++```
++
++The [complete standalone consumer](../tests/support/agent_consumer.rs) configures
++the Host components, executes a request with synthetic models, reconnects to its
++events, and reopens its SQLite state. Run the extracted-package examples with
++`python3 scripts/check-package.py --allow-dirty`.
++
++## Supply Host components
++
++`AgentBindings` contains the exact scope, `StateStore`, current `PolicyGate`,
++`ProfileResolver`, pinned `ModelRouter`, configured `ModelExchange`, trusted Host
++instructions, `SystemInputRegistry`, clock, ID source, token estimator, and
++`AgentSettings`. A single Agent instance owns one scope; use separately configured
++instances for other scopes.
++
++Constructing the Agent validates profile structure and finite settings. It does
++not invoke component callbacks, open connections, create a runtime, spawn tasks,
++or read environment files. The Host supplies Tokio before calling `start`.
++Metadata resolution and model work begin only during execution.
++
++`ModelTokenEstimator` estimates the final request for its selected route. It is a
++synchronous Host callback with no I/O. Its estimate is used for capacity checks
++and remains separate from provider-reported usage. `AgentSettings` bounds output,
++request/response/context sizes, admission preparation, lease renewal, and observer
++polling. Run-wide model, tool, recovery, and elapsed limits come from the profile.
++
++The initial driver supports text instructions, text output, the bounded context
++strategy without additional strategy version/configuration, and `turn_end` completion.
++Profiles requiring Tool execution, Skills,
++Hooks, automatic context sources, asset loading, or verified completion are
++rejected explicitly until those execution components are connected. Their
++configuration is never silently removed to make a request run.
++
++## Start, replay, and observe
++
++`start` checks current admission permission and looks up the request under its
++scope, session, and request ID before resolving current metadata. An identical
++request returns the original Run. Changed input, model options, or effective
++system values conflicts with the stored request. For `start`, omitted system
++inputs mean an empty map. Atomic admission decides concurrent requests; only the
++newly created Run starts a driver.
++
++The driver owns its lease, heartbeat, cancellation signal, and state transitions.
++Dropping the start Future after it has been polled, a RunHandle, an outcome Future,
++or an event Stream does not cancel accepted execution. Observer context
++cancellation stops observation separately from the run's execution token.
++
++`get_run` returns an authorized `RunView`. `get_run_details` requires the separate
++details permission and returns the protected checkpoint. `RunHandle.outcome`
++returns a `Guarded<RunOutcome>` read from the store; a text delta or finish
++notification is not completion authority. If completion cannot be saved, the
++observer receives an execution/storage error rather than a fabricated success.
++
++`RunHandle.events(after_seq, context)` returns durable `EventView` metadata after
++the cursor. It rechecks current permission while yielding and does not publish
++protected record references. A slow or disconnected subscriber cannot restart or
++block the driver. Reconnecting replays the remaining committed sequence.
++
++## Cancel and finish
++
++`handle.cancel(reason, &context)` checks `CancelRun` permission and returns a
++`Guarded<CancelReceipt>`:
++
++| Receipt | Meaning |
++| --- | --- |
++| `Requested` | The local driver received the cancellation signal; observe its saved outcome for completion |
++| `AlreadyTerminal` | The stored result is already terminal and stays unchanged |
++| `NotLocal` | This instance owns no live driver for the Run; no remote cancellation was accepted |
++
++Success records `completion_basis=turn_ended`. This says the model completed its
++turn under the configured output contract; it does not claim external business
++verification. Failure, cancellation, and budget exhaustion have distinct outcomes.
++Already stored response text can be retained as partial output without becoming
++a successful assistant transcript. Unfinished stream deltas are not guaranteed
++to survive an interrupted collector.
++
++Opaque continuation returned by a successful model is stored in protected records
++with the assistant transcript. A later Run can reuse it only under the exact
++matching route. Changing providers or route identity fails before transmitting
++foreign continuation. The original session prompt remains pinned.
++
++`resume` has a public command shape, but waiting-command consumption and recovery
++of interrupted external effects are not implemented by this initial driver.
++Replaying `start` is not a substitute for that recovery operation. Durable state
++can still be inspected after a process stops.
+diff --git a/docs/contracts.md b/docs/contracts.md
+index 7f1641e3d29dfcb184bd8cfbc0f2e624e7329c8d..d04b08d05d81f713fcdbf8cf838e159efb16d2f3 100644
+--- a/docs/contracts.md
++++ b/docs/contracts.md
+@@ -1,7 +1,8 @@
+ # Data contracts and profile validation
+ 
+ Wickle provides profile validation, scoped state and policy contracts, and a
+-bounded model-call boundary. The full agent loop and runtime component assembly
++bounded model-call boundary. The [text agent runtime](agents.md) connects these
++contracts to Agent and RunHandle. Tool execution and runtime component assembly
+ are still being implemented.
+ 
+ `AgentProfile` contains data and registered references. A `ProfileResolver` is
+diff --git a/tests/support/agent_consumer.rs b/tests/support/agent_consumer.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..6dbfda3e2f22dd801a615eb4c0ae881261007548
+--- /dev/null
++++ b/tests/support/agent_consumer.rs
+@@ -0,0 +1,396 @@
++// Synthetic adapters and metadata inspector: no provider network calls are made.
++// The fixed clock supports deterministic accounting; this does not test timeouts.
++use futures_util::{TryStreamExt, stream};
++use serde_json::json;
++use std::collections::BTreeSet;
++use std::{
++    sync::{
++        Arc,
++        atomic::{AtomicUsize, Ordering},
++    },
++    time::Duration,
++};
++use wickle::*;
++use wickle_model_router::{ModelDispatcherEntry, PolicyModelRouter, RegistryModelDispatcher};
++use wickle_state_sqlite::SqliteStateStore;
++
++fn id(s: &str) -> Id {
++    Id::new(s).expect("example identifiers")
++}
++struct Catalog;
++impl ProfileResolver for Catalog {
++    fn resolve<'a>(
++        &'a self,
++        r: &'a ComponentRef,
++        _: &'a Scope,
++    ) -> PortFuture<'a, ComponentMetadata> {
++        Box::pin(async move {
++            Ok(ComponentMetadata {
++                reference: ComponentRef {
++                    version: Some(id("revision-1")),
++                    ..r.clone()
++                },
++                contract_version: 1,
++                manifest_digest: canonical_digest(&json!("registered model")),
++                config_schema: json!({"type":"object","additionalProperties":false}),
++                dependencies: vec![],
++                capabilities: BTreeSet::new(),
++                required_capabilities: BTreeSet::new(),
++                required_connections: BTreeSet::new(),
++                model_name: None,
++                hook_position: None,
++                exports: vec![],
++            })
++        })
++    }
++}
++
++fn reference(name: &str) -> VersionedRef {
++    VersionedRef {
++        id: id(name),
++        version: id("1"),
++    }
++}
++fn routing_snapshot(scope: &Scope) -> Result<RoutingSnapshot, ContractError> {
++    let mut models = vec![];
++    let mut bindings = vec![];
++    for name in ["first", "second"] {
++        let capabilities = ModelCapabilities {
++            revision: id("capabilities"),
++            features: BTreeSet::from([id("text")]),
++            options_schema: json!({"type":"object","properties":{"reasoning_effort":{"enum":["high"]}},"additionalProperties":false}),
++            context_window: 4096.try_into().unwrap(),
++            max_output_tokens: 512.try_into().unwrap(),
++        };
++        let model = ModelDefinition {
++            model_key: id(name),
++            family: id("example"),
++            provider: id(name),
++            model_id: id("example-model"),
++            model_version: id("release-1"),
++            version_semantics: VersionSemantics::Pinned,
++            lifecycle: ModelLifecycle::Active,
++            capabilities: capabilities.clone(),
++            evidence: vec![],
++        };
++        let mut binding = ModelBinding {
++            binding: reference(name),
++            model: model.reference(),
++            requested_model: model.model_id.clone(),
++            adapter: reference("adapter"),
++            connection_ref: reference(&format!("{name}-account")),
++            target: JsonObject::new(),
++            target_schema: json!({"type":"object","additionalProperties":false}),
++            api_contract: ApiContract {
++                operation: id("messages"),
++                version: id("v1"),
++            },
++            deployment_revision: None,
++            version_semantics: VersionSemantics::Pinned,
++            capabilities,
++            support: ModelSupportStatus::ContractTested,
++            evidence: vec![],
++        };
++        binding.evidence.push(ModelValidationEvidence {
++            kind: ModelValidationKind::ContractTest,
++            binding_digest: binding.contract_digest(&model)?,
++            checked_at_ms: 1000,
++            evidence_ref: id("synthetic-fixture"),
++            passed: true,
++        });
++        models.push(model);
++        bindings.push(binding);
++    }
++    RoutingSnapshot::new(
++        ModelCatalogSnapshot {
++            revision: id("catalog"),
++            scope: scope.clone(),
++            models,
++            bindings,
++            aliases: vec![],
++        },
++        RoutingPolicy {
++            revision: id("policy"),
++            scope: scope.clone(),
++            rules: vec![RoutingRule {
++                model_binding: id("primary"),
++                purpose: ModelPurpose::Agent,
++                primary: reference("first"),
++                fallbacks: vec![reference("second")],
++                fallback_on: vec![ModelFailureKind::RateLimited],
++                version_policy: VersionPolicy::RequirePinned,
++                min_support: ModelSupportStatus::ContractTested,
++            }],
++        },
++    )
++}
++struct TemporaryDatabase(std::path::PathBuf);
++impl Drop for TemporaryDatabase {
++    fn drop(&mut self) {
++        let _ = std::fs::remove_dir_all(&self.0);
++    }
++}
++
++struct ExampleClock;
++impl Clock for ExampleClock {
++    fn now(&self) -> Result<ClockReading, ContractError> {
++        Ok(ClockReading {
++            utc_ms: 1000,
++            monotonic_ms: 1000,
++        })
++    }
++    fn sleep_until<'a>(&'a self, _: u64) -> PortFuture<'a, ()> {
++        Box::pin(std::future::pending())
++    }
++}
++struct ExamplePolicy;
++impl PolicyPort for ExamplePolicy {
++    fn authorize<'a>(
++        &'a self,
++        request: &'a PolicyRequest,
++        _: PolicyContext<'a>,
++    ) -> PortFuture<'a, PolicyDecision> {
++        Box::pin(async move {
++            if let PolicyAction::InvokeModel { route, .. } = &request.action {
++                if route.connection_ref.id == id(&format!("{}-account", route.provider)) {
++                    return Ok(PolicyDecision::Allow {});
++                }
++            }
++            Ok(
++                if matches!(request.action, PolicyAction::InvokeModel { .. }) {
++                    PolicyDecision::Deny {
++                        reason: id("unknown-account"),
++                    }
++                } else {
++                    PolicyDecision::Allow {}
++                },
++            )
++        })
++    }
++}
++struct ExampleInspector;
++// This echo is a fixture only. A real inspector must read authoritative provider
++// metadata instead of presenting requested values as independently observed facts.
++impl ModelRouteInspector for ExampleInspector {
++    fn inspect<'a>(
++        &'a self,
++        route: &'a ResolvedModelRoute,
++        _: &'a ModelInspectionContext,
++    ) -> PortFuture<'a, ModelRouteObservation> {
++        Box::pin(async move {
++            Ok(ModelRouteObservation {
++                route_digest: route.digest(),
++                availability: ModelRouteAvailability::Available,
++                model_id: Some(route.model_id.clone()),
++                model_version: Some(route.model_version.clone()),
++                deployment_revision: None,
++                version_semantics: VersionSemantics::Pinned,
++                evidence_ref: id("synthetic-metadata-check"),
++            })
++        })
++    }
++}
++struct ExampleModel {
++    route: ResolvedModelRoute,
++    calls: AtomicUsize,
++    fail: bool,
++}
++impl ModelPort for ExampleModel {
++    fn binding(&self) -> ModelPortBinding {
++        ModelPortBinding {
++            provider: self.route.provider.clone(),
++            adapter: self.route.adapter.clone(),
++            connection_ref: self.route.connection_ref.clone(),
++        }
++    }
++    fn generate<'a>(
++        &'a self,
++        request: &'a ModelRequest,
++        _: &'a ModelCallContext,
++    ) -> PortStream<'a, ModelEvent> {
++        assert_eq!(
++            request.options.get("reasoning_effort"),
++            Some(&json!("high"))
++        );
++        assert_eq!(request.route, self.route);
++        self.calls.fetch_add(1, Ordering::SeqCst);
++        let events = if self.fail {
++            vec![Ok(ModelEvent::ResponseError {
++                kind: ModelFailureKind::RateLimited,
++                metadata: ModelResponseMetadata::default(),
++            })]
++        } else {
++            vec![
++                Ok(ModelEvent::TextDelta {
++                    text: "second provider result".into(),
++                }),
++                Ok(ModelEvent::ResponseCompleted {
++                    finish: ModelFinish::Stop,
++                    metadata: ModelResponseMetadata::default(),
++                    continuation: vec![],
++                }),
++            ]
++        };
++        Box::pin(stream::iter(events))
++    }
++}
++struct Estimate;
++impl ModelTokenEstimator for Estimate {
++    fn estimate(&self, request: &ModelRequest) -> Result<u64, ContractError> {
++        // Conservative test estimate; it is not provider-measured token usage.
++        serde_json::to_vec(request)
++            .map(|bytes| bytes.len() as u64)
++            .map_err(|_| ContractError::new(ErrorCode::InvalidContext, "example.estimate"))
++    }
++}
++fn completed<T>(value: Guarded<T>) -> Result<T, Box<dyn std::error::Error>> {
++    match value {
++        Guarded::Completed(value) => Ok(value),
++        Guarded::ApprovalRequired(_) => Err("unexpected approval".into()),
++    }
++}
++
++#[tokio::main(flavor = "current_thread")]
++async fn main() -> Result<(), Box<dyn std::error::Error>> {
++    let scope = Scope {
++        tenant_id: id("tenant"),
++        workspace_id: id("workspace"),
++        user_id: None,
++    };
++    let temporary = TemporaryDatabase(
++        std::env::temp_dir().join(format!("wickle-agent-{}", RandomIdSource.next_id()?)),
++    );
++    std::fs::create_dir(&temporary.0)?;
++    let database = temporary.0.join("state.sqlite3");
++    let store = Arc::new(SqliteStateStore::open(&database)?);
++    let snapshot = routing_snapshot(&scope)?;
++    let first = Arc::new(ExampleModel {
++        route: snapshot.route_for_binding(&reference("first"))?,
++        calls: AtomicUsize::new(0),
++        fail: true,
++    });
++    let second = Arc::new(ExampleModel {
++        route: snapshot.route_for_binding(&reference("second"))?,
++        calls: AtomicUsize::new(0),
++        fail: false,
++    });
++    let policy = Arc::new(PolicyGate::new(
++        Arc::new(ExamplePolicy),
++        Duration::from_secs(1),
++    )?);
++    let exchange = Arc::new(
++        ModelExchange::with_dispatcher(
++            Arc::new(RegistryModelDispatcher::new(vec![
++                ModelDispatcherEntry {
++                    scope: scope.clone(),
++                    port: first.clone(),
++                },
++                ModelDispatcherEntry {
++                    scope: scope.clone(),
++                    port: second.clone(),
++                },
++            ])?),
++            policy.clone(),
++        )
++        .with_route_inspector(Arc::new(ExampleInspector), Duration::from_secs(1))?,
++    );
++    let profile = AgentProfile::from_json(
++        r#"{
++        "schema_version":"wickle.agent-profile.v1","agent_id":"assistant","version":"1.0.0",
++        "name":"Assistant","description":"Agent consumer","instructions":{"text":"Use supplied information"},
++        "model_binding":"primary","tools":[],"skills":[],"connectors":[],
++        "context_policy":{"strategy":"bounded"},"output_contract":{"type":"text"},
++        "limits":{"max_model_calls":4,"max_tool_attempts":0,"max_repair_attempts":0,"max_recovery_attempts":2,"max_elapsed_ms":10000}
++    }"#,
++    )?;
++    let agent = create_agent(
++        profile,
++        AgentBindings {
++            scope: scope.clone(),
++            state: store.clone(),
++            policy,
++            profile_resolver: Arc::new(Catalog),
++            model_exchange: exchange,
++            router: Arc::new(PolicyModelRouter::new(snapshot)?),
++            host_instructions: vec!["Preserve the requested output.".into()],
++            system_inputs: SystemInputRegistry::new(vec![])?,
++            clock: Arc::new(ExampleClock),
++            ids: Arc::new(RandomIdSource),
++            token_estimator: Arc::new(Estimate),
++            settings: AgentSettings {
++                max_output_tokens: 128.try_into()?,
++                require_durable: true,
++                ..AgentSettings::default()
++            },
++        },
++    )?;
++    assert_eq!(first.calls.load(Ordering::SeqCst), 0);
++    assert_eq!(second.calls.load(Ordering::SeqCst), 0);
++    let context = ExecutionContext::new(
++        ExecutionContextData {
++            scope: scope.clone(),
++            principal_ref: id("actor"),
++            capability_grant_ref: id("grant"),
++            trace_context: None,
++            system_inputs: None,
++        },
++        Default::default(),
++    );
++    let request = RunRequest {
++        request_id: id("request"),
++        session_id: id("session"),
++        input: vec![InputContent::Text {
++            text: "Retrieve the available result".into(),
++        }],
++        trigger: RunTrigger::User {},
++        model_options: JsonObject::from([("reasoning_effort".into(), json!("high"))]),
++        output_contract: None,
++    };
++    let handle = completed(agent.start(request.clone(), context.clone()).await?)?;
++    let run_id = handle.run_id().clone();
++    let mut events = handle.events(0, context.clone());
++    use futures_util::StreamExt;
++    let started = events.next().await.ok_or("missing admission event")??;
++    assert_eq!(started.event_type, "run.started");
++    drop(events);
++    let outcome = completed(handle.outcome(&context).await?)?;
++    assert_eq!(
++        outcome.result,
++        OutcomeResult::Succeeded {
++            completion_basis: CompletionBasis::TurnEnded
++        }
++    );
++    assert_eq!(
++        outcome.output,
++        vec![InputContent::Text {
++            text: "second provider result".into()
++        }]
++    );
++    assert_eq!(outcome.usage.model_calls, 2);
++    assert_eq!(outcome.usage.recovery_attempts, 1);
++    let replay = completed(agent.start(request, context.clone()).await?)?;
++    assert_eq!(replay.run_id(), &run_id);
++    assert_eq!(completed(replay.outcome(&context).await?)?, outcome);
++    assert_eq!(first.calls.load(Ordering::SeqCst), 1);
++    assert_eq!(second.calls.load(Ordering::SeqCst), 1);
++    let view = completed(agent.get_run(&run_id, &context).await?)?;
++    assert_eq!(view.status, RunStatus::Succeeded);
++    let events: Vec<_> = handle
++        .events(started.seq.get(), context.clone())
++        .try_collect()
++        .await?;
++    assert_eq!(
++        events.last().ok_or("missing finish event")?.event_type,
++        "run.finished"
++    );
++    drop(store);
++    let restored = SqliteStateStore::open(&database)?
++        .load(&scope, &run_id)
++        .await?;
++    assert_eq!(restored.snapshot.outcome, Some(outcome));
++    assert!(restored.session.active_run_id.is_none());
++    println!(
++        "agent consumer: pure construction, detached execution after observer drop, fallback under shared budgets, stored outcome and event replay, duplicate request without new model calls, SQLite reopen"
++    );
++    Ok(())
++}

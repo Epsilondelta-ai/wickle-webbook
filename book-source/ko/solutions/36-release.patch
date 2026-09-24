@@ -1,0 +1,1641 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..633822b1de0e43d06c50a2342d849d8be60200f8
+--- /dev/null
++++ b/CHANGELOG.md
+@@ -0,0 +1,15 @@
++# Changelog
++
++## 0.1.0
++
++Initial MIT-licensed release of the embeddable Rust agent engine.
++
++- Profile-driven serial model/tool loops with scoped policy, system-owned tool inputs and bounded budgets.
++- Persisted outcomes, event replay, approval/input/external waits and explicit recovery.
++- Versioned model routing and seven separate provider adapters.
++- Context sources, Skills, artifacts, lifecycle hooks, context compaction and output verification.
++- Reviewed MCP stdio tools, SQLite reference storage and external event Host examples.
++
++See [model validation](docs/model-support.md) for the difference between local
++contract checks and limited live smoke evidence. Version 0.1.0 does not promise
++a stable API or general production readiness.
+diff --git a/CONTRIBUTING.md b/CONTRIBUTING.md
+index 8e617bbd14f96806d3553a3e6ec55dc7f6b40c80..784ebe472e0ebf79a5b65095a622f17b98ac1d56 100644
+--- a/CONTRIBUTING.md
++++ b/CONTRIBUTING.md
+@@ -16,11 +16,11 @@ cargo doc --workspace --no-deps --locked
+ python3 scripts/check-package.py
+ ```
+ 
+-The package check builds a `.crate`, extracts it outside the checkout, and builds
+-and runs a separate Rust consumer with its own target directory. Use
+-`--allow-dirty` to check uncommitted changes. The consumer validates a profile
+-through a Host resolver, persists and restores it, and checks its pinned identity.
+-Agent execution is not implemented yet.
++The package check builds all library archives, extracts them outside the checkout,
++and runs focused consumers plus two independent business workspaces. It verifies
++model/tool execution, persistence, extension contracts, process recovery and
++unchanged core package digests. Use `--allow-dirty` for uncommitted changes.
++See [integration validation](docs/integration-validation.md) for the exact scope.
+ 
+ Tests use insertion-ordered JSON objects so digest tests can detect a missing
+ sorting step. Library-only builds also run separately from test feature unification.
+diff --git a/Cargo.toml b/Cargo.toml
+index 227180c33dd2e9952cbc5784deac710f388934f8..da8b0d3288cf669ea38c58a1e89f328446735593 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -5,6 +5,7 @@ resolver = "3"
+ 
+ [workspace.package]
+ version = "0.1.0"
++license = "MIT"
+ edition = "2024"
+ rust-version = "1.85"
+ repository = "https://github.com/Epsilondelta-ai/wickle"
+diff --git a/LICENSE b/LICENSE
+new file mode 100644
+index 0000000000000000000000000000000000000000..fa110f6cca190273b8a205aaff2a0cec1684e255
+--- /dev/null
++++ b/LICENSE
+@@ -0,0 +1,21 @@
++MIT License
++
++Copyright (c) 2026 EpsilonDelta
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++SOFTWARE.
+diff --git a/README.de.md b/README.de.md
+index b7e4e8131a8d73f7481fa40b9100059caf1cc5e2..4742f12ee69b9d3f50719c406c19f9c061da2d94 100644
+--- a/README.de.md
++++ b/README.de.md
+@@ -2,32 +2,91 @@
+ 
+ [English](README.md) | [한국어](README.ko.md) | [日本語](README.ja.md) | [简体中文](README.zh-CN.md) | [Español](README.es.md) | [Français](README.fr.md) | **Deutsch** | [Русский](README.ru.md)
+ 
+-**Eine erweiterbare Agenten-Engine von EpsilonDelta.**
++**Eine erweiterbare Agenten-Engine für Rust.**
++
++Bette Agenten mit konfigurierbaren Profilen, Modellen und Werkzeugen in deine Anwendung ein. Wickle führt Modellentscheidungen und Werkzeugaufrufe im selben Prozess aus. Datenzugriff, Zugangsdaten und Berechtigungen stellt die Anwendung bereit.
+ 
+ <p align="center">
+-  <img src="assets/mascot/wickle.png" alt="Das Wickle-Maskottchen, ein Igel, der in einem Laufrad läuft" width="420" />
++  <img src="assets/mascot/wickle.png" alt="Wickle" width="320" />
+ </p>
+ 
+-Wickle ist eine Agenten-Engine, die EpsilonDelta in Rust entwickelt. Ziel ist eine in Anwendungen einbettbare Bibliothek, die den Zyklus aus Modellentscheidungen und Werkzeugaufrufen ausführt.
++## Installation
++
++Benötigt Rust 1.85 oder neuer und Tokio. Verwende denselben Git-Tag für den Kern und die Adapter. v0.1.0 wird über GitHub Releases verteilt.
++
++```toml
++[dependencies]
++wickle = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
++wickle-model-openai = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
++wickle-model-router = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
++```
++
++## Einen Agenten ausführen
++
++Lege Anweisungen, Werkzeuge, Modellbindung und Grenzen im `AgentProfile` fest. Konfiguriere `AgentBindings` mit Modell, Zustandsspeicher und Richtlinien und übergib einen `RunRequest` mit authentifiziertem `ExecutionContext`.
++
++```rust
++use wickle::*;
++
++pub async fn run_once(
++    profile: AgentProfile,
++    bindings: AgentBindings,
++    request: RunRequest,
++    context: ExecutionContext,
++) -> Result<Guarded<RunOutcome>, ContractError> {
++    let agent = create_agent(profile, bindings)?;
++    match agent.start(request, context.clone()).await? {
++        Guarded::Completed(handle) => handle.outcome(&context).await,
++        Guarded::ApprovalRequired(challenge) => {
++            Ok(Guarded::ApprovalRequired(challenge))
++        }
++    }
++}
++```
+ 
+-Der Entwurf verwendet Agentenprofile (Agent Profiles) zur Konfiguration des Agentenverhaltens und Adapter zur Anbindung verschiedener Modelle und Werkzeuge.
++`start` liefert ein Ausführungshandle, `outcome` das gespeicherte Ergebnis. `Guarded::ApprovalRequired` erfordert eine Freigabe durch die Anwendung. Das Beispiel nimmt bereits konfigurierte Komponenten entgegen; deren Einrichtung erklärt die Agentenanleitung.
+ 
+-**Status:** In Entwicklung. Agenten unterstützen sequenzielle Modell- und Werkzeugaufrufe, getrennte Systemeingaben, gespeicherte Ergebnisse, Ereigniswiedergabe, Abbruch und die Fortsetzung gespeicherter Wartezustände für Genehmigungen, Eingaben oder externe Wirkungen. Fortsetzungsbefehle werden dedupliziert; externe Wirkungen müssen vom Host geprüft werden. Lifecycle-Hooks unterstützen begrenzte Kontext- und Argumenttransformationen sowie die Beobachtung gespeicherter Ergebnisse. Tool-/Hook-/ContextSource-Exporte von Adaptern verwenden festgelegte Konfigurationen und segmentgebundene Instanzen, deren Ressourcen am Segmentende freigegeben werden. [Adapter-Laufzeit](docs/adapters.md). Unterbrochene Läufe können mit geprüfter Ausführungsberechtigung, gespeicherten Eingaben und Abgleich externer Wirkungen wiederhergestellt werden. [Wiederherstellung](docs/recovery.md). [Agenten ausführen](docs/agents.md) · [Datenverträge](docs/contracts.md).
++## Funktionen
+ 
+-Schreibgeschützte [Kontextquellen](docs/context-sources.md) unterstützen Abrufe pro Run oder Modellschritt, gespeicherte Datenpakete und die Prüfung aktueller Zugriffsrechte bei erneuter Nutzung.
++- **Getrennte Eingaben:** Das Modell liefert seine Argumente; vertrauenswürdige IDs werden aus Systemeingaben ergänzt.
++- **Persistenz:** Ergebnisse, Ereignisse, Freigabe- und Eingabewartezustände sowie explizite Wiederaufnahme und Wiederherstellung.
++- **Erweiterungen:** Werkzeuge, ContextSource, Skills, Hooks und MCP stdio.
++- **Ausführungsgrenzen:** Modellaufrufe, Werkzeugversuche, Korrekturen und Laufzeit.
++- **Zugriffskontrolle:** Host-Richtlinien und getrennte Organisations- und Arbeitsbereichsgrenzen.
++- **Kontext und Ausgabe:** Artefakte, Belege, Kontextkomprimierung und Ergebnisvalidierung.
+ 
+-[Skills](docs/skills.md) lädt vollständige Anweisungen einer festgelegten Version über registrierte Tools. [Artifacts](docs/artifacts.md) bewahrt Originale innerhalb ihres Geltungsbereichs, begrenzte Vorschauen und Quellenbelege auf.
++## Modellanbieter und Adapter
+ 
+-Die [Kontextauswahl und -komprimierung](docs/context-compaction.md) bewahrt den ursprünglichen Gesprächsverlauf und verwendet begrenzte Vorschauen sowie geprüfte Zusammenfassungen. Modellbasierte Komprimierung nutzt dasselbe Run-Budget.
++Diese Dienste lassen sich über optionale Crates anbinden. Modellversionen, Deployments, API-Verträge und Optionen werden explizit konfiguriert. Die Anleitungen beschreiben unterstützte Operationen und Einschränkungen.
+ 
+-Die [Ausgabeprüfung](docs/verification.md) unterstützt JSON-Schemas, versionierte Kriterien, begrenzte Überarbeitungen und die Genehmigung eines festgelegten Kandidaten. Modellbasierte Prüfungen nutzen dasselbe Run-Budget.
++| Provider | Crate |
++| --- | --- |
++| OpenAI GPT | `wickle-model-openai` |
++| Azure OpenAI / Microsoft Foundry | `wickle-model-azure-openai` |
++| Anthropic Claude | `wickle-model-anthropic` |
++| AWS Bedrock Claude | `wickle-model-bedrock` |
++| Google Gemini API / AI Studio | `wickle-model-gemini` |
++| Google Vertex AI Gemini | `wickle-model-vertex` |
++| xAI Grok | `wickle-model-xai` |
+ 
+-Der [Leitfaden für Modellanbieter](docs/model-providers.md) beschreibt die Anbindung von OpenAI, Azure OpenAI, Anthropic, AWS Bedrock, Gemini API, Vertex AI und xAI. Die Adapter nutzen gemeinsame Kernverträge und behalten eigene Zugangsdaten, API-Versionen und Verhaltensweisen.
++Verwende `wickle-state-sqlite` für lokale Persistenz und `wickle-adapter-runtime` zum Zusammenstellen von Erweiterungen. Speicher- und Graphdienste können ContextSource oder Werkzeuge implementieren; nachgelagerte Schreibvorgänge übernimmt ein externer Ereigniskonsument.
+ 
+-Die Anleitung für [MCP-Werkzeuge](docs/mcp.md) beschreibt die Verbindung geprüfter Werkzeuge über stdio.
++## Dokumentation
+ 
+-Die Anleitung für [Ereigniskonsumenten](docs/event-consumers.md) beschreibt die Übermittlung von Ausführungsdaten an Speicher- und Graphdienste durch den Host.
++- [Installation](docs/installation.md)
++- [Agenten, Anfragen und Ergebnisse](docs/agents.md)
++- [Werkzeuge und Systemeingaben](docs/tool-inputs.md)
++- [Kontext und Speicher](docs/context-sources.md)
++- [Skills](docs/skills.md)
++- [Hooks](docs/hooks.md)
++- [Modellrouting](docs/model-routing.md)
++- [Anbieterkonfiguration und Unterstützung](docs/model-providers.md)
++- [SQLite und Wiederherstellung](docs/sqlite-state-store.md)
++- [MCP](docs/mcp.md)
++- [Artefakte](docs/artifacts.md)
++- [Kontextkomprimierung](docs/context-compaction.md)
++- [Ausgabevalidierung](docs/verification.md)
+ 
+-Die [Versionsmatrix](docs/model-support.md) unterscheidet lokale Vertragstests von Prüfungen mit realen Diensten.
++## Lizenz
+ 
+-Die [Validierung unabhängiger Hosts](docs/integration-validation.md) prüft Paketgrenzen, Adapterwechsel und Wiederaufnahme über Prozessgrenzen hinweg.
++[MIT](LICENSE) · MIT © EpsilonDelta. Die 0.1-Reihe ist eine erste API und kann sich ändern.
+diff --git a/README.es.md b/README.es.md
+index 3cd7ab475d79fa12a84b1d28362a1327ce2039d6..c67ea2ee3a7015afc7e0a8a253c81b09406b7617 100644
+--- a/README.es.md
++++ b/README.es.md
+@@ -2,32 +2,91 @@
+ 
+ [English](README.md) | [한국어](README.ko.md) | [日本語](README.ja.md) | [简体中文](README.zh-CN.md) | **Español** | [Français](README.fr.md) | [Deutsch](README.de.md) | [Русский](README.ru.md)
+ 
+-**Un motor de agentes extensible de EpsilonDelta.**
++**Un motor de agentes extensible para Rust.**
++
++Integra agentes en tu aplicación mediante perfiles, modelos y herramientas. Wickle ejecuta el ciclo de decisiones y llamadas a herramientas dentro del mismo proceso. La aplicación proporciona acceso a datos, credenciales y autorización.
+ 
+ <p align="center">
+-  <img src="assets/mascot/wickle.png" alt="La mascota de Wickle, un erizo corriendo en una rueda de ejercicio" width="420" />
++  <img src="assets/mascot/wickle.png" alt="Wickle" width="320" />
+ </p>
+ 
+-Wickle es un motor de agentes que EpsilonDelta está desarrollando en Rust. Su objetivo es ofrecer una biblioteca integrable en aplicaciones que ejecute el ciclo de decisiones del modelo y llamadas a herramientas.
++## Instalación
++
++Requiere Rust 1.85 o posterior y Tokio. Usa la misma etiqueta Git para el núcleo y los adaptadores. v0.1.0 se distribuye mediante GitHub Releases.
++
++```toml
++[dependencies]
++wickle = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
++wickle-model-openai = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
++wickle-model-router = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
++```
++
++## Ejecutar un agente
++
++Define instrucciones, herramientas, modelo y límites en `AgentProfile`. Configura `AgentBindings` con el modelo, almacenamiento y políticas de tu aplicación; entrega un `RunRequest` junto con un `ExecutionContext` autenticado.
++
++```rust
++use wickle::*;
++
++pub async fn run_once(
++    profile: AgentProfile,
++    bindings: AgentBindings,
++    request: RunRequest,
++    context: ExecutionContext,
++) -> Result<Guarded<RunOutcome>, ContractError> {
++    let agent = create_agent(profile, bindings)?;
++    match agent.start(request, context.clone()).await? {
++        Guarded::Completed(handle) => handle.outcome(&context).await,
++        Guarded::ApprovalRequired(challenge) => {
++            Ok(Guarded::ApprovalRequired(challenge))
++        }
++    }
++}
++```
+ 
+-Su diseño utiliza perfiles de agente (Agent Profiles) para configurar el comportamiento de los agentes y adaptadores para conectar distintos modelos y herramientas.
++`start` devuelve un identificador de ejecución y `outcome` su resultado guardado. `Guarded::ApprovalRequired` indica que la aplicación debe obtener aprobación. El ejemplo recibe componentes previamente configurados; consulta la guía de agentes para prepararlos.
+ 
+-**Estado:** En desarrollo. Los agentes admiten llamadas secuenciales al modelo y a herramientas, entradas del sistema separadas, resultados persistentes, reproducción de eventos, cancelación y reanudación de esperas guardadas de aprobación, datos o confirmación de efectos externos. Los comandos de reanudación se deduplican; los efectos externos requieren verificación del Host. Los hooks del ciclo de vida permiten transformar contexto y argumentos con límites y observar resultados ya guardados. Los exports Tool/Hook/ContextSource de adaptadores usan una configuración fijada e instancias por segmento, que liberan sus recursos al finalizar. [Runtime de adaptadores](docs/adapters.md). Las ejecuciones interrumpidas pueden recuperarse validando la propiedad de ejecución, conservando las entradas y consultando los efectos externos. [Recuperación](docs/recovery.md). [Ejecutar un agente](docs/agents.md) · [Contratos de datos](docs/contracts.md).
++## Características
+ 
+-Las [fuentes de contexto](docs/context-sources.md) de solo lectura permiten consultar por Run o paso del modelo, guardar lotes y comprobar los permisos actuales al reutilizarlos.
++- **Entradas separadas:** el modelo aporta sus argumentos; los identificadores de confianza se inyectan desde entradas del sistema.
++- **Persistencia:** resultados, eventos, esperas de aprobación o entrada, reanudación y recuperación explícitas.
++- **Extensiones:** herramientas, ContextSource, Skills, Hooks y MCP stdio.
++- **Límites:** llamadas al modelo, intentos de herramientas, correcciones y tiempo de ejecución.
++- **Autorización:** políticas del Host y ámbitos de organización y espacio de trabajo.
++- **Contexto y resultados:** artefactos, evidencias, compresión y validación de salidas.
+ 
+-[Skills](docs/skills.md) carga instrucciones completas de una versión fija mediante una herramienta registrada. [Artifacts](docs/artifacts.md) conserva originales por ámbito, vistas previas limitadas y referencias de origen.
++## Proveedores y adaptadores
+ 
+-La [selección y compresión de contexto](docs/context-compaction.md) conserva la conversación original y aplica vistas previas limitadas y resúmenes validados. La compresión con modelos utiliza el mismo presupuesto del Run.
++Conecta estos servicios mediante crates opcionales. Configura explícitamente versiones de modelo, despliegues, contratos API y opciones. Consulta las guías para conocer operaciones y limitaciones.
+ 
+-La [verificación de resultados](docs/verification.md) admite esquemas JSON, criterios con versión fija, revisiones limitadas y aprobación de un candidato fijo. Las revisiones mediante modelos comparten el presupuesto del Run.
++| Provider | Crate |
++| --- | --- |
++| OpenAI GPT | `wickle-model-openai` |
++| Azure OpenAI / Microsoft Foundry | `wickle-model-azure-openai` |
++| Anthropic Claude | `wickle-model-anthropic` |
++| AWS Bedrock Claude | `wickle-model-bedrock` |
++| Google Gemini API / AI Studio | `wickle-model-gemini` |
++| Google Vertex AI Gemini | `wickle-model-vertex` |
++| xAI Grok | `wickle-model-xai` |
+ 
+-La [guía de proveedores de modelos](docs/model-providers.md) explica cómo conectar OpenAI, Azure OpenAI, Anthropic, AWS Bedrock, Gemini API, Vertex AI y xAI. Los adaptadores comparten los contratos del núcleo y conservan sus credenciales, versiones de API y diferencias de comportamiento.
++Usa `wickle-state-sqlite` para persistencia local y `wickle-adapter-runtime` para componer extensiones. Los servicios de memoria y grafos se conectan como ContextSource o herramientas; un consumidor externo gestiona las escrituras posteriores.
+ 
+-La guía de [herramientas MCP](docs/mcp.md) explica cómo conectar herramientas revisadas mediante stdio.
++## Documentación
+ 
+-La guía de [consumidores de eventos](docs/event-consumers.md) describe la entrega de registros a servicios de memoria y grafos desde el Host.
++- [Instalación](docs/installation.md)
++- [Agentes, solicitudes y resultados](docs/agents.md)
++- [Herramientas y entradas del sistema](docs/tool-inputs.md)
++- [Contexto y memoria](docs/context-sources.md)
++- [Skills](docs/skills.md)
++- [Hooks](docs/hooks.md)
++- [Enrutamiento](docs/model-routing.md)
++- [Proveedores y compatibilidad](docs/model-providers.md)
++- [SQLite y recuperación](docs/sqlite-state-store.md)
++- [MCP](docs/mcp.md)
++- [Artefactos](docs/artifacts.md)
++- [Compresión del contexto](docs/context-compaction.md)
++- [Validación de resultados](docs/verification.md)
+ 
+-La [matriz de versiones](docs/model-support.md) distingue las pruebas locales de contrato de las comprobaciones con servicios reales.
++## Licencia
+ 
+-La [validación de Hosts independientes](docs/integration-validation.md) comprueba el aislamiento de paquetes, el cambio de adaptadores y la recuperación entre procesos.
++[MIT](LICENSE) · MIT © EpsilonDelta. La serie 0.1 es una API inicial y puede cambiar.
+diff --git a/README.fr.md b/README.fr.md
+index e91eee2523bd2cf2e83f9775241f92e0119beed1..6ea6efff8477c0d66fa13df1e95f3b6ea308ecdd 100644
+--- a/README.fr.md
++++ b/README.fr.md
+@@ -2,32 +2,91 @@
+ 
+ [English](README.md) | [한국어](README.ko.md) | [日本語](README.ja.md) | [简体中文](README.zh-CN.md) | [Español](README.es.md) | **Français** | [Deutsch](README.de.md) | [Русский](README.ru.md)
+ 
+-**Un moteur d’agents extensible développé par EpsilonDelta.**
++**Un moteur d’agents extensible pour Rust.**
++
++Intégrez des agents à votre application à partir de profils, de modèles et d’outils. Wickle exécute la boucle de décisions et d’appels d’outils dans le même processus. L’application fournit les accès aux données, les identifiants et les autorisations.
+ 
+ <p align="center">
+-  <img src="assets/mascot/wickle.png" alt="La mascotte de Wickle, un hérisson courant dans une roue d’exercice" width="420" />
++  <img src="assets/mascot/wickle.png" alt="Wickle" width="320" />
+ </p>
+ 
+-Wickle est un moteur d’agents qu’EpsilonDelta développe en Rust. Il vise à fournir une bibliothèque intégrable aux applications, qui exécute une boucle de décisions du modèle et d’appels d’outils.
++## Installation
++
++Nécessite Rust 1.85 ou supérieur et Tokio. Utilisez le même tag Git pour le cœur et les adaptateurs. La version 0.1.0 est distribuée via GitHub Releases.
++
++```toml
++[dependencies]
++wickle = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
++wickle-model-openai = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
++wickle-model-router = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
++```
++
++## Exécuter un agent
++
++Définissez les instructions, les outils, le modèle et les limites dans `AgentProfile`. Configurez `AgentBindings` avec le modèle, le stockage et les politiques de l’application, puis transmettez un `RunRequest` et un `ExecutionContext` authentifié.
++
++```rust
++use wickle::*;
++
++pub async fn run_once(
++    profile: AgentProfile,
++    bindings: AgentBindings,
++    request: RunRequest,
++    context: ExecutionContext,
++) -> Result<Guarded<RunOutcome>, ContractError> {
++    let agent = create_agent(profile, bindings)?;
++    match agent.start(request, context.clone()).await? {
++        Guarded::Completed(handle) => handle.outcome(&context).await,
++        Guarded::ApprovalRequired(challenge) => {
++            Ok(Guarded::ApprovalRequired(challenge))
++        }
++    }
++}
++```
+ 
+-Sa conception repose sur des profils d’agent (Agent Profiles) pour configurer le comportement des agents et sur des adaptateurs pour connecter différents modèles et outils.
++`start` renvoie un handle d’exécution et `outcome` le résultat enregistré. `Guarded::ApprovalRequired` demande une approbation dans l’application. Les composants de cet exemple sont configurés par l’application ; consultez le guide des agents.
+ 
+-**État :** En développement. Les agents prennent en charge les appels séquentiels au modèle et aux outils, la séparation des entrées système, la persistance des résultats, la relecture des événements, l’annulation et la reprise des attentes enregistrées d’approbation, de données ou de confirmation d’effets externes. Les commandes de reprise sont dédupliquées ; les effets externes doivent être vérifiés par le Host. Les hooks du cycle de vie permettent des transformations limitées du contexte et des arguments, ainsi que l’observation des résultats enregistrés. Les exports Tool/Hook/ContextSource des adaptateurs utilisent une configuration figée et des instances par segment, libérées à sa fin. [Runtime des adaptateurs](docs/adapters.md). Les exécutions interrompues peuvent être reprises après vérification du propriétaire, en conservant les entrées et en vérifiant les effets externes. [Récupération](docs/recovery.md). [Exécuter un agent](docs/agents.md) · [Contrats de données](docs/contracts.md).
++## Fonctionnalités
+ 
+-Les [sources de contexte](docs/context-sources.md) en lecture seule permettent la collecte par Run ou étape du modèle, la conservation des lots et la vérification des droits actuels lors de leur réutilisation.
++- **Entrées séparées :** seuls les arguments du modèle sont exposés ; les identifiants fiables proviennent des entrées système.
++- **Persistance :** résultats, événements, attente d’approbation ou de saisie, reprise et récupération explicites.
++- **Extensions :** outils, ContextSource, Skills, Hooks et MCP stdio.
++- **Limites :** appels de modèles, tentatives d’outils, corrections et durée.
++- **Autorisations :** politiques du Host et isolation des organisations et espaces de travail.
++- **Contexte et sorties :** artefacts, preuves, compression et validation des résultats.
+ 
+-[Skills](docs/skills.md) charge les instructions complètes d’une version fixée via un outil enregistré. [Artifacts](docs/artifacts.md) conserve les originaux dans leur périmètre, des aperçus limités et les références aux sources.
++## Modèles et adaptateurs
+ 
+-La [sélection et compression du contexte](docs/context-compaction.md) conserve la conversation originale et applique des aperçus limités et des résumés validés. La compression par modèle utilise le même budget du Run.
++Connectez ces services avec des crates facultatifs. Les versions, déploiements, contrats API et options restent explicites. Consultez les guides pour les opérations disponibles et leurs limites.
+ 
+-La [vérification des résultats](docs/verification.md) prend en charge les schémas JSON, les critères versionnés, les révisions limitées et l’approbation d’un candidat figé. Les vérifications par modèle partagent le budget du Run.
++| Provider | Crate |
++| --- | --- |
++| OpenAI GPT | `wickle-model-openai` |
++| Azure OpenAI / Microsoft Foundry | `wickle-model-azure-openai` |
++| Anthropic Claude | `wickle-model-anthropic` |
++| AWS Bedrock Claude | `wickle-model-bedrock` |
++| Google Gemini API / AI Studio | `wickle-model-gemini` |
++| Google Vertex AI Gemini | `wickle-model-vertex` |
++| xAI Grok | `wickle-model-xai` |
+ 
+-Le [guide des fournisseurs de modèles](docs/model-providers.md) présente les adaptateurs OpenAI, Azure OpenAI, Anthropic, AWS Bedrock, Gemini API, Vertex AI et xAI. Ils partagent les contrats du cœur tout en conservant leurs identifiants, versions d’API et comportements spécifiques.
++Utilisez `wickle-state-sqlite` pour la persistance locale et `wickle-adapter-runtime` pour composer les extensions. La mémoire et les graphes se connectent comme ContextSource ou outils ; les écritures après exécution appartiennent à un consommateur externe.
+ 
+-Le guide des [outils MCP](docs/mcp.md) explique comment connecter des outils approuvés via stdio.
++## Documentation
+ 
+-Le guide des [consommateurs d’événements](docs/event-consumers.md) décrit la transmission des résultats aux services de mémoire et de graphe par le Host.
++- [Installation](docs/installation.md)
++- [Agents, requêtes et résultats](docs/agents.md)
++- [Outils et entrées système](docs/tool-inputs.md)
++- [Contexte et mémoire](docs/context-sources.md)
++- [Skills](docs/skills.md)
++- [Hooks](docs/hooks.md)
++- [Routage des modèles](docs/model-routing.md)
++- [Configuration et compatibilité](docs/model-providers.md)
++- [SQLite et récupération](docs/sqlite-state-store.md)
++- [MCP](docs/mcp.md)
++- [Artefacts](docs/artifacts.md)
++- [Compression du contexte](docs/context-compaction.md)
++- [Validation des sorties](docs/verification.md)
+ 
+-La [matrice des versions](docs/model-support.md) distingue les tests locaux des vérifications effectuées sur les services réels.
++## Licence
+ 
+-La [validation de Hosts indépendants](docs/integration-validation.md) couvre l’isolation des paquets, le remplacement des adaptateurs et la reprise entre processus.
++[MIT](LICENSE) · MIT © EpsilonDelta. La série 0.1 est une API initiale susceptible de changer.
+diff --git a/README.ja.md b/README.ja.md
+index ad33a1d71f41740550c7f43bab7adc442136900e..9dd85e52245eadff9edd2d69cf93a3897b04cd0e 100644
+--- a/README.ja.md
++++ b/README.ja.md
+@@ -2,32 +2,91 @@
+ 
+ [English](README.md) | [한국어](README.ko.md) | **日本語** | [简体中文](README.zh-CN.md) | [Español](README.es.md) | [Français](README.fr.md) | [Deutsch](README.de.md) | [Русский](README.ru.md)
+ 
+-**EpsilonDelta が開発する、拡張可能なエージェントエンジン。**
++**Rust アプリケーションに組み込む拡張可能なエージェントエンジン。**
++
++プロファイル、モデル、ツールを組み合わせてエージェントを実行します。Wickle はアプリケーションと同じプロセスでモデルの判断とツール呼び出しを繰り返し、データアクセス・認証情報・権限はアプリケーションが提供します。
+ 
+ <p align="center">
+-  <img src="assets/mascot/wickle.png" alt="回し車を走るハリネズミ、Wickle のマスコット" width="420" />
++  <img src="assets/mascot/wickle.png" alt="Wickle" width="320" />
+ </p>
+ 
+-Wickle は、EpsilonDelta が Rust で開発しているエージェントエンジンです。モデルによる判断とツール呼び出しのループを、アプリケーションに組み込めるライブラリとして提供することを目指しています。
++## インストール
++
++Rust 1.85 以上と Tokio ランタイムが必要です。コアとアダプターには同じ Git タグを使用します。v0.1.0 は GitHub Releases で配布します。
++
++```toml
++[dependencies]
++wickle = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
++wickle-model-openai = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
++wickle-model-router = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
++```
++
++## エージェントの実行
++
++`AgentProfile` に指示、ツール、モデルバインディング、実行上限を設定します。モデル・状態ストア・権限ポリシーで `AgentBindings` を構成し、認証済みの `ExecutionContext` と `RunRequest` を渡します。
++
++```rust
++use wickle::*;
++
++pub async fn run_once(
++    profile: AgentProfile,
++    bindings: AgentBindings,
++    request: RunRequest,
++    context: ExecutionContext,
++) -> Result<Guarded<RunOutcome>, ContractError> {
++    let agent = create_agent(profile, bindings)?;
++    match agent.start(request, context.clone()).await? {
++        Guarded::Completed(handle) => handle.outcome(&context).await,
++        Guarded::ApprovalRequired(challenge) => {
++            Ok(Guarded::ApprovalRequired(challenge))
++        }
++    }
++}
++```
+ 
+-Agent Profile でエージェントの振る舞いを設定し、アダプターを通じてさまざまなモデルやツールに接続する構成を設計しています。
++`start` は実行ハンドル、`outcome` は保存済みの結果を返します。`Guarded::ApprovalRequired` は承認が必要な状態です。例の構成要素はアプリケーション側で用意します。詳細は実行ガイドを参照してください。
+ 
+-**開発状況:** モデルとツールの順次呼び出し、システム入力の分離、結果の保存、イベントの再取得、キャンセル、保存済みの承認・入力・外部作用確認待ちからの再開に対応しています。同じ再開コマンドは重複して処理せず、外部作用の確定には Host による検証を必要とします。Lifecycle Hook により、制限付きのコンテキスト・引数変換と保存後の観察にも対応しています。アダプターの Tool・Hook・ContextSource export は固定された構成と実行区間ごとのインスタンスで接続し、区間終了時にリソースを解放します。[アダプターランタイム](docs/adapters.md)。実行権限と保存済み入力を確認し、外部作用を照会して中断した実行を復旧できます。[実行の復旧](docs/recovery.md)。[エージェントの実行](docs/agents.md) · [データ契約](docs/contracts.md)。
++## 主な機能
+ 
+-読み取り専用の [ContextSource](docs/context-sources.md) は、Run・モデルステップごとの取得、データの保存、再利用時の現在のアクセス権確認に対応しています。
++- **ツール入力の分離:** モデル用引数だけを公開し、workspace ID などはシステム入力から注入します。
++- **状態の永続化:** 結果とイベント、承認・入力待ち、明示的な再開と復旧を扱います。
++- **拡張:** ツール、ContextSource、Skills、Hooks、MCP stdio を接続します。
++- **実行上限:** モデル呼び出し、ツール試行、修正、経過時間を制限します。
++- **アクセス制御:** Host ポリシーで組織とワークスペースの範囲を分離します。
++- **文脈と出力:** アーティファクトと根拠、文脈圧縮、構造化出力、verifier に対応します。
+ 
+-[Skills](docs/skills.md) は登録済みツールから固定バージョンの指示全文を読み込みます。[Artifacts](docs/artifacts.md) はスコープ付きの原文、サイズ制限付きプレビュー、出典情報を保持します。
++## モデルとアダプター
+ 
+-[コンテキストの選択・圧縮](docs/context-compaction.md) は元の会話を保持し、制限付きプレビューと検証済みの要約を適用します。モデルによる圧縮も同じ Run の予算を使用します。
++以下のサービスを個別の crate で接続できます。モデルバージョン、デプロイ名、API 契約、オプションを明示します。対応操作と制限は各ガイドを確認してください。
+ 
+-[出力検証](docs/verification.md)は JSON Schema、バージョンを固定した評価基準、上限付きの修正、固定された候補の承認に対応します。モデルによる検証も同じ Run 予算を使います。
++| Provider | Crate |
++| --- | --- |
++| OpenAI GPT | `wickle-model-openai` |
++| Azure OpenAI / Microsoft Foundry | `wickle-model-azure-openai` |
++| Anthropic Claude | `wickle-model-anthropic` |
++| AWS Bedrock Claude | `wickle-model-bedrock` |
++| Google Gemini API / AI Studio | `wickle-model-gemini` |
++| Google Vertex AI Gemini | `wickle-model-vertex` |
++| xAI Grok | `wickle-model-xai` |
+ 
+-[モデルプロバイダーガイド](docs/model-providers.md)では、OpenAI、Azure OpenAI、Anthropic、AWS Bedrock、Gemini API、Vertex AI、xAI アダプターの共通接続方法を説明しています。認証、API バージョン、各プロバイダーの動作の違いは個別に扱います。
++ローカル永続化には `wickle-state-sqlite`、拡張の構成には `wickle-adapter-runtime` を使用します。メモリやグラフは ContextSource またはツールとして接続し、実行後の更新は外部イベントコンシューマーが担当します。
+ 
+-[MCP ツール接続](docs/mcp.md)では、確認済みのツールを stdio で接続する方法を説明します。
++## ドキュメント
+ 
+-[イベントコンシューマー](docs/event-consumers.md)では、Host が実行記録をメモリやグラフサービスに渡す方法を説明します。
++- [依存関係の設定](docs/installation.md)
++- [バインディング・リクエスト・結果](docs/agents.md)
++- [ツールとシステム入力](docs/tool-inputs.md)
++- [文脈とメモリ](docs/context-sources.md)
++- [Skills](docs/skills.md)
++- [Hooks](docs/hooks.md)
++- [モデルルーティング](docs/model-routing.md)
++- [モデル設定と対応範囲](docs/model-providers.md)
++- [SQLite と復旧](docs/sqlite-state-store.md)
++- [MCP ツール](docs/mcp.md)
++- [Artifacts](docs/artifacts.md)
++- [文脈圧縮](docs/context-compaction.md)
++- [出力検証](docs/verification.md)
+ 
+-[モデルバージョン別の検証表](docs/model-support.md)で、ローカル契約テストと実接続の結果を区別しています。
++## ライセンス
+ 
+-[独立 Host の統合検証](docs/integration-validation.md)では、パッケージの分離、アダプター交換、プロセスをまたぐ再開を確認します。
++[MIT](LICENSE) · MIT © EpsilonDelta。0.1 系は初期 API のため変更される場合があります。
+diff --git a/README.ko.md b/README.ko.md
+index f1adab68b10c0e8b590e5cf2c42c8200a5acfac5..7a69f07c5bdbcd1c0562712a50572910e4fc1a58 100644
+--- a/README.ko.md
++++ b/README.ko.md
+@@ -2,32 +2,91 @@
+ 
+ [English](README.md) | **한국어** | [日本語](README.ja.md) | [简体中文](README.zh-CN.md) | [Español](README.es.md) | [Français](README.fr.md) | [Deutsch](README.de.md) | [Русский](README.ru.md)
+ 
+-**엡실론델타가 만드는 확장 가능한 에이전트 엔진.**
++**Rust 애플리케이션에 내장하는 확장형 에이전트 엔진.**
++
++프로필, 모델, 도구를 조합해 애플리케이션 안에서 에이전트를 실행합니다. Wickle은 같은 프로세스에서 모델 판단과 도구 호출을 반복하며, 데이터 접근·인증 정보·권한 정책은 애플리케이션이 제공합니다.
+ 
+ <p align="center">
+-  <img src="assets/mascot/wickle.png" alt="쳇바퀴를 달리는 귀여운 고슴도치, Wickle 마스코트" width="420" />
++  <img src="assets/mascot/wickle.png" alt="Wickle" width="320" />
+ </p>
+ 
+-Wickle은 엡실론델타가 Rust로 개발하는 에이전트 엔진입니다. 모델의 판단과 도구 호출을 반복하는 실행 루프를 애플리케이션에서 사용하는 라이브러리로 제공하는 것을 목표로 합니다.
++## 설치
++
++Rust 1.85 이상과 Tokio 런타임이 필요합니다. 코어와 선택한 어댑터는 같은 Git 태그로 설치합니다. v0.1.0은 GitHub Release로 배포합니다.
++
++```toml
++[dependencies]
++wickle = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
++wickle-model-openai = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
++wickle-model-router = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
++```
++
++## 에이전트 실행
++
++`AgentProfile`에 지시문, 사용할 도구, 모델 바인딩, 실행 한도를 지정합니다. 모델·상태 저장소·권한 정책 등 애플리케이션 구성요소로 `AgentBindings`를 만든 뒤, 인증된 `ExecutionContext`와 함께 `RunRequest`를 전달합니다.
++
++```rust
++use wickle::*;
++
++pub async fn run_once(
++    profile: AgentProfile,
++    bindings: AgentBindings,
++    request: RunRequest,
++    context: ExecutionContext,
++) -> Result<Guarded<RunOutcome>, ContractError> {
++    let agent = create_agent(profile, bindings)?;
++    match agent.start(request, context.clone()).await? {
++        Guarded::Completed(handle) => handle.outcome(&context).await,
++        Guarded::ApprovalRequired(challenge) => {
++            Ok(Guarded::ApprovalRequired(challenge))
++        }
++    }
++}
++```
+ 
+-Agent Profile로 에이전트의 동작을 구성하고, 어댑터를 통해 다양한 모델과 도구를 연결하는 구조로 설계하고 있습니다.
++`start`는 실행 핸들을 반환하고, `outcome`은 저장된 결과를 반환합니다. `Guarded::ApprovalRequired`이면 애플리케이션에서 승인을 받아야 합니다. 이 예제의 구성요소는 호출하는 애플리케이션에서 준비하며, 바인딩 설정은 에이전트 실행 가이드를 참고하세요.
+ 
+-**개발 상태:** 모델·도구의 순차 호출, 시스템 입력 분리, 결과 저장, 이벤트 재조회, 취소와 승인·입력·외부 효과 확인 대기의 재개를 지원합니다. 같은 재개 명령은 중복 소비하지 않으며, 외부 효과는 Host의 검증을 거쳐 확정합니다. Lifecycle Hook으로 제한된 문맥·인자 변환과 저장 완료 후 관찰을 지원합니다. 어댑터의 Tool·Hook·ContextSource export를 고정된 조립 정보와 구간별 인스턴스로 연결하며, 실행 구간이 끝나면 자원을 해제합니다. [어댑터 런타임](docs/adapters.md). 실행 소유권과 저장된 입력을 확인하고 외부 효과를 조회하여 중단된 실행을 복구할 수 있습니다. [실행 복구](docs/recovery.md). [에이전트 실행](docs/agents.md) · [데이터 계약](docs/contracts.md).
++## 주요 기능
+ 
+-읽기 전용 [ContextSource](docs/context-sources.md)는 Run·모델 단계별 조회, 자료 묶음 저장, 재사용 시 현재 접근 권한 검사를 지원합니다.
++- **도구 입력 분리:** 모델이 작성할 인자만 노출하고, workspace ID·user ID 등 신뢰할 값은 등록된 시스템 입력으로 주입합니다.
++- **실행 상태 저장:** 결과와 이벤트를 저장하고 승인·입력 대기, 명시적 재개, 중단된 실행 복구를 지원합니다.
++- **확장 기능:** 도구, 읽기 전용 ContextSource, Skills, lifecycle hook, MCP stdio 도구를 연결합니다.
++- **실행 한도:** 모델 호출·도구 시도·보완·경과 시간을 제한하며 압축과 검증에도 같은 실행 예산을 적용합니다.
++- **범위별 접근 제어:** Host 정책과 바인딩으로 조직·워크스페이스의 접근 범위를 구분합니다.
++- **문맥과 결과 처리:** 원본 artifact와 근거를 유지하고 문맥 압축, 구조화 출력 검사, verifier 기반 검증을 수행합니다.
+ 
+-[Skills](docs/skills.md)는 등록된 도구를 통해 고정 버전의 지침 전체를 로드합니다. [Artifacts](docs/artifacts.md)는 scope가 적용된 원문, 제한된 preview와 원천 근거를 보존합니다.
++## 모델 제공자와 어댑터
+ 
+-[문맥 선택·압축](docs/context-compaction.md)은 원본 대화를 보존하면서 제한된 preview와 검증된 요약을 적용합니다. 모델 기반 압축도 같은 Run 예산을 사용합니다.
++다음 서비스를 선택형 crate로 연결할 수 있습니다. 모델 버전, 배포 이름, API 계약, 제공자별 옵션을 명시적으로 설정합니다. 지원 작업과 모델별 제약은 제공자 가이드를 확인하세요.
+ 
+-[출력 검증](docs/verification.md)은 JSON 스키마, 버전이 고정된 검증 기준, 한도 내 보완과 고정된 후보의 승인을 지원합니다. 모델 기반 검증도 같은 Run 예산을 사용합니다.
++| Provider | Crate |
++| --- | --- |
++| OpenAI GPT | `wickle-model-openai` |
++| Azure OpenAI / Microsoft Foundry | `wickle-model-azure-openai` |
++| Anthropic Claude | `wickle-model-anthropic` |
++| AWS Bedrock Claude | `wickle-model-bedrock` |
++| Google Gemini API / AI Studio | `wickle-model-gemini` |
++| Google Vertex AI Gemini | `wickle-model-vertex` |
++| xAI Grok | `wickle-model-xai` |
+ 
+-[모델 제공자 가이드](docs/model-providers.md)에서 OpenAI, Azure OpenAI, Anthropic, AWS Bedrock, Gemini API, Vertex AI, xAI 어댑터와 공통 연결 방법을 확인할 수 있습니다. 각 제공자의 인증, API 버전과 동작 차이는 별도로 처리합니다.
++로컬 영속 저장에는 `wickle-state-sqlite`, 범위별 확장 구성에는 `wickle-adapter-runtime`을 사용합니다. 메모리·그래프 서비스는 ContextSource나 도구로 연결하며, 실행 후 기록 갱신은 외부 이벤트 소비자가 담당합니다.
+ 
+-[MCP 도구 연결](docs/mcp.md)은 검토한 도구를 stdio로 연결하는 방법을 설명합니다.
++## 사용 문서
+ 
+-[이벤트 소비자](docs/event-consumers.md) 가이드는 Host가 실행 기록을 기억·그래프 서비스에 전달하는 방법을 설명합니다.
++- [설치와 의존성 구성](docs/installation.md)
++- [에이전트 바인딩·요청·결과](docs/agents.md)
++- [도구와 시스템 입력](docs/tool-inputs.md)
++- [문맥 조회와 메모리](docs/context-sources.md)
++- [Skills](docs/skills.md)
++- [Hooks](docs/hooks.md)
++- [모델 라우팅](docs/model-routing.md)
++- [모델 제공자 설정과 지원 범위](docs/model-providers.md)
++- [SQLite 저장과 복구](docs/sqlite-state-store.md)
++- [MCP 도구](docs/mcp.md)
++- [Artifacts](docs/artifacts.md)
++- [문맥 압축](docs/context-compaction.md)
++- [출력 검증](docs/verification.md)
+ 
+-[모델 버전별 검증 행렬](docs/model-support.md)에서 로컬 계약 검증과 실제 연결 결과를 구분해 확인할 수 있습니다.
++## 라이선스
+ 
+-[독립 Host 통합 검증](docs/integration-validation.md)에서 패키지 분리, 어댑터 교체, 프로세스 재개 검사를 확인할 수 있습니다.
++[MIT](LICENSE) · MIT © EpsilonDelta. 0.1 계열은 초기 API로, 이후 버전에서 변경될 수 있습니다.
+diff --git a/README.md b/README.md
+index 714c1345a668ed5b16dd85f5367c4cd0964717cd..2eafc056d84f947c0ddeb499766d54b609da8a44 100644
+--- a/README.md
++++ b/README.md
+@@ -2,32 +2,91 @@
+ 
+ **English** | [한국어](README.ko.md) | [日本語](README.ja.md) | [简体中文](README.zh-CN.md) | [Español](README.es.md) | [Français](README.fr.md) | [Deutsch](README.de.md) | [Русский](README.ru.md)
+ 
+-**An extensible agent engine by EpsilonDelta.**
++**An extensible Rust agent engine.**
++
++Embed agents in your application with configurable profiles, model providers and tools. Wickle runs the model/tool loop inside your process; your application supplies data access, credentials and authorization.
+ 
+ <p align="center">
+-  <img src="assets/mascot/wickle.png" alt="Wickle's hedgehog mascot running on an exercise wheel" width="420" />
++  <img src="assets/mascot/wickle.png" alt="Wickle" width="320" />
+ </p>
+ 
+-Wickle is an agent engine being developed in Rust by EpsilonDelta. It aims to provide an embeddable library that runs the loop of model decisions and tool calls.
++## Installation
++
++Requires Rust 1.85 or later and a Tokio runtime. Use the same Git tag for the core and optional adapters. v0.1.0 is distributed through GitHub Releases.
++
++```toml
++[dependencies]
++wickle = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
++wickle-model-openai = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
++wickle-model-router = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
++```
++
++## Run an agent
++
++Create an `AgentProfile` for instructions, selected tools, model binding and execution limits. Configure `AgentBindings` with your model, state store, policy and other Host components, then submit a `RunRequest` with an authenticated `ExecutionContext`.
++
++```rust
++use wickle::*;
++
++pub async fn run_once(
++    profile: AgentProfile,
++    bindings: AgentBindings,
++    request: RunRequest,
++    context: ExecutionContext,
++) -> Result<Guarded<RunOutcome>, ContractError> {
++    let agent = create_agent(profile, bindings)?;
++    match agent.start(request, context.clone()).await? {
++        Guarded::Completed(handle) => handle.outcome(&context).await,
++        Guarded::ApprovalRequired(challenge) => {
++            Ok(Guarded::ApprovalRequired(challenge))
++        }
++    }
++}
++```
+ 
+-Its design uses Agent Profiles to configure agent behavior and adapters to connect different models and tools.
++`start` returns a handle to the Run; `outcome` returns its saved result. `Guarded::ApprovalRequired` means the application must obtain approval. The example accepts components configured by your application; see the agent guide for binding setup.
+ 
+-**Status:** In development. Agents support serial model/tool loops, separate system inputs, persisted outcomes, event replay, cancellation, and resuming saved approval, input, or external-effect waits. Resume commands are deduplicated; external effects require Host verification. Lifecycle hooks support bounded context and argument transformations plus observations after commit. Adapter Tool/Hook/ContextSource exports support pinned assemblies and scoped instances that close when each execution segment ends. [Adapter runtime](docs/adapters.md). Interrupted runs support explicit recovery with fenced ownership, preserved inputs, and external-effect reconciliation. [Recovery](docs/recovery.md). [Run an agent](docs/agents.md) · [Data contracts](docs/contracts.md).
++## Features
+ 
+-Read-only [context sources](docs/context-sources.md) support Run and model-step collection, saved batches, and current access checks on reuse.
++- **Tool input ownership:** expose only model-owned arguments; inject workspace IDs, user IDs and other trusted values through registered system inputs.
++- **Persistent execution:** store outcomes and events, wait for approvals or input, and explicitly resume or recover interrupted Runs.
++- **Extensibility:** connect tools, read-only context sources, Skills, lifecycle hooks and MCP stdio tools.
++- **Bounded execution:** limit model calls, tool attempts, repairs and elapsed time; use shared budgets for compression and verification.
++- **Scoped access:** separate organizations and workspaces through Host policy and scoped bindings.
++- **Context and output:** preserve artifacts and evidence, compact context, and validate structured outputs or verifier criteria.
+ 
+-[Skills](docs/skills.md) load complete, versioned instructions through a registered Tool. [Artifacts](docs/artifacts.md) preserve scoped originals, bounded previews, and source evidence.
++## Model providers and adapters
+ 
+-[Context rewriting](docs/context-compaction.md) preserves the original conversation while applying bounded previews and validated summaries. Model-based compression shares the Run budget.
++Optional crates connect the core to the following services. Model versions, deployment names, API contracts and provider options remain explicit. Consult the provider guide for supported operations and model-specific limitations.
+ 
+-[Output verification](docs/verification.md) supports JSON schemas, versioned criteria, bounded repair, and approval of a fixed candidate. Model-based reviews share the Run budget.
++| Provider | Crate |
++| --- | --- |
++| OpenAI GPT | `wickle-model-openai` |
++| Azure OpenAI / Microsoft Foundry | `wickle-model-azure-openai` |
++| Anthropic Claude | `wickle-model-anthropic` |
++| AWS Bedrock Claude | `wickle-model-bedrock` |
++| Google Gemini API / AI Studio | `wickle-model-gemini` |
++| Google Vertex AI Gemini | `wickle-model-vertex` |
++| xAI Grok | `wickle-model-xai` |
+ 
+-The [model provider guide](docs/model-providers.md) covers OpenAI, Azure OpenAI, Anthropic, AWS Bedrock, Gemini API, Vertex AI and xAI adapters. They use the same core contracts while retaining explicit credentials, API versions and provider-specific behavior.
++Use `wickle-state-sqlite` for local persistence and `wickle-adapter-runtime` to assemble scoped extensions. Memory and graph services can implement `ContextSource` or tools; post-run writes belong to an external event consumer.
+ 
+-See [MCP tools](docs/mcp.md) for connecting reviewed tools over stdio.
++## Documentation
+ 
+-See [event consumers](docs/event-consumers.md) for Host-managed delivery to memory and graph services.
++- [Install and configure dependencies](docs/installation.md)
++- [Agent bindings, requests and results](docs/agents.md)
++- [Tools and system inputs](docs/tool-inputs.md)
++- [Context sources and memory](docs/context-sources.md)
++- [Skills](docs/skills.md)
++- [Hooks](docs/hooks.md)
++- [Model routing](docs/model-routing.md)
++- [Provider configuration and support](docs/model-providers.md)
++- [SQLite persistence and recovery](docs/sqlite-state-store.md)
++- [MCP tools](docs/mcp.md)
++- [Artifacts](docs/artifacts.md)
++- [Context compaction](docs/context-compaction.md)
++- [Output verification](docs/verification.md)
+ 
+-The [model-version evidence matrix](docs/model-support.md) distinguishes local contract checks from live smoke results.
++## License
+ 
+-See [independent Host validation](docs/integration-validation.md) for package isolation, adapter replacement and recovery across processes.
++[MIT](LICENSE) · MIT © EpsilonDelta. The 0.1 series is an initial API and may change.
+diff --git a/README.ru.md b/README.ru.md
+index 84a4e0ec87559346b04e2ed11081e4ef3084ac71..921a302fa9844b6e03fffc989b7b68b33a1661ce 100644
+--- a/README.ru.md
++++ b/README.ru.md
+@@ -2,32 +2,91 @@
+ 
+ [English](README.md) | [한국어](README.ko.md) | [日本語](README.ja.md) | [简体中文](README.zh-CN.md) | [Español](README.es.md) | [Français](README.fr.md) | [Deutsch](README.de.md) | **Русский**
+ 
+-**Расширяемый движок агентов от EpsilonDelta.**
++**Расширяемый движок агентов для Rust.**
++
++Встраивайте агентов в приложение с помощью профилей, моделей и инструментов. Wickle выполняет цикл решений модели и вызовов инструментов в том же процессе. Приложение предоставляет доступ к данным, учётные данные и правила авторизации.
+ 
+ <p align="center">
+-  <img src="assets/mascot/wickle.png" alt="Талисман Wickle — ёжик, бегущий в колесе" width="420" />
++  <img src="assets/mascot/wickle.png" alt="Wickle" width="320" />
+ </p>
+ 
+-Wickle — движок агентов, который EpsilonDelta разрабатывает на Rust. Цель проекта — предоставить встраиваемую в приложения библиотеку, выполняющую цикл принятия решений моделью и вызовов инструментов.
++## Установка
++
++Требуются Rust 1.85 или новее и Tokio. Используйте один Git-тег для ядра и адаптеров. Версия 0.1.0 распространяется через GitHub Releases.
++
++```toml
++[dependencies]
++wickle = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
++wickle-model-openai = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
++wickle-model-router = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
++```
++
++## Запуск агента
++
++Задайте инструкции, инструменты, модель и ограничения в `AgentProfile`. Настройте `AgentBindings` с моделью, хранилищем и политиками приложения, затем передайте `RunRequest` с аутентифицированным `ExecutionContext`.
++
++```rust
++use wickle::*;
++
++pub async fn run_once(
++    profile: AgentProfile,
++    bindings: AgentBindings,
++    request: RunRequest,
++    context: ExecutionContext,
++) -> Result<Guarded<RunOutcome>, ContractError> {
++    let agent = create_agent(profile, bindings)?;
++    match agent.start(request, context.clone()).await? {
++        Guarded::Completed(handle) => handle.outcome(&context).await,
++        Guarded::ApprovalRequired(challenge) => {
++            Ok(Guarded::ApprovalRequired(challenge))
++        }
++    }
++}
++```
+ 
+-В основе архитектуры — профили агентов (Agent Profiles) для настройки их поведения и адаптеры для подключения различных моделей и инструментов.
++`start` возвращает дескриптор выполнения, а `outcome` — сохранённый результат. `Guarded::ApprovalRequired` означает, что приложение должно получить одобрение. Пример принимает готовые компоненты; настройка описана в руководстве по агентам.
+ 
+-**Статус:** В разработке. Агенты поддерживают последовательные вызовы модели и инструментов, отдельные системные входные данные, сохранение результатов, повторное чтение событий, отмену и продолжение после сохранённого ожидания одобрения, ввода или подтверждения внешнего эффекта. Команды продолжения обрабатываются без дублирования; внешние эффекты подтверждает Host. Хуки жизненного цикла поддерживают ограниченное преобразование контекста и аргументов, а также наблюдение за сохранёнными результатами. Экспорты Tool/Hook/ContextSource адаптеров используют зафиксированную конфигурацию и экземпляры для каждого сегмента; ресурсы освобождаются по его завершении. [Среда адаптеров](docs/adapters.md). Прерванное выполнение можно восстановить с проверкой владельца, сохранением входных данных и сверкой внешних эффектов. [Восстановление](docs/recovery.md). [Запуск агента](docs/agents.md) · [Контракты данных](docs/contracts.md).
++## Возможности
+ 
+-[Источники контекста](docs/context-sources.md) с доступом только для чтения поддерживают запросы для Run или шага модели, сохранение данных и проверку текущих прав при повторном использовании.
++- **Разделение входов:** модель задаёт только свои аргументы; доверенные ID поступают из системных входов.
++- **Сохранение состояния:** результаты, события, ожидание одобрения или ввода, явное продолжение и восстановление.
++- **Расширения:** инструменты, ContextSource, Skills, Hooks и MCP stdio.
++- **Ограничения:** вызовы модели, попытки инструментов, исправления и время выполнения.
++- **Контроль доступа:** политики Host и изоляция организаций и рабочих пространств.
++- **Контекст и результаты:** артефакты, доказательства, сжатие контекста и проверка вывода.
+ 
+-[Skills](docs/skills.md) загружает полные инструкции фиксированной версии через зарегистрированный инструмент. [Artifacts](docs/artifacts.md) сохраняет оригиналы в пределах scope, ограниченные предпросмотры и сведения об источниках.
++## Модели и адаптеры
+ 
+-[Выбор и сжатие контекста](docs/context-compaction.md) сохраняет исходный диалог и использует ограниченные предпросмотры и проверенные сводки. Сжатие с помощью модели расходует общий бюджет Run.
++Эти сервисы подключаются отдельными crate. Версии моделей, развёртывания, API-контракты и параметры задаются явно. Поддерживаемые операции и ограничения описаны в руководствах.
+ 
+-[Проверка результатов](docs/verification.md) поддерживает схемы JSON, версионированные критерии, ограниченные доработки и одобрение зафиксированного кандидата. Проверки с помощью модели используют общий бюджет Run.
++| Provider | Crate |
++| --- | --- |
++| OpenAI GPT | `wickle-model-openai` |
++| Azure OpenAI / Microsoft Foundry | `wickle-model-azure-openai` |
++| Anthropic Claude | `wickle-model-anthropic` |
++| AWS Bedrock Claude | `wickle-model-bedrock` |
++| Google Gemini API / AI Studio | `wickle-model-gemini` |
++| Google Vertex AI Gemini | `wickle-model-vertex` |
++| xAI Grok | `wickle-model-xai` |
+ 
+-[Руководство по поставщикам моделей](docs/model-providers.md) описывает подключение OpenAI, Azure OpenAI, Anthropic, AWS Bedrock, Gemini API, Vertex AI и xAI. Адаптеры используют общие контракты ядра, сохраняя отдельные учётные данные, версии API и особенности поведения.
++Используйте `wickle-state-sqlite` для локального хранения и `wickle-adapter-runtime` для сборки расширений. Память и графы подключаются как ContextSource или инструменты; запись после выполнения выполняет внешний обработчик событий.
+ 
+-Руководство по [инструментам MCP](docs/mcp.md) описывает подключение проверенных инструментов через stdio.
++## Документация
+ 
+-Руководство по [обработчикам событий](docs/event-consumers.md) описывает передачу записей выполнения в сервисы памяти и графов на стороне Host.
++- [Установка](docs/installation.md)
++- [Агенты, запросы и результаты](docs/agents.md)
++- [Инструменты и системные входы](docs/tool-inputs.md)
++- [Контекст и память](docs/context-sources.md)
++- [Skills](docs/skills.md)
++- [Hooks](docs/hooks.md)
++- [Маршрутизация моделей](docs/model-routing.md)
++- [Настройка и поддержка провайдеров](docs/model-providers.md)
++- [SQLite и восстановление](docs/sqlite-state-store.md)
++- [MCP](docs/mcp.md)
++- [Артефакты](docs/artifacts.md)
++- [Сжатие контекста](docs/context-compaction.md)
++- [Проверка вывода](docs/verification.md)
+ 
+-[Матрица версий моделей](docs/model-support.md) разделяет локальные проверки контрактов и результаты реальных подключений.
++## Лицензия
+ 
+-[Проверка независимых Host](docs/integration-validation.md) охватывает изоляцию пакетов, замену адаптеров и восстановление между процессами.
++[MIT](LICENSE) · MIT © EpsilonDelta. Серия 0.1 содержит начальную версию API, которая может изменяться.
+diff --git a/README.zh-CN.md b/README.zh-CN.md
+index 4cc1f2c2fbd4a688fed30e79f756ea1d6b085873..56506759690ed850cf505ae938ec6042c772e0ec 100644
+--- a/README.zh-CN.md
++++ b/README.zh-CN.md
+@@ -2,32 +2,91 @@
+ 
+ [English](README.md) | [한국어](README.ko.md) | [日本語](README.ja.md) | **简体中文** | [Español](README.es.md) | [Français](README.fr.md) | [Deutsch](README.de.md) | [Русский](README.ru.md)
+ 
+-**由 EpsilonDelta 开发的可扩展智能体引擎。**
++**可嵌入 Rust 应用的可扩展智能体引擎。**
++
++组合配置档案、模型和工具，在应用中运行智能体。Wickle 在同一进程内循环执行模型判断和工具调用；数据访问、凭据和授权由应用提供。
+ 
+ <p align="center">
+-  <img src="assets/mascot/wickle.png" alt="Wickle 的刺猬吉祥物正在跑轮上奔跑" width="420" />
++  <img src="assets/mascot/wickle.png" alt="Wickle" width="320" />
+ </p>
+ 
+-Wickle 是 EpsilonDelta 正在使用 Rust 开发的智能体引擎，旨在以可嵌入应用程序的库形式，运行模型决策与工具调用的循环。
++## 安装
++
++需要 Rust 1.85 或更新版本及 Tokio 运行时。核心与适配器使用相同的 Git 标签。v0.1.0 通过 GitHub Releases 发布。
++
++```toml
++[dependencies]
++wickle = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
++wickle-model-openai = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
++wickle-model-router = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
++```
++
++## 运行智能体
++
++在 `AgentProfile` 中设置指令、工具、模型绑定和执行限制。通过模型、状态存储及授权策略构建 `AgentBindings`，再传入 `RunRequest` 和经过认证的 `ExecutionContext`。
++
++```rust
++use wickle::*;
++
++pub async fn run_once(
++    profile: AgentProfile,
++    bindings: AgentBindings,
++    request: RunRequest,
++    context: ExecutionContext,
++) -> Result<Guarded<RunOutcome>, ContractError> {
++    let agent = create_agent(profile, bindings)?;
++    match agent.start(request, context.clone()).await? {
++        Guarded::Completed(handle) => handle.outcome(&context).await,
++        Guarded::ApprovalRequired(challenge) => {
++            Ok(Guarded::ApprovalRequired(challenge))
++        }
++    }
++}
++```
+ 
+-其设计通过 Agent Profile 配置智能体行为，并通过适配器连接不同的模型和工具。
++`start` 返回执行句柄，`outcome` 返回已保存的结果。`Guarded::ApprovalRequired` 表示应用需要取得批准。示例中的组件由应用预先配置，详见运行指南。
+ 
+-**开发状态：** 已支持模型与工具的串行调用、系统输入分离、结果持久化、事件重放、取消，以及从已保存的审批、输入或外部操作确认等待中恢复执行。恢复命令会去重，外部操作是否生效须由 Host 验证。生命周期 Hook 支持受限的上下文和参数转换，以及提交后的结果观察。适配器 Tool/Hook/ContextSource export 使用固定的装配配置和按执行阶段隔离的实例，阶段结束后释放资源。[适配器运行时](docs/adapters.md)。支持在验证执行所有权和已保存输入后恢复中断的执行，并查询外部操作的结果。[执行恢复](docs/recovery.md)。[运行智能体](docs/agents.md) · [数据契约](docs/contracts.md)。
++## 主要功能
+ 
+-只读 [ContextSource](docs/context-sources.md) 支持按 Run 或模型步骤查询、保存数据批次，并在复用时重新检查当前访问权限。
++- **工具输入分离：** 仅向模型公开其负责的参数，工作区 ID 等可信值由系统输入注入。
++- **持久执行：** 保存结果与事件，支持批准等待、输入等待、恢复与重新继续。
++- **扩展：** 连接工具、ContextSource、Skills、Hooks 和 MCP stdio。
++- **执行限制：** 限制模型调用、工具尝试、修复次数与运行时间。
++- **访问范围：** 通过 Host 策略隔离组织与工作区。
++- **上下文与输出：** 管理原始文件和证据，支持上下文压缩、结构化输出与 verifier。
+ 
+-[Skills](docs/skills.md) 通过已注册工具加载固定版本的完整指令。[Artifacts](docs/artifacts.md) 保存按 scope 隔离的原文、有大小限制的预览及来源依据。
++## 模型和适配器
+ 
+-[上下文选择与压缩](docs/context-compaction.md) 保留原始对话，并应用有大小限制的预览和经过验证的摘要。模型压缩也使用同一 Run 的预算。
++可使用独立 crate 接入以下服务。明确配置模型版本、部署名称、API 契约及提供者选项；具体支持范围与限制见相关指南。
+ 
+-[输出验证](docs/verification.md)支持 JSON Schema、固定版本的验证标准、限定次数的修正和固定候选结果的审批。模型验证也使用同一 Run 预算。
++| Provider | Crate |
++| --- | --- |
++| OpenAI GPT | `wickle-model-openai` |
++| Azure OpenAI / Microsoft Foundry | `wickle-model-azure-openai` |
++| Anthropic Claude | `wickle-model-anthropic` |
++| AWS Bedrock Claude | `wickle-model-bedrock` |
++| Google Gemini API / AI Studio | `wickle-model-gemini` |
++| Google Vertex AI Gemini | `wickle-model-vertex` |
++| xAI Grok | `wickle-model-xai` |
+ 
+-[模型提供商指南](docs/model-providers.md)介绍 OpenAI、Azure OpenAI、Anthropic、AWS Bedrock、Gemini API、Vertex AI 和 xAI 适配器的通用连接方式。各提供商的身份验证、API 版本和行为差异分别处理。
++使用 `wickle-state-sqlite` 实现本地持久化，使用 `wickle-adapter-runtime` 组装扩展。记忆与图服务通过 ContextSource 或工具连接，执行后的写入由外部事件消费者负责。
+ 
+-[MCP 工具连接](docs/mcp.md)介绍如何通过 stdio 连接已审核的工具。
++## 使用文档
+ 
+-[事件消费者](docs/event-consumers.md)介绍 Host 如何将执行记录传递给记忆和图服务。
++- [安装依赖](docs/installation.md)
++- [绑定、请求和结果](docs/agents.md)
++- [工具与系统输入](docs/tool-inputs.md)
++- [上下文和记忆](docs/context-sources.md)
++- [Skills](docs/skills.md)
++- [Hooks](docs/hooks.md)
++- [模型路由](docs/model-routing.md)
++- [提供者配置与支持范围](docs/model-providers.md)
++- [SQLite 与恢复](docs/sqlite-state-store.md)
++- [MCP 工具](docs/mcp.md)
++- [Artifacts](docs/artifacts.md)
++- [上下文压缩](docs/context-compaction.md)
++- [输出验证](docs/verification.md)
+ 
+-[模型版本验证矩阵](docs/model-support.md)区分本地契约测试与实际连接结果。
++## 许可证
+ 
+-[独立 Host 集成验证](docs/integration-validation.md)涵盖包隔离、适配器替换和跨进程恢复。
++[MIT](LICENSE) · MIT © EpsilonDelta。0.1 系列属于初始 API，后续版本可能调整。
+diff --git a/crates/wickle-adapter-runtime/Cargo.toml b/crates/wickle-adapter-runtime/Cargo.toml
+index 13735c63cda5e3c5680ecbbdc80a36ff855070fe..696cb76be8bcd06b9836d6ae46a6ae17238b13fa 100644
+--- a/crates/wickle-adapter-runtime/Cargo.toml
++++ b/crates/wickle-adapter-runtime/Cargo.toml
+@@ -1,12 +1,13 @@
+ [package]
+ name = "wickle-adapter-runtime"
+ version.workspace = true
++license.workspace = true
+ edition.workspace = true
+ rust-version.workspace = true
+ repository.workspace = true
+ description = "Scoped adapter assembly and lifecycle management for Wickle"
+ publish = false
+-include = ["Cargo.toml", "src/**"]
++include = ["Cargo.toml", "LICENSE", "src/**"]
+ 
+ [dependencies]
+ wickle = { path = "../wickle", version = "=0.1.0" }
+diff --git a/crates/wickle-adapter-runtime/LICENSE b/crates/wickle-adapter-runtime/LICENSE
+new file mode 100644
+index 0000000000000000000000000000000000000000..fa110f6cca190273b8a205aaff2a0cec1684e255
+--- /dev/null
++++ b/crates/wickle-adapter-runtime/LICENSE
+@@ -0,0 +1,21 @@
++MIT License
++
++Copyright (c) 2026 EpsilonDelta
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++SOFTWARE.
+diff --git a/crates/wickle-mcp/Cargo.toml b/crates/wickle-mcp/Cargo.toml
+index 922104ccba17be90b33614e6ce87fd88fc8a4b8e..80964cc0aaaab1a3b854840e36cd86148dfc565c 100644
+--- a/crates/wickle-mcp/Cargo.toml
++++ b/crates/wickle-mcp/Cargo.toml
+@@ -1,12 +1,13 @@
+ [package]
+ name = "wickle-mcp"
+ version.workspace = true
++license.workspace = true
+ edition.workspace = true
+ rust-version.workspace = true
+ repository.workspace = true
+ description = "Reviewed MCP stdio Tool adapters for Wickle"
+ publish = false
+-include = ["Cargo.toml", "src/**"]
++include = ["Cargo.toml", "LICENSE", "src/**"]
+ [dependencies]
+ wickle = { path = "../wickle", version = "=0.1.0" }
+ rmcp = { version = "=0.8.5", features = ["client", "transport-async-rw"] }
+diff --git a/crates/wickle-mcp/LICENSE b/crates/wickle-mcp/LICENSE
+new file mode 100644
+index 0000000000000000000000000000000000000000..fa110f6cca190273b8a205aaff2a0cec1684e255
+--- /dev/null
++++ b/crates/wickle-mcp/LICENSE
+@@ -0,0 +1,21 @@
++MIT License
++
++Copyright (c) 2026 EpsilonDelta
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++SOFTWARE.
+diff --git a/crates/wickle-model-anthropic/Cargo.toml b/crates/wickle-model-anthropic/Cargo.toml
+index 54e0ae629329ae2a0ed21387a4f30935437859ff..c68d0ad7a43e6a4cc5bbcf20745bf1f34018465f 100644
+--- a/crates/wickle-model-anthropic/Cargo.toml
++++ b/crates/wickle-model-anthropic/Cargo.toml
+@@ -1,12 +1,13 @@
+ [package]
+ name = "wickle-model-anthropic"
+ version.workspace = true
++license.workspace = true
+ edition.workspace = true
+ rust-version.workspace = true
+ repository.workspace = true
+ description = "Anthropic Messages model and metadata adapters for Wickle"
+ publish = false
+-include = ["Cargo.toml", "src/**"]
++include = ["Cargo.toml", "LICENSE", "src/**"]
+ 
+ [dependencies]
+ wickle-model-responses = { path = "../wickle-model-responses", version = "=0.1.0" }
+diff --git a/crates/wickle-model-anthropic/LICENSE b/crates/wickle-model-anthropic/LICENSE
+new file mode 100644
+index 0000000000000000000000000000000000000000..fa110f6cca190273b8a205aaff2a0cec1684e255
+--- /dev/null
++++ b/crates/wickle-model-anthropic/LICENSE
+@@ -0,0 +1,21 @@
++MIT License
++
++Copyright (c) 2026 EpsilonDelta
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++SOFTWARE.
+diff --git a/crates/wickle-model-azure-openai/Cargo.toml b/crates/wickle-model-azure-openai/Cargo.toml
+index 24e3f4c2dfe326e0b4672827f93048b638f364ad..f19a1b12da3dc264ae02ca763ec7d7896163ac73 100644
+--- a/crates/wickle-model-azure-openai/Cargo.toml
++++ b/crates/wickle-model-azure-openai/Cargo.toml
+@@ -1,12 +1,13 @@
+ [package]
+ name = "wickle-model-azure-openai"
+ version.workspace = true
++license.workspace = true
+ edition.workspace = true
+ rust-version.workspace = true
+ repository.workspace = true
+ description = "Azure OpenAI Responses and deployment metadata adapters for Wickle"
+ publish = false
+-include = ["Cargo.toml", "src/**"]
++include = ["Cargo.toml", "LICENSE", "src/**"]
+ 
+ [dependencies]
+ wickle = { path = "../wickle", version = "=0.1.0" }
+diff --git a/crates/wickle-model-azure-openai/LICENSE b/crates/wickle-model-azure-openai/LICENSE
+new file mode 100644
+index 0000000000000000000000000000000000000000..fa110f6cca190273b8a205aaff2a0cec1684e255
+--- /dev/null
++++ b/crates/wickle-model-azure-openai/LICENSE
+@@ -0,0 +1,21 @@
++MIT License
++
++Copyright (c) 2026 EpsilonDelta
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++SOFTWARE.
+diff --git a/crates/wickle-model-bedrock/Cargo.toml b/crates/wickle-model-bedrock/Cargo.toml
+index 3d10030b934a3f4e042ff71bdb64e1d465fa4626..d0f6273bb35a156177b388105cd3829f8a53f54c 100644
+--- a/crates/wickle-model-bedrock/Cargo.toml
++++ b/crates/wickle-model-bedrock/Cargo.toml
+@@ -1,12 +1,13 @@
+ [package]
+ name = "wickle-model-bedrock"
+ version.workspace = true
++license.workspace = true
+ edition.workspace = true
+ rust-version.workspace = true
+ repository.workspace = true
+ description = "AWS Bedrock Claude model adapters for Wickle"
+ publish = false
+-include = ["Cargo.toml", "src/**"]
++include = ["Cargo.toml", "LICENSE", "src/**"]
+ [dependencies]
+ wickle = { path = "../wickle", version = "=0.1.0" }
+ wickle-model-anthropic = { path = "../wickle-model-anthropic", version = "=0.1.0" }
+diff --git a/crates/wickle-model-bedrock/LICENSE b/crates/wickle-model-bedrock/LICENSE
+new file mode 100644
+index 0000000000000000000000000000000000000000..fa110f6cca190273b8a205aaff2a0cec1684e255
+--- /dev/null
++++ b/crates/wickle-model-bedrock/LICENSE
+@@ -0,0 +1,21 @@
++MIT License
++
++Copyright (c) 2026 EpsilonDelta
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++SOFTWARE.
+diff --git a/crates/wickle-model-gemini/Cargo.toml b/crates/wickle-model-gemini/Cargo.toml
+index b427b6bfa1335e7192a623e9cdeff01805b2bdbc..b8bd4159da51b55ffc7b5b5756ceb8dca37f0b9a 100644
+--- a/crates/wickle-model-gemini/Cargo.toml
++++ b/crates/wickle-model-gemini/Cargo.toml
+@@ -1,12 +1,13 @@
+ [package]
+ name = "wickle-model-gemini"
+ version.workspace = true
++license.workspace = true
+ edition.workspace = true
+ rust-version.workspace = true
+ repository.workspace = true
+ description = "Google Gemini generateContent model and metadata adapters for Wickle"
+ publish = false
+-include = ["Cargo.toml", "src/**"]
++include = ["Cargo.toml", "LICENSE", "src/**"]
+ 
+ [dependencies]
+ wickle-model-responses = { path = "../wickle-model-responses", version = "=0.1.0" }
+diff --git a/crates/wickle-model-gemini/LICENSE b/crates/wickle-model-gemini/LICENSE
+new file mode 100644
+index 0000000000000000000000000000000000000000..fa110f6cca190273b8a205aaff2a0cec1684e255
+--- /dev/null
++++ b/crates/wickle-model-gemini/LICENSE
+@@ -0,0 +1,21 @@
++MIT License
++
++Copyright (c) 2026 EpsilonDelta
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++SOFTWARE.
+diff --git a/crates/wickle-model-openai/Cargo.toml b/crates/wickle-model-openai/Cargo.toml
+index 9f1c67e3b0675b42f10d911641fec0f7748b8b22..9dd1561e54931568ca8088bab7f097949225a3af 100644
+--- a/crates/wickle-model-openai/Cargo.toml
++++ b/crates/wickle-model-openai/Cargo.toml
+@@ -1,12 +1,13 @@
+ [package]
+ name = "wickle-model-openai"
+ version.workspace = true
++license.workspace = true
+ edition.workspace = true
+ rust-version.workspace = true
+ repository.workspace = true
+ description = "OpenAI Responses model and metadata adapters for Wickle"
+ publish = false
+-include = ["Cargo.toml", "src/**"]
++include = ["Cargo.toml", "LICENSE", "src/**"]
+ 
+ [dependencies]
+ wickle-model-responses = { path = "../wickle-model-responses", version = "=0.1.0" }
+diff --git a/crates/wickle-model-openai/LICENSE b/crates/wickle-model-openai/LICENSE
+new file mode 100644
+index 0000000000000000000000000000000000000000..fa110f6cca190273b8a205aaff2a0cec1684e255
+--- /dev/null
++++ b/crates/wickle-model-openai/LICENSE
+@@ -0,0 +1,21 @@
++MIT License
++
++Copyright (c) 2026 EpsilonDelta
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++SOFTWARE.
+diff --git a/crates/wickle-model-responses/Cargo.toml b/crates/wickle-model-responses/Cargo.toml
+index 12340b5b9599443554dd7a342f4dee3064385abe..6c9f9384cd561a37aabc546366d4441b58f760f0 100644
+--- a/crates/wickle-model-responses/Cargo.toml
++++ b/crates/wickle-model-responses/Cargo.toml
+@@ -1,12 +1,13 @@
+ [package]
+ name = "wickle-model-responses"
+ version.workspace = true
++license.workspace = true
+ edition.workspace = true
+ rust-version.workspace = true
+ repository.workspace = true
+ description = "Responses request and bounded SSE codecs for Wickle adapters"
+ publish = false
+-include = ["Cargo.toml", "src/**"]
++include = ["Cargo.toml", "LICENSE", "src/**"]
+ 
+ [dependencies]
+ wickle = { path = "../wickle", version = "=0.1.0" }
+diff --git a/crates/wickle-model-responses/LICENSE b/crates/wickle-model-responses/LICENSE
+new file mode 100644
+index 0000000000000000000000000000000000000000..fa110f6cca190273b8a205aaff2a0cec1684e255
+--- /dev/null
++++ b/crates/wickle-model-responses/LICENSE
+@@ -0,0 +1,21 @@
++MIT License
++
++Copyright (c) 2026 EpsilonDelta
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++SOFTWARE.
+diff --git a/crates/wickle-model-router/Cargo.toml b/crates/wickle-model-router/Cargo.toml
+index 6288bde39579ee26f593ecb13b6e9d89df23e3bd..6db34ee0931c23964421e973068c964cec5458c7 100644
+--- a/crates/wickle-model-router/Cargo.toml
++++ b/crates/wickle-model-router/Cargo.toml
+@@ -1,12 +1,13 @@
+ [package]
+ name = "wickle-model-router"
+ version.workspace = true
++license.workspace = true
+ edition.workspace = true
+ rust-version.workspace = true
+ repository.workspace = true
+ description = "Immutable model catalogs and routing components for Wickle"
+ publish = false
+-include = ["Cargo.toml", "src/**"]
++include = ["Cargo.toml", "LICENSE", "src/**"]
+ 
+ [dependencies]
+ wickle = { path = "../wickle", version = "=0.1.0" }
+diff --git a/crates/wickle-model-router/LICENSE b/crates/wickle-model-router/LICENSE
+new file mode 100644
+index 0000000000000000000000000000000000000000..fa110f6cca190273b8a205aaff2a0cec1684e255
+--- /dev/null
++++ b/crates/wickle-model-router/LICENSE
+@@ -0,0 +1,21 @@
++MIT License
++
++Copyright (c) 2026 EpsilonDelta
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++SOFTWARE.
+diff --git a/crates/wickle-model-vertex/Cargo.toml b/crates/wickle-model-vertex/Cargo.toml
+index 19d619872a609bf5f5924385e15b9532ac056629..e666d6c1259025069cbdbc5708f9a87f63fa367e 100644
+--- a/crates/wickle-model-vertex/Cargo.toml
++++ b/crates/wickle-model-vertex/Cargo.toml
+@@ -1,12 +1,13 @@
+ [package]
+ name = "wickle-model-vertex"
+ version.workspace = true
++license.workspace = true
+ edition.workspace = true
+ rust-version.workspace = true
+ repository.workspace = true
+ description = "Google Cloud Vertex AI Gemini model and metadata adapters for Wickle"
+ publish = false
+-include = ["Cargo.toml", "src/**"]
++include = ["Cargo.toml", "LICENSE", "src/**"]
+ 
+ [dependencies]
+ wickle-model-gemini = { path = "../wickle-model-gemini", version = "=0.1.0" }
+diff --git a/crates/wickle-model-vertex/LICENSE b/crates/wickle-model-vertex/LICENSE
+new file mode 100644
+index 0000000000000000000000000000000000000000..fa110f6cca190273b8a205aaff2a0cec1684e255
+--- /dev/null
++++ b/crates/wickle-model-vertex/LICENSE
+@@ -0,0 +1,21 @@
++MIT License
++
++Copyright (c) 2026 EpsilonDelta
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++SOFTWARE.
+diff --git a/crates/wickle-model-xai/Cargo.toml b/crates/wickle-model-xai/Cargo.toml
+index f3e20db28d0d7d3636ccc64ac343e861e31b8ed5..77af36f0957971bf813317914ffea7cc3d04c2c2 100644
+--- a/crates/wickle-model-xai/Cargo.toml
++++ b/crates/wickle-model-xai/Cargo.toml
+@@ -1,12 +1,13 @@
+ [package]
+ name = "wickle-model-xai"
+ version.workspace = true
++license.workspace = true
+ edition.workspace = true
+ rust-version.workspace = true
+ repository.workspace = true
+ description = "xAI Responses model and metadata adapters for Wickle"
+ publish = false
+-include = ["Cargo.toml", "src/**"]
++include = ["Cargo.toml", "LICENSE", "src/**"]
+ 
+ [dependencies]
+ wickle-model-responses = { path = "../wickle-model-responses", version = "=0.1.0" }
+diff --git a/crates/wickle-model-xai/LICENSE b/crates/wickle-model-xai/LICENSE
+new file mode 100644
+index 0000000000000000000000000000000000000000..fa110f6cca190273b8a205aaff2a0cec1684e255
+--- /dev/null
++++ b/crates/wickle-model-xai/LICENSE
+@@ -0,0 +1,21 @@
++MIT License
++
++Copyright (c) 2026 EpsilonDelta
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++SOFTWARE.
+diff --git a/crates/wickle-state-sqlite/Cargo.toml b/crates/wickle-state-sqlite/Cargo.toml
+index 6e68de78b5b38aed3ed7e3e0a130daa9936a4de9..0a880ad5d8b43fc68ced524ea25465f07c2d319d 100644
+--- a/crates/wickle-state-sqlite/Cargo.toml
++++ b/crates/wickle-state-sqlite/Cargo.toml
+@@ -1,12 +1,13 @@
+ [package]
+ name = "wickle-state-sqlite"
+ version.workspace = true
++license.workspace = true
+ edition.workspace = true
+ rust-version.workspace = true
+ repository.workspace = true
+ description = "A durable SQLite state store for Wickle"
+ publish = false
+-include = ["Cargo.toml", "src/**"]
++include = ["Cargo.toml", "LICENSE", "src/**"]
+ 
+ [dependencies]
+ wickle = { path = "../wickle", version = "=0.1.0" }
+diff --git a/crates/wickle-state-sqlite/LICENSE b/crates/wickle-state-sqlite/LICENSE
+new file mode 100644
+index 0000000000000000000000000000000000000000..fa110f6cca190273b8a205aaff2a0cec1684e255
+--- /dev/null
++++ b/crates/wickle-state-sqlite/LICENSE
+@@ -0,0 +1,21 @@
++MIT License
++
++Copyright (c) 2026 EpsilonDelta
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++SOFTWARE.
+diff --git a/crates/wickle/Cargo.toml b/crates/wickle/Cargo.toml
+index e7b14775a459e0932860ac0df08b0b170fe5c2e2..d3eb5176131dcc2a02906fa0daf0f951f74e6bbd 100644
+--- a/crates/wickle/Cargo.toml
++++ b/crates/wickle/Cargo.toml
+@@ -1,12 +1,13 @@
+ [package]
+ name = "wickle"
+ version.workspace = true
++license.workspace = true
+ edition.workspace = true
+ rust-version.workspace = true
+ repository.workspace = true
+ description = "An extensible agent engine for Rust applications"
+ publish = false
+-include = ["Cargo.toml", "src/**"]
++include = ["Cargo.toml", "LICENSE", "src/**"]
+ 
+ [dependencies]
+ getrandom.workspace = true
+diff --git a/crates/wickle/LICENSE b/crates/wickle/LICENSE
+new file mode 100644
+index 0000000000000000000000000000000000000000..fa110f6cca190273b8a205aaff2a0cec1684e255
+--- /dev/null
++++ b/crates/wickle/LICENSE
+@@ -0,0 +1,21 @@
++MIT License
++
++Copyright (c) 2026 EpsilonDelta
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++SOFTWARE.
+diff --git a/docs/installation.md b/docs/installation.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..96697a020473d4a2df1b2cf65b26f99b66272592
+--- /dev/null
++++ b/docs/installation.md
+@@ -0,0 +1,41 @@
++# Install Wickle
++
++Wickle is an in-process Rust library. Use Rust 1.85 or later and a Tokio runtime
++for asynchronous execution. The repository pins its development compiler in
++`rust-toolchain.toml`.
++
++Version 0.1.0 is distributed through GitHub Releases. Add dependencies from the
++same Git tag so the core and optional adapters resolve together:
++
++```toml
++[dependencies]
++wickle = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
++wickle-model-openai = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
++wickle-model-router = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
++```
++
++Select only the adapters your Host uses. Model providers, SQLite persistence,
++MCP and adapter assembly live in separate crates. The core has no provider SDK
++or database dependency. See [provider configuration](model-providers.md),
++[SQLite storage](sqlite-state-store.md) and [MCP tools](mcp.md).
++
++Construct the Host bindings and call the library directly; no separate Wickle
++server process is required. See [running an agent](agents.md). Credentials,
++connection permissions and configuration loading belong to your Host; the library
++does not load `.env` files.
++
++To verify a source checkout, run:
++
++```sh
++cargo test --workspace --locked
++python3 scripts/check-package.py
++```
++
++The package check needs Python 3.9 or later. It extracts Cargo archives into a
++separate directory and executes consumer applications, including two independent
++business workspaces. It does not contact paid model APIs. Additional live-test
++setup is described in [provider setup](provider-setup.md); consult the
++[model evidence matrix](model-support.md) before relying on a particular release.
++
++Wickle is licensed under [MIT](../LICENSE). Version 0.1.0 is an initial release;
++public contracts may change in later releases.
+diff --git a/scripts/check-package.py b/scripts/check-package.py
+index 4802e639e58900accc556f32cd26a2185a2011e5..c26934450608471053e9535a3903c003563c85a5 100644
+--- a/scripts/check-package.py
++++ b/scripts/check-package.py
+@@ -93,6 +93,7 @@ def main():
+             destination = staged / manifest.parent.relative_to(ROOT)
+             destination.mkdir(parents=True)
+             shutil.copyfile(manifest, destination / "Cargo.toml")
++            shutil.copyfile(manifest.parent / "LICENSE", destination / "LICENSE")
+             shutil.copytree(manifest.parent / "src", destination / "src")
+         package_paths = {core["name"]: base / package_name}
+         core_source_digest = source_digest(package_paths["wickle"])
+diff --git a/tests/support/report_process_consumer.rs b/tests/support/report_process_consumer.rs
+index 0e27c2315c058cf915059b1a530c5db1746a9dd4..2261096bddaa2ea33c039ec0c06d0328265c6f76 100644
+--- a/tests/support/report_process_consumer.rs
++++ b/tests/support/report_process_consumer.rs
+@@ -182,6 +182,9 @@ mod host {
+             policy.clone(),
+             clock.clone(),
+         ));
++        // The Run budget includes both process lifetimes and the approval gap.
++        // Each child has a separate 30-second wall watchdog below; this is a
++        // recovery-contract example, not a 30-second end-to-end latency test.
+         let profile = AgentProfile::from_json(
+             r#"{
+         "schema_version":"wickle.agent-profile.v1","agent_id":"writer","version":"1",
+@@ -190,7 +193,7 @@ mod host {
+         "connectors":[{"binding_id":"data","connector_id":"report-service","version":"1"}],
+         "adapters":[{"binding_id":"reports","adapter_id":"report-adapter","version":"1","connections":{"main":"data"}}],
+         "context_policy":{"strategy":"bounded"},"output_contract":{"type":"text"},
+-        "limits":{"max_model_calls":3,"max_tool_attempts":2,"max_repair_attempts":0,"max_recovery_attempts":0,"max_elapsed_ms":30000}
++        "limits":{"max_model_calls":3,"max_tool_attempts":2,"max_repair_attempts":0,"max_recovery_attempts":0,"max_elapsed_ms":120000}
+     }"#,
+         )?;
+         Ok((

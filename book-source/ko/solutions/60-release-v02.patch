@@ -1,0 +1,669 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 633822b1de0e43d06c50a2342d849d8be60200f8..79f7afb6697846b88f7d098690e9b4177bfdb4ce 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,5 +1,29 @@
+ # Changelog
+ 
++## 0.2.0
++
++Agent runs now preserve submitted request identity, prepared model steps and
++execution intervals across retries, interruptions and recovery.
++
++- Compile Tool schemas for each provider while retaining original validation,
++  reversible argument encodings and protected system-input binding.
++- Configure inference options through Binding, Profile and Run layers, with
++  saved provenance and separate settings for verification and compaction.
++- Attach validated application state to recoverable interruptions and use
++  durable control receipts without rewriting an earlier handle's outcome.
++- Inspect saved steps with sensitive values redacted, and observe deadline
++  expiry without mutating the Run.
++- Preserve scoped context revisions and derived-source permissions, and recover
++  SQLite execution boundaries without blindly repeating uncertain effects.
++- Use the packaged Host examples individually, including custom interruption
++  recovery and native/strict Tool schema decoding.
++
++This release changes Rust integration contracts. Follow the
++[migration guide](docs/migration-v0.2.md) before upgrading persistent data;
++legacy nonterminal Runs must be resolved with their original runtime.
++Install all Wickle crates from the same tag. Provider
++[contract and live evidence](docs/model-support.md) remain configuration-specific.
++
+ ## 0.1.0
+ 
+ Initial MIT-licensed release of the embeddable Rust agent engine.
+diff --git a/Cargo.lock b/Cargo.lock
+index 46d92ad316ad7d571daf0ed008937f68af9fb514..ee5467358ddafc4ceea32d3ede748506114f06a2 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -2517,7 +2517,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "wickle"
+-version = "0.1.0"
++version = "0.2.0"
+ dependencies = [
+  "futures-util",
+  "getrandom 0.3.4",
+@@ -2532,7 +2532,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "wickle-adapter-runtime"
+-version = "0.1.0"
++version = "0.2.0"
+ dependencies = [
+  "futures-util",
+  "serde_json",
+@@ -2545,7 +2545,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "wickle-mcp"
+-version = "0.1.0"
++version = "0.2.0"
+ dependencies = [
+  "futures-util",
+  "rmcp",
+@@ -2558,7 +2558,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "wickle-model-anthropic"
+-version = "0.1.0"
++version = "0.2.0"
+ dependencies = [
+  "futures-util",
+  "reqwest",
+@@ -2571,7 +2571,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "wickle-model-azure-openai"
+-version = "0.1.0"
++version = "0.2.0"
+ dependencies = [
+  "futures-util",
+  "reqwest",
+@@ -2584,7 +2584,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "wickle-model-bedrock"
+-version = "0.1.0"
++version = "0.2.0"
+ dependencies = [
+  "aws-credential-types",
+  "aws-sigv4",
+@@ -2607,7 +2607,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "wickle-model-gemini"
+-version = "0.1.0"
++version = "0.2.0"
+ dependencies = [
+  "futures-util",
+  "reqwest",
+@@ -2620,7 +2620,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "wickle-model-openai"
+-version = "0.1.0"
++version = "0.2.0"
+ dependencies = [
+  "futures-util",
+  "reqwest",
+@@ -2633,7 +2633,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "wickle-model-responses"
+-version = "0.1.0"
++version = "0.2.0"
+ dependencies = [
+  "serde_json",
+  "wickle",
+@@ -2641,7 +2641,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "wickle-model-router"
+-version = "0.1.0"
++version = "0.2.0"
+ dependencies = [
+  "futures-util",
+  "serde",
+@@ -2653,7 +2653,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "wickle-model-vertex"
+-version = "0.1.0"
++version = "0.2.0"
+ dependencies = [
+  "futures-util",
+  "reqwest",
+@@ -2667,7 +2667,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "wickle-model-xai"
+-version = "0.1.0"
++version = "0.2.0"
+ dependencies = [
+  "futures-util",
+  "reqwest",
+@@ -2680,7 +2680,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "wickle-state-sqlite"
+-version = "0.1.0"
++version = "0.2.0"
+ dependencies = [
+  "futures-util",
+  "rusqlite",
+diff --git a/Cargo.toml b/Cargo.toml
+index da8b0d3288cf669ea38c58a1e89f328446735593..73c63109019fe324be04bc9210c71b4feeb9c53c 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -4,7 +4,7 @@ default-members = ["crates/wickle"]
+ resolver = "3"
+ 
+ [workspace.package]
+-version = "0.1.0"
++version = "0.2.0"
+ license = "MIT"
+ edition = "2024"
+ rust-version = "1.85"
+diff --git a/README.de.md b/README.de.md
+index 5808d241f3745ef3ead5d30de3ce67f333ea32a9..f2ebe932879461cefcf7fadd734457e67185c3b9 100644
+--- a/README.de.md
++++ b/README.de.md
+@@ -12,13 +12,13 @@ Bette Agenten mit konfigurierbaren Profilen, Modellen und Werkzeugen in deine An
+ 
+ ## Installation
+ 
+-Benötigt Rust 1.85 oder neuer und Tokio. Verwende denselben Git-Tag für den Kern und die Adapter. v0.1.0 wird über GitHub Releases verteilt.
++Benötigt Rust 1.85 oder neuer und Tokio. Verwende denselben Git-Tag für den Kern und die Adapter. v0.2.0 wird über GitHub Releases verteilt.
+ 
+ ```toml
+ [dependencies]
+-wickle = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
+-wickle-model-openai = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
+-wickle-model-router = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
++wickle = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.2.0" }
++wickle-model-openai = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.2.0" }
++wickle-model-router = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.2.0" }
+ ```
+ 
+ ## Einen Agenten ausführen
+@@ -101,4 +101,4 @@ Verwende `wickle-state-sqlite` für lokale Persistenz und `wickle-adapter-runtim
+ 
+ ## Lizenz
+ 
+-[MIT](LICENSE) · MIT © EpsilonDelta. Die 0.1-Reihe ist eine erste API und kann sich ändern.
++[MIT](LICENSE) · MIT © EpsilonDelta. Die API der 0.2-Reihe kann sich in späteren Versionen ändern.
+diff --git a/README.es.md b/README.es.md
+index bd31a9b336a3ee0940dd65f99f1703be24bc8b2f..69f7dfc5f8b5435656c737a76cd234464b45e3e9 100644
+--- a/README.es.md
++++ b/README.es.md
+@@ -12,13 +12,13 @@ Integra agentes en tu aplicación mediante perfiles, modelos y herramientas. Wic
+ 
+ ## Instalación
+ 
+-Requiere Rust 1.85 o posterior y Tokio. Usa la misma etiqueta Git para el núcleo y los adaptadores. v0.1.0 se distribuye mediante GitHub Releases.
++Requiere Rust 1.85 o posterior y Tokio. Usa la misma etiqueta Git para el núcleo y los adaptadores. v0.2.0 se distribuye mediante GitHub Releases.
+ 
+ ```toml
+ [dependencies]
+-wickle = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
+-wickle-model-openai = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
+-wickle-model-router = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
++wickle = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.2.0" }
++wickle-model-openai = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.2.0" }
++wickle-model-router = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.2.0" }
+ ```
+ 
+ ## Ejecutar un agente
+@@ -101,4 +101,4 @@ Usa `wickle-state-sqlite` para persistencia local y `wickle-adapter-runtime` par
+ 
+ ## Licencia
+ 
+-[MIT](LICENSE) · MIT © EpsilonDelta. La serie 0.1 es una API inicial y puede cambiar.
++[MIT](LICENSE) · MIT © EpsilonDelta. La API de la serie 0.2 puede cambiar en versiones posteriores.
+diff --git a/README.fr.md b/README.fr.md
+index b9b5688a199f5a3c17e89301f0c2d23d59bc4c9f..aa51826f8a3a8dcb9eaddfc7321fd6916f13827c 100644
+--- a/README.fr.md
++++ b/README.fr.md
+@@ -12,13 +12,13 @@ Intégrez des agents à votre application à partir de profils, de modèles et d
+ 
+ ## Installation
+ 
+-Nécessite Rust 1.85 ou supérieur et Tokio. Utilisez le même tag Git pour le cœur et les adaptateurs. La version 0.1.0 est distribuée via GitHub Releases.
++Nécessite Rust 1.85 ou supérieur et Tokio. Utilisez le même tag Git pour le cœur et les adaptateurs. La version 0.2.0 est distribuée via GitHub Releases.
+ 
+ ```toml
+ [dependencies]
+-wickle = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
+-wickle-model-openai = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
+-wickle-model-router = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
++wickle = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.2.0" }
++wickle-model-openai = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.2.0" }
++wickle-model-router = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.2.0" }
+ ```
+ 
+ ## Exécuter un agent
+@@ -101,4 +101,4 @@ Utilisez `wickle-state-sqlite` pour la persistance locale et `wickle-adapter-run
+ 
+ ## Licence
+ 
+-[MIT](LICENSE) · MIT © EpsilonDelta. La série 0.1 est une API initiale susceptible de changer.
++[MIT](LICENSE) · MIT © EpsilonDelta. L’API de la série 0.2 est susceptible de changer.
+diff --git a/README.ja.md b/README.ja.md
+index c10a3d518a25ed5cff6d55e7530656fc0a19d258..46e2bee821c868e82bba45a2e1129f9cad4e6f63 100644
+--- a/README.ja.md
++++ b/README.ja.md
+@@ -12,13 +12,13 @@
+ 
+ ## インストール
+ 
+-Rust 1.85 以上と Tokio ランタイムが必要です。コアとアダプターには同じ Git タグを使用します。v0.1.0 は GitHub Releases で配布します。
++Rust 1.85 以上と Tokio ランタイムが必要です。コアとアダプターには同じ Git タグを使用します。v0.2.0 は GitHub Releases で配布します。
+ 
+ ```toml
+ [dependencies]
+-wickle = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
+-wickle-model-openai = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
+-wickle-model-router = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
++wickle = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.2.0" }
++wickle-model-openai = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.2.0" }
++wickle-model-router = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.2.0" }
+ ```
+ 
+ ## エージェントの実行
+@@ -101,4 +101,4 @@ pub async fn run_once(
+ 
+ ## ライセンス
+ 
+-[MIT](LICENSE) · MIT © EpsilonDelta。0.1 系は初期 API のため変更される場合があります。
++[MIT](LICENSE) · MIT © EpsilonDelta. 0.2 系の API は今後変更される場合があります。
+diff --git a/README.ko.md b/README.ko.md
+index c75206c6b2ae799a032ed4930f4ec36c80d278b9..996a3e898a81d55704408d4badb889465f262627 100644
+--- a/README.ko.md
++++ b/README.ko.md
+@@ -12,13 +12,13 @@
+ 
+ ## 설치
+ 
+-Rust 1.85 이상과 Tokio 런타임이 필요합니다. 코어와 선택한 어댑터는 같은 Git 태그로 설치합니다. v0.1.0은 GitHub Release로 배포합니다.
++Rust 1.85 이상과 Tokio 런타임이 필요합니다. 코어와 선택한 어댑터는 같은 Git 태그로 설치합니다. v0.2.0은 GitHub Release로 배포합니다.
+ 
+ ```toml
+ [dependencies]
+-wickle = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
+-wickle-model-openai = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
+-wickle-model-router = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
++wickle = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.2.0" }
++wickle-model-openai = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.2.0" }
++wickle-model-router = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.2.0" }
+ ```
+ 
+ ## 에이전트 실행
+@@ -101,4 +101,4 @@ pub async fn run_once(
+ 
+ ## 라이선스
+ 
+-[MIT](LICENSE) · MIT © EpsilonDelta. 0.1 계열은 초기 API로, 이후 버전에서 변경될 수 있습니다.
++[MIT](LICENSE) · MIT © EpsilonDelta. 0.2 API는 이후 버전에서 변경될 수 있습니다.
+diff --git a/README.md b/README.md
+index 687a8c157695ae194452b4bea62e4322ab503a01..0d12a34db6e679bffe04e55c1f62102fb4bb2a78 100644
+--- a/README.md
++++ b/README.md
+@@ -12,13 +12,13 @@ Embed agents in your application with configurable profiles, model providers and
+ 
+ ## Installation
+ 
+-Requires Rust 1.85 or later and a Tokio runtime. Use the same Git tag for the core and optional adapters. v0.1.0 is distributed through GitHub Releases.
++Requires Rust 1.85 or later and a Tokio runtime. Use the same Git tag for the core and optional adapters. v0.2.0 is distributed through GitHub Releases.
+ 
+ ```toml
+ [dependencies]
+-wickle = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
+-wickle-model-openai = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
+-wickle-model-router = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
++wickle = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.2.0" }
++wickle-model-openai = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.2.0" }
++wickle-model-router = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.2.0" }
+ ```
+ 
+ ## Run an agent
+@@ -101,4 +101,4 @@ Use `wickle-state-sqlite` for local persistence and `wickle-adapter-runtime` to
+ 
+ ## License
+ 
+-[MIT](LICENSE) · MIT © EpsilonDelta. The 0.1 series is an initial API and may change.
++[MIT](LICENSE) · MIT © EpsilonDelta. The 0.2 API may change in later releases.
+diff --git a/README.ru.md b/README.ru.md
+index 0f264275c9495fcf6beed32b71e52ae2c5363d74..1af9a0fbd0aca2f18e5faec06c31c9b670ff7a90 100644
+--- a/README.ru.md
++++ b/README.ru.md
+@@ -12,13 +12,13 @@
+ 
+ ## Установка
+ 
+-Требуются Rust 1.85 или новее и Tokio. Используйте один Git-тег для ядра и адаптеров. Версия 0.1.0 распространяется через GitHub Releases.
++Требуются Rust 1.85 или новее и Tokio. Используйте один Git-тег для ядра и адаптеров. Версия 0.2.0 распространяется через GitHub Releases.
+ 
+ ```toml
+ [dependencies]
+-wickle = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
+-wickle-model-openai = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
+-wickle-model-router = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
++wickle = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.2.0" }
++wickle-model-openai = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.2.0" }
++wickle-model-router = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.2.0" }
+ ```
+ 
+ ## Запуск агента
+@@ -101,4 +101,4 @@ pub async fn run_once(
+ 
+ ## Лицензия
+ 
+-[MIT](LICENSE) · MIT © EpsilonDelta. Серия 0.1 содержит начальную версию API, которая может изменяться.
++[MIT](LICENSE) · MIT © EpsilonDelta. API серии 0.2 может измениться в последующих версиях.
+diff --git a/README.zh-CN.md b/README.zh-CN.md
+index 0c292c67fb2177a699c2534cb22e999b8542847a..338673c0ff2ac36455923674ff85a9d084c48e75 100644
+--- a/README.zh-CN.md
++++ b/README.zh-CN.md
+@@ -12,13 +12,13 @@
+ 
+ ## 安装
+ 
+-需要 Rust 1.85 或更新版本及 Tokio 运行时。核心与适配器使用相同的 Git 标签。v0.1.0 通过 GitHub Releases 发布。
++需要 Rust 1.85 或更新版本及 Tokio 运行时。核心与适配器使用相同的 Git 标签。v0.2.0 通过 GitHub Releases 发布。
+ 
+ ```toml
+ [dependencies]
+-wickle = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
+-wickle-model-openai = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
+-wickle-model-router = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
++wickle = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.2.0" }
++wickle-model-openai = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.2.0" }
++wickle-model-router = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.2.0" }
+ ```
+ 
+ ## 运行智能体
+@@ -101,4 +101,4 @@ pub async fn run_once(
+ 
+ ## 许可证
+ 
+-[MIT](LICENSE) · MIT © EpsilonDelta。0.1 系列属于初始 API，后续版本可能调整。
++[MIT](LICENSE) · MIT © EpsilonDelta. 0.2 系列 API 可能在后续版本中调整。
+diff --git a/crates/wickle-adapter-runtime/Cargo.toml b/crates/wickle-adapter-runtime/Cargo.toml
+index 696cb76be8bcd06b9836d6ae46a6ae17238b13fa..43155d88629667c75799ca3a6899cde747978e94 100644
+--- a/crates/wickle-adapter-runtime/Cargo.toml
++++ b/crates/wickle-adapter-runtime/Cargo.toml
+@@ -10,7 +10,7 @@ publish = false
+ include = ["Cargo.toml", "LICENSE", "src/**"]
+ 
+ [dependencies]
+-wickle = { path = "../wickle", version = "=0.1.0" }
++wickle = { path = "../wickle", version = "=0.2.0" }
+ futures-util.workspace = true
+ serde_json.workspace = true
+ tokio.workspace = true
+@@ -18,8 +18,8 @@ tokio-util.workspace = true
+ 
+ [dev-dependencies]
+ tokio = { workspace = true, features = ["rt-multi-thread", "test-util"] }
+-wickle-model-router = { path = "../wickle-model-router", version = "=0.1.0" }
+-wickle-state-sqlite = { path = "../wickle-state-sqlite", version = "=0.1.0" }
++wickle-model-router = { path = "../wickle-model-router", version = "=0.2.0" }
++wickle-state-sqlite = { path = "../wickle-state-sqlite", version = "=0.2.0" }
+ 
+ [lints]
+ workspace = true
+diff --git a/crates/wickle-mcp/Cargo.toml b/crates/wickle-mcp/Cargo.toml
+index 80964cc0aaaab1a3b854840e36cd86148dfc565c..9f1401fe7aa8228337da71efa22cb7a636a3e612 100644
+--- a/crates/wickle-mcp/Cargo.toml
++++ b/crates/wickle-mcp/Cargo.toml
+@@ -9,7 +9,7 @@ description = "Reviewed MCP stdio Tool adapters for Wickle"
+ publish = false
+ include = ["Cargo.toml", "LICENSE", "src/**"]
+ [dependencies]
+-wickle = { path = "../wickle", version = "=0.1.0" }
++wickle = { path = "../wickle", version = "=0.2.0" }
+ rmcp = { version = "=0.8.5", features = ["client", "transport-async-rw"] }
+ serde.workspace = true
+ serde_json.workspace = true
+diff --git a/crates/wickle-model-anthropic/Cargo.toml b/crates/wickle-model-anthropic/Cargo.toml
+index 740faa8126f5626b1296487def3a81123fdd9048..9c4334392aa6c55582de2778374df0f309d85f65 100644
+--- a/crates/wickle-model-anthropic/Cargo.toml
++++ b/crates/wickle-model-anthropic/Cargo.toml
+@@ -10,8 +10,8 @@ publish = false
+ include = ["Cargo.toml", "LICENSE", "src/**"]
+ 
+ [dependencies]
+-wickle-model-responses = { path = "../wickle-model-responses", version = "=0.1.0" }
+-wickle = { path = "../wickle", version = "=0.1.0" }
++wickle-model-responses = { path = "../wickle-model-responses", version = "=0.2.0" }
++wickle = { path = "../wickle", version = "=0.2.0" }
+ reqwest.workspace = true
+ serde_json = { workspace = true, features = ["raw_value"] }
+ futures-util.workspace = true
+diff --git a/crates/wickle-model-azure-openai/Cargo.toml b/crates/wickle-model-azure-openai/Cargo.toml
+index f19a1b12da3dc264ae02ca763ec7d7896163ac73..6a4ba2c361f4ca7b222d8a3844c36f9b85aa5dea 100644
+--- a/crates/wickle-model-azure-openai/Cargo.toml
++++ b/crates/wickle-model-azure-openai/Cargo.toml
+@@ -10,8 +10,8 @@ publish = false
+ include = ["Cargo.toml", "LICENSE", "src/**"]
+ 
+ [dependencies]
+-wickle = { path = "../wickle", version = "=0.1.0" }
+-wickle-model-responses = { path = "../wickle-model-responses", version = "=0.1.0" }
++wickle = { path = "../wickle", version = "=0.2.0" }
++wickle-model-responses = { path = "../wickle-model-responses", version = "=0.2.0" }
+ reqwest.workspace = true
+ serde_json.workspace = true
+ futures-util.workspace = true
+diff --git a/crates/wickle-model-bedrock/Cargo.toml b/crates/wickle-model-bedrock/Cargo.toml
+index d0f6273bb35a156177b388105cd3829f8a53f54c..f82af3daa03da6223683ada6c9476a437c21fe0e 100644
+--- a/crates/wickle-model-bedrock/Cargo.toml
++++ b/crates/wickle-model-bedrock/Cargo.toml
+@@ -9,9 +9,9 @@ description = "AWS Bedrock Claude model adapters for Wickle"
+ publish = false
+ include = ["Cargo.toml", "LICENSE", "src/**"]
+ [dependencies]
+-wickle = { path = "../wickle", version = "=0.1.0" }
+-wickle-model-anthropic = { path = "../wickle-model-anthropic", version = "=0.1.0" }
+-wickle-model-responses = { path = "../wickle-model-responses", version = "=0.1.0" }
++wickle = { path = "../wickle", version = "=0.2.0" }
++wickle-model-anthropic = { path = "../wickle-model-anthropic", version = "=0.2.0" }
++wickle-model-responses = { path = "../wickle-model-responses", version = "=0.2.0" }
+ reqwest.workspace = true
+ serde_json.workspace = true
+ futures-util.workspace = true
+diff --git a/crates/wickle-model-gemini/Cargo.toml b/crates/wickle-model-gemini/Cargo.toml
+index 710b4e0f1031d101958a41e6fbebd0d58551b826..bbcfc667fa3f6d41f71c0f89f31273a3ad2776ea 100644
+--- a/crates/wickle-model-gemini/Cargo.toml
++++ b/crates/wickle-model-gemini/Cargo.toml
+@@ -10,8 +10,8 @@ publish = false
+ include = ["Cargo.toml", "LICENSE", "src/**"]
+ 
+ [dependencies]
+-wickle-model-responses = { path = "../wickle-model-responses", version = "=0.1.0" }
+-wickle = { path = "../wickle", version = "=0.1.0" }
++wickle-model-responses = { path = "../wickle-model-responses", version = "=0.2.0" }
++wickle = { path = "../wickle", version = "=0.2.0" }
+ reqwest.workspace = true
+ serde_json = { workspace = true, features = ["raw_value"] }
+ futures-util.workspace = true
+diff --git a/crates/wickle-model-openai/Cargo.toml b/crates/wickle-model-openai/Cargo.toml
+index 9dd1561e54931568ca8088bab7f097949225a3af..8d4e8655ee49f431166ef5e42d7b2632507d2f4f 100644
+--- a/crates/wickle-model-openai/Cargo.toml
++++ b/crates/wickle-model-openai/Cargo.toml
+@@ -10,8 +10,8 @@ publish = false
+ include = ["Cargo.toml", "LICENSE", "src/**"]
+ 
+ [dependencies]
+-wickle-model-responses = { path = "../wickle-model-responses", version = "=0.1.0" }
+-wickle = { path = "../wickle", version = "=0.1.0" }
++wickle-model-responses = { path = "../wickle-model-responses", version = "=0.2.0" }
++wickle = { path = "../wickle", version = "=0.2.0" }
+ reqwest.workspace = true
+ serde_json.workspace = true
+ futures-util.workspace = true
+diff --git a/crates/wickle-model-responses/Cargo.toml b/crates/wickle-model-responses/Cargo.toml
+index 6c9f9384cd561a37aabc546366d4441b58f760f0..b5f77a8611b4323d74f7320ccb16fb73b6d9316b 100644
+--- a/crates/wickle-model-responses/Cargo.toml
++++ b/crates/wickle-model-responses/Cargo.toml
+@@ -10,7 +10,7 @@ publish = false
+ include = ["Cargo.toml", "LICENSE", "src/**"]
+ 
+ [dependencies]
+-wickle = { path = "../wickle", version = "=0.1.0" }
++wickle = { path = "../wickle", version = "=0.2.0" }
+ serde_json.workspace = true
+ 
+ [lints]
+diff --git a/crates/wickle-model-router/Cargo.toml b/crates/wickle-model-router/Cargo.toml
+index 6db34ee0931c23964421e973068c964cec5458c7..3443d7bd113a8c4cb97645d62e13793b0c313bae 100644
+--- a/crates/wickle-model-router/Cargo.toml
++++ b/crates/wickle-model-router/Cargo.toml
+@@ -10,7 +10,7 @@ publish = false
+ include = ["Cargo.toml", "LICENSE", "src/**"]
+ 
+ [dependencies]
+-wickle = { path = "../wickle", version = "=0.1.0" }
++wickle = { path = "../wickle", version = "=0.2.0" }
+ serde.workspace = true
+ serde_json.workspace = true
+ 
+diff --git a/crates/wickle-model-vertex/Cargo.toml b/crates/wickle-model-vertex/Cargo.toml
+index e666d6c1259025069cbdbc5708f9a87f63fa367e..bd1f4e99196187c2ef0b722ac5ff71239a0f73d8 100644
+--- a/crates/wickle-model-vertex/Cargo.toml
++++ b/crates/wickle-model-vertex/Cargo.toml
+@@ -10,9 +10,9 @@ publish = false
+ include = ["Cargo.toml", "LICENSE", "src/**"]
+ 
+ [dependencies]
+-wickle-model-gemini = { path = "../wickle-model-gemini", version = "=0.1.0" }
+-wickle-model-responses = { path = "../wickle-model-responses", version = "=0.1.0" }
+-wickle = { path = "../wickle", version = "=0.1.0" }
++wickle-model-gemini = { path = "../wickle-model-gemini", version = "=0.2.0" }
++wickle-model-responses = { path = "../wickle-model-responses", version = "=0.2.0" }
++wickle = { path = "../wickle", version = "=0.2.0" }
+ reqwest.workspace = true
+ serde_json.workspace = true
+ futures-util.workspace = true
+diff --git a/crates/wickle-model-xai/Cargo.toml b/crates/wickle-model-xai/Cargo.toml
+index 77af36f0957971bf813317914ffea7cc3d04c2c2..8b1a6c2830ac5440c37ae3c3a0382b7e476b0820 100644
+--- a/crates/wickle-model-xai/Cargo.toml
++++ b/crates/wickle-model-xai/Cargo.toml
+@@ -10,8 +10,8 @@ publish = false
+ include = ["Cargo.toml", "LICENSE", "src/**"]
+ 
+ [dependencies]
+-wickle-model-responses = { path = "../wickle-model-responses", version = "=0.1.0" }
+-wickle = { path = "../wickle", version = "=0.1.0" }
++wickle-model-responses = { path = "../wickle-model-responses", version = "=0.2.0" }
++wickle = { path = "../wickle", version = "=0.2.0" }
+ reqwest.workspace = true
+ serde_json.workspace = true
+ futures-util.workspace = true
+diff --git a/crates/wickle-state-sqlite/Cargo.toml b/crates/wickle-state-sqlite/Cargo.toml
+index 0a880ad5d8b43fc68ced524ea25465f07c2d319d..a3e0c8a33df45dc8e176d0f1707b82a1393c8f7f 100644
+--- a/crates/wickle-state-sqlite/Cargo.toml
++++ b/crates/wickle-state-sqlite/Cargo.toml
+@@ -10,7 +10,7 @@ publish = false
+ include = ["Cargo.toml", "LICENSE", "src/**"]
+ 
+ [dependencies]
+-wickle = { path = "../wickle", version = "=0.1.0" }
++wickle = { path = "../wickle", version = "=0.2.0" }
+ rusqlite.workspace = true
+ serde_json.workspace = true
+ tokio.workspace = true
+diff --git a/docs/installation.md b/docs/installation.md
+index aaa9a52a076472b9ccda9b35327e6f6b880e54d9..d915093353ae120aa2a53c6cedf65084f03b7b3f 100644
+--- a/docs/installation.md
++++ b/docs/installation.md
+@@ -4,14 +4,14 @@ Wickle is an in-process Rust library. Use Rust 1.85 or later and a Tokio runtime
+ for asynchronous execution. The repository pins its development compiler in
+ `rust-toolchain.toml`.
+ 
+-Version 0.1.0 is distributed through GitHub Releases. Add dependencies from the
++Version 0.2.0 is distributed through GitHub Releases. Add dependencies from the
+ same Git tag so the core and optional adapters resolve together:
+ 
+ ```toml
+ [dependencies]
+-wickle = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
+-wickle-model-openai = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
+-wickle-model-router = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.1.0" }
++wickle = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.2.0" }
++wickle-model-openai = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.2.0" }
++wickle-model-router = { git = "https://github.com/Epsilondelta-ai/wickle", tag = "v0.2.0" }
+ ```
+ 
+ Select only the adapters your Host uses. Model providers, SQLite persistence,
+@@ -38,5 +38,7 @@ business workspaces. It does not contact paid model APIs. Additional live-test
+ setup is described in [provider setup](provider-setup.md); consult the
+ [model evidence matrix](model-support.md) before relying on a particular release.
+ 
+-Wickle is licensed under [MIT](../LICENSE). Version 0.1.0 is an initial release;
+-public contracts may change in later releases.
++Wickle is licensed under [MIT](../LICENSE). The 0.2 API may change in later
++releases; existing applications should follow the [migration guide](migration-v0.2.md).
++
++Source archives and checksum verification are described in [release artifacts](releases.md).
+diff --git a/docs/releases.md b/docs/releases.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..997df179be09d395cd514c86e61f03f9b390c6d8
+--- /dev/null
++++ b/docs/releases.md
+@@ -0,0 +1,53 @@
++# Release archives
++
++Wickle is distributed under MIT through GitHub Releases. The source archive
++contains the workspace, lockfile, library sources, documentation and consumer
++examples. It is not a server executable and does not include credentials.
++
++## Download and verify
++
++Download `wickle-0.2.0.tar.gz`, `release-manifest.json` and `SHA256SUMS` from the
++[v0.2.0 release](https://github.com/Epsilondelta-ai/wickle/releases/tag/v0.2.0).
++In the download directory, verify the files before extraction:
++
++```sh
++shasum -a 256 -c SHA256SUMS
++tar -xzf wickle-0.2.0.tar.gz
++cd wickle-0.2.0
++python3 scripts/check-package.py --consumer agent
++```
++
++On systems with GNU coreutils, `sha256sum -c SHA256SUMS` performs the same check.
++The manifest records the source commit/tree, version, license, minimum Rust
++version and archive digest. Compare the commit with the release tag when checking
++provenance. A matching checksum checks file integrity; obtain these files from
++the intended repository's release.
++
++For application dependencies, the [Git-tag installation](installation.md) keeps
++core and adapter versions aligned. The extracted source can also be used with
++local Cargo path dependencies. Read the [migration guide](migration-v0.2.md)
++before attaching a newer runtime to existing persistent data.
++
++## Reproduce the source archive
++
++Maintainers build from the clean, committed tree that passed review and CI.
++Use the same source commit when reproducing an archive; `git archive` excludes
++untracked files. The gzip timestamp is omitted for reproducibility.
++
++```sh
++release_dir=$(mktemp -d)
++git archive --format=tar --prefix=wickle-0.2.0/ \
++  --output="$release_dir/wickle-0.2.0.tar" HEAD
++gzip -n "$release_dir/wickle-0.2.0.tar"
++```
++
++Write a manifest for that exact commit and archive, then calculate SHA-256 for
++both files into `SHA256SUMS`. Validate an extracted archive and an independent
++application before tagging. Publish the tag at the reviewed commit, upload the
++verified files, download them again, and repeat checksum and consumer validation.
++The complete pre-release package gate is `python3 scripts/check-package.py`
++without a consumer selector; Linux/macOS and the declared minimum Rust version
++remain part of the CI gate.
++
++Do not change the contents of an existing release tag to deliver a code fix.
++Publish a new version with its own artifacts and compatibility notes.

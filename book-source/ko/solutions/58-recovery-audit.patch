@@ -1,0 +1,1797 @@
+diff --git a/crates/wickle-adapter-runtime/tests/agent_components.rs b/crates/wickle-adapter-runtime/tests/agent_components.rs
+index 396bf802e638c25e5dfaea86d9f210675224ad17..c4b395425d19bbff04078f7c3cf482470a10bbf1 100644
+--- a/crates/wickle-adapter-runtime/tests/agent_components.rs
++++ b/crates/wickle-adapter-runtime/tests/agent_components.rs
+@@ -592,3 +592,247 @@ async fn cleanup_releases_the_lease_before_bounded_adapter_close_and_preserves_t
+     assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 2);
+     assert_eq!(instance.close_calls.load(Ordering::SeqCst), 1);
+ }
++
++struct ScopedModel {
++    owner: Scope,
++    query: String,
++    calls: AtomicUsize,
++    requests: Mutex<Vec<ModelRequest>>,
++}
++impl ModelPort for ScopedModel {
++    fn binding(&self) -> ModelPortBinding {
++        ModelPortBinding {
++            provider: id("fixture"),
++            adapter: reference("adapter"),
++            connection_ref: reference("connection"),
++        }
++    }
++    fn generate<'a>(
++        &'a self,
++        request: &'a ModelRequest,
++        context: &'a ModelCallContext,
++    ) -> PortStream<'a, ModelEvent> {
++        assert_eq!(context.scope, self.owner);
++        self.requests.lock().unwrap().push(request.clone());
++        let first = self.calls.fetch_add(1, Ordering::SeqCst) == 0;
++        let event = if first {
++            ModelEvent::ToolArgumentsDelta {
++                index: 0,
++                provider_call_id: Some("lookup".into()),
++                name: Some("search_0".into()),
++                delta: json!({"query":self.query}).to_string(),
++            }
++        } else {
++            ModelEvent::TextDelta {
++                text: "complete".into(),
++            }
++        };
++        Box::pin(stream::iter(vec![
++            Ok(event),
++            Ok(ModelEvent::ResponseCompleted {
++                finish: if first {
++                    ModelFinish::ToolCalls
++                } else {
++                    ModelFinish::Stop
++                },
++                metadata: Default::default(),
++                continuation: vec![],
++            }),
++        ]))
++    }
++}
++#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++async fn simultaneous_tenants_keep_user_thread_mappings_and_mutable_instances_separate() {
++    let adapters = Fixture::new();
++    let factory = adapters.factories[0].clone();
++    factory.behavior.store(7, Ordering::SeqCst);
++    let mut cases = vec![];
++    for (tenant, user, workspace, thread, query) in [
++        (
++            "tenant-a",
++            "user-a",
++            "11111111-1111-4111-8111-111111111111",
++            "thread-a",
++            "query-a",
++        ),
++        (
++            "tenant-b",
++            "user-b",
++            "22222222-2222-4222-8222-222222222222",
++            "thread-b",
++            "query-b",
++        ),
++    ] {
++        let owner = Scope {
++            tenant_id: id(tenant),
++            workspace_id: id("workspace"),
++            user_id: Some(id(user)),
++        };
++        let state = json!({"thread_id":thread,"external_user":user});
++        let mapping = AdapterBindingState {
++            scope: owner.clone(),
++            session_id: id("session"),
++            adapter_binding: id("binding-0"),
++            adapter: reference("adapter"),
++            definition_digest: adapters.definitions[0].digest(),
++            state_ref: ProtectedRecord::new(id(&format!("mapping-{tenant}")), 1, state.clone())
++                .reference()
++                .clone(),
++            value: state,
++        };
++        let registry = Arc::new(
++            AdapterRegistry::new(
++                owner.clone(),
++                vec![AdapterRegistration {
++                    definition: adapters.definitions[0].clone(),
++                    factory: factory.clone(),
++                }],
++                adapters.connections.clone(),
++                vec![],
++                vec![],
++                vec![mapping],
++            )
++            .unwrap(),
++        );
++        let base = agent_support::Fixture::new(agent_support::Response::Text, false);
++        let model = Arc::new(ScopedModel {
++            owner: owner.clone(),
++            query: query.into(),
++            calls: AtomicUsize::new(0),
++            requests: Mutex::new(vec![]),
++        });
++        let mut bindings = base.bindings();
++        bindings.scope = owner.clone();
++        bindings.state = adapters.store.clone();
++        bindings.clock = adapters.clock.clone();
++        bindings.ids = Arc::new(RandomIdSource);
++        bindings.profile_resolver = Arc::new(Catalog(registry.clone()));
++        let mut catalog = base.router.snapshot.catalog().clone();
++        let mut policy = base.router.snapshot.policy().clone();
++        catalog.scope = owner.clone();
++        policy.scope = owner.clone();
++        catalog.models[0]
++            .capabilities
++            .features
++            .insert(id("tool_calling"));
++        catalog.bindings[0].capabilities = catalog.models[0].capabilities.clone();
++        catalog.bindings[0].evidence[0].binding_digest = catalog.bindings[0]
++            .contract_digest(&catalog.models[0])
++            .unwrap();
++        bindings.router = Arc::new(agent_support::Router {
++            snapshot: RoutingSnapshot::new(catalog, policy).unwrap(),
++            queries: AtomicUsize::new(0),
++            snapshots: AtomicUsize::new(0),
++        });
++        bindings.policy =
++            Arc::new(PolicyGate::new(adapters.policy.clone(), Duration::from_secs(5)).unwrap());
++        bindings.model_exchange = Arc::new(
++            ModelExchange::new(model.clone(), bindings.policy.clone())
++                .with_route_inspector(base.inspector.clone(), Duration::from_secs(5))
++                .unwrap(),
++        );
++        bindings.system_inputs = inputs();
++        bindings.components = Some(Arc::new(adapters.runtime(registry)));
++        bindings.tools = None;
++        bindings.settings.lease_ttl_ms = 30000;
++        bindings.settings.heartbeat_interval_ms = 5000;
++        let agent = create_agent(multi_profile(&["adapter"]), bindings).unwrap();
++        let mut context = agent_support::context();
++        context.data.scope = owner.clone();
++        context.data.principal_ref = id(user);
++        context.data.system_inputs =
++            Some(SystemInputs::new(object(json!({"workspace_id":workspace}))));
++        let start_agent = agent.clone();
++        let start_context = context.clone();
++        let start = tokio::spawn(async move {
++            agent_support::completed(
++                start_agent
++                    .start(agent_support::request("same-request"), start_context)
++                    .await
++                    .unwrap(),
++            )
++        });
++        cases.push((agent, context, model, workspace, thread, query, start));
++    }
++    tokio::time::timeout(Duration::from_secs(5), async {
++        while factory.observed.lock().unwrap().len() != 2 {
++            tokio::time::sleep(Duration::from_millis(1)).await;
++        }
++    })
++    .await
++    .unwrap();
++    // Both Runs are inside the shared factory before either may create an instance.
++    assert!(factory.instances.lock().unwrap().is_empty());
++    factory.release.add_permits(2);
++    let mut finished = vec![];
++    for (agent, context, model, workspace, thread, query, start) in cases {
++        let handle = start.await.unwrap();
++        let outcome = agent_support::completed(
++            tokio::time::timeout(Duration::from_secs(10), handle.outcome(&context))
++                .await
++                .unwrap()
++                .unwrap(),
++        );
++        assert_eq!(
++            outcome.result.status(),
++            RunStatus::Succeeded,
++            "{:?}",
++            outcome
++        );
++        assert_eq!(model.calls.load(Ordering::SeqCst), 2);
++        let observed = factory
++            .observed
++            .lock()
++            .unwrap()
++            .iter()
++            .find(|item| item.execution.scope == context.data.scope)
++            .cloned()
++            .unwrap();
++        assert_eq!(observed.execution.principal_ref, context.data.principal_ref);
++        assert_eq!(
++            observed.binding.binding_state.unwrap().value,
++            json!({"thread_id":thread,"external_user":context.data.principal_ref})
++        );
++        let instance = factory
++            .instances
++            .lock()
++            .unwrap()
++            .iter()
++            .find(|item| item.scope == context.data.scope)
++            .cloned()
++            .unwrap();
++        assert_eq!(instance.run_id, *handle.run_id());
++        assert_eq!(instance.executor.calls.load(Ordering::SeqCst), 1);
++        let seen = instance.executor.seen.lock().unwrap();
++        assert_eq!(seen.len(), 1);
++        assert_eq!(seen[0].0["workspace_id"], workspace);
++        assert_eq!(seen[0].0["query"], query);
++        assert_eq!(seen[0].1.scope, context.data.scope);
++        drop(seen);
++        for request in model.requests.lock().unwrap().iter() {
++            let encoded = serde_json::to_string(request).unwrap();
++            assert!(!encoded.contains(workspace));
++            assert!(!encoded.contains(thread));
++        }
++        finished.push((agent, context, handle));
++    }
++    assert_eq!(factory.instances.lock().unwrap().len(), 2);
++    assert_eq!(
++        adapters
++            .store
++            .load(&finished[0].1.data.scope, finished[1].2.run_id())
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::StateNotFound
++    );
++    assert_eq!(
++        finished[0]
++            .0
++            .get_run(finished[0].2.run_id(), &finished[1].1)
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::AccessDenied
++    );
++}
+diff --git a/crates/wickle-model-azure-openai/tests/responses.rs b/crates/wickle-model-azure-openai/tests/responses.rs
+index 66f0480a23a42ff5f4f8b09f7794d961261547ec..1acd31dd37ba56f87850c1a3b532c9ab13de6d74 100644
+--- a/crates/wickle-model-azure-openai/tests/responses.rs
++++ b/crates/wickle-model-azure-openai/tests/responses.rs
+@@ -856,7 +856,7 @@ async fn top_level_property_limit_uses_one_json_object_without_exposing_system_f
+ }
+ 
+ #[tokio::test]
+-async fn empty_object_depth_boundaries_keep_openai_compiler_revision_compatible() {
++async fn empty_object_depth_boundaries_preserve_native_schema_with_bounded_compiler() {
+     let server = Server::new(vec![]).await;
+     let connection = connection(&server);
+     let target = ProviderToolTarget::for_route(&request(&connection, "base-model").route);
+@@ -874,7 +874,7 @@ async fn empty_object_depth_boundaries_keep_openai_compiler_revision_compatible(
+             Default::default(),
+         )
+         .unwrap();
+-        assert_eq!(openai.compiler().version, id("1"));
++        assert_eq!(openai.compiler().version, id("2"));
+         assert_eq!(
+             openai.wire_tool().model_input_schema,
+             *original.model_input_schema()
+diff --git a/crates/wickle-model-openai/tests/responses.rs b/crates/wickle-model-openai/tests/responses.rs
+index 5c5ae2e3093d1f8e489fa79ec8996079cee3c74b..6a5eca11a024e9f2e44e489404ab4612c84ef102 100644
+--- a/crates/wickle-model-openai/tests/responses.rs
++++ b/crates/wickle-model-openai/tests/responses.rs
+@@ -820,3 +820,73 @@ async fn oversized_native_enum_uses_reversible_text_without_losing_original_vali
+         true
+     );
+ }
++
++#[tokio::test]
++async fn shared_reference_work_budget_falls_back_without_losing_canonical_values() {
++    let server = Server::new(vec![]).await;
++    let connection = connection(&server);
++    let request = request(&connection, "model");
++    let mut defs = serde_json::Map::new();
++    defs.insert("level3".into(),json!({"type":"string","minLength":1,"description":"A leaf selected from a shared reference graph"}));
++    let mut value = json!("selected");
++    for level in (0..3).rev() {
++        let properties: serde_json::Map<String, Value> = (0..5)
++            .map(|index| {
++                (
++                    format!("branch{index}"),
++                    json!({"$ref":format!("#/$defs/level{}",level+1)}),
++                )
++            })
++            .collect();
++        let required: Vec<_> = properties.keys().cloned().collect();
++        defs.insert(format!("level{level}"),json!({"type":"object","properties":properties,"required":required,"additionalProperties":false}));
++        value = Value::Object(
++            (0..5)
++                .map(|index| (format!("branch{index}"), value.clone()))
++                .collect(),
++        );
++    }
++    let canonical = compiled_input(
++        json!({"type":"object","properties":{"a":{"$ref":"#/$defs/level0"},"b":{"$ref":"#/$defs/level0"}},"required":["a","b"],"additionalProperties":false,"if":{"required":["a"]},"then":{"required":["b"]},"$defs":defs}),
++    );
++    let contract = CompiledToolContract::compile(
++        &canonical,
++        ProviderToolTarget::for_route(&request.route),
++        &wickle_model_responses::ResponsesToolSchemaCompiler,
++        Default::default(),
++    )
++    .unwrap();
++    // Each field alone fits native limits. Expansion work across both fields must
++    // share one budget rather than reset at each reference or top-level property.
++    assert_eq!(
++        contract.wire_tool().model_input_schema["properties"]["a"]["type"],
++        "object"
++    );
++    assert_eq!(
++        contract.wire_tool().model_input_schema["properties"]["b"]["type"],
++        "string"
++    );
++    let values = JsonObject::from([("a".into(), value.clone()), ("b".into(), value)]);
++    canonical.validate_model_inputs(&values).unwrap();
++    let encoded = contract.encode_arguments(&values).unwrap();
++    assert!(encoded["b"].is_string());
++    assert_eq!(
++        contract
++            .decode_arguments(
++                &serde_json::to_string(&encoded).unwrap(),
++                Default::default()
++            )
++            .unwrap(),
++        values
++    );
++    let mut invalid = values;
++    invalid.get_mut("b").unwrap()["branch0"]["branch0"]["branch0"] = json!(7);
++    let encoded = contract.encode_arguments(&invalid).unwrap();
++    let decoded = contract
++        .decode_arguments(
++            &serde_json::to_string(&encoded).unwrap(),
++            Default::default(),
++        )
++        .unwrap();
++    assert!(canonical.validate_model_inputs(&decoded).is_err());
++}
+diff --git a/crates/wickle-model-responses/src/schema.rs b/crates/wickle-model-responses/src/schema.rs
+index 8d2c4571f68da71bb5cc11bffdf2537a687081d3..51121c29f00713a257277f9ac38dec6fa1e6b4c3 100644
+--- a/crates/wickle-model-responses/src/schema.rs
++++ b/crates/wickle-model-responses/src/schema.rs
+@@ -10,7 +10,7 @@ impl ProviderToolSchemaCompiler for ResponsesToolSchemaCompiler {
+     fn reference(&self) -> VersionedRef {
+         VersionedRef {
+             id: Id::new("wickle-responses-tool-schema").expect("constant"),
+-            version: Id::new("1").expect("constant"),
++            version: Id::new("2").expect("constant"),
+         }
+     }
+     fn compile(
+@@ -33,7 +33,7 @@ impl ProviderToolSchemaCompiler for AzureResponsesToolSchemaCompiler {
+     fn reference(&self) -> VersionedRef {
+         VersionedRef {
+             id: Id::new("wickle-azure-responses-tool-schema").expect("constant"),
+-            version: Id::new("1").expect("constant"),
++            version: Id::new("2").expect("constant"),
+         }
+     }
+     fn compile(
+@@ -119,9 +119,20 @@ fn compile(
+         .collect();
+     let mut wire = Map::new();
+     let mut fields = vec![];
++    let mut expansion = ExpansionBudget {
++        nodes: 1024,
++        bytes: 32 * 1024,
++    };
+     for (name, schema) in properties {
+         let optional = !required.contains(name.as_str());
+-        let native = lower(schema, root, fine_tuned, 1, &mut BTreeSet::new());
++        let native = lower(
++            schema,
++            root,
++            fine_tuned,
++            1,
++            &mut BTreeSet::new(),
++            &mut expansion,
++        );
+         let (schema, encoding) = match native {
+             Some(schema) if optional => (
+                 json!({"type":"object","properties":{"present":{"type":"boolean"},"value":{"anyOf":[schema,{"type":"null"}]}},"required":["present","value"],"additionalProperties":false}),
+@@ -186,16 +197,32 @@ fn json_text_schema(_optional: bool) -> Value {
+     json!({"type":"string"})
+ }
+ 
++// Bound work before expanding shared references. A final wire-size check alone
++// cannot stop a small DAG from allocating a large intermediate tree.
++struct ExpansionBudget {
++    nodes: usize,
++    bytes: usize,
++}
++impl ExpansionBudget {
++    fn charge(&mut self, schema: &Value) -> Option<()> {
++        let bytes = serde_json::to_vec(schema).ok()?.len();
++        self.nodes = self.nodes.checked_sub(1)?;
++        self.bytes = self.bytes.checked_sub(bytes)?;
++        Some(())
++    }
++}
+ fn lower(
+     schema: &Value,
+     root: &Value,
+     fine_tuned: bool,
+     depth: usize,
+     visiting: &mut BTreeSet<String>,
++    expansion: &mut ExpansionBudget,
+ ) -> Option<Value> {
+     if depth > 8 {
+         return None;
+     }
++    expansion.charge(schema)?;
+     let node = schema.as_object()?;
+     if let Some(reference) = node.get("$ref") {
+         let reference = reference.as_str()?;
+@@ -208,7 +235,7 @@ fn lower(
+             return None;
+         }
+         let target = root.pointer(&reference[1..])?;
+-        let result = lower(target, root, fine_tuned, depth + 1, visiting);
++        let result = lower(target, root, fine_tuned, depth + 1, visiting, expansion);
+         visiting.remove(reference);
+         return result;
+     }
+@@ -226,7 +253,7 @@ fn lower(
+         let branches: Vec<_> = alternatives
+             .as_array()?
+             .iter()
+-            .map(|branch| lower(branch, root, fine_tuned, depth + 1, visiting))
++            .map(|branch| lower(branch, root, fine_tuned, depth + 1, visiting, expansion))
+             .collect::<Option<_>>()?;
+         return Some(json!({"anyOf":branches}));
+     }
+@@ -248,7 +275,7 @@ fn lower(
+         for (name, child) in properties {
+             projected.insert(
+                 name.clone(),
+-                lower(child, root, fine_tuned, depth + 1, visiting)?,
++                lower(child, root, fine_tuned, depth + 1, visiting, expansion)?,
+             );
+         }
+         result.insert("properties".into(), Value::Object(projected));
+@@ -264,7 +291,14 @@ fn lower(
+         }
+         result.insert(
+             "items".into(),
+-            lower(node.get("items")?, root, fine_tuned, depth + 1, visiting)?,
++            lower(
++                node.get("items")?,
++                root,
++                fine_tuned,
++                depth + 1,
++                visiting,
++                expansion,
++            )?,
+         );
+     }
+     if let Some(value) = node.get("enum") {
+@@ -536,3 +570,23 @@ fn invalid(path: &str) -> ContractError {
+         format!("responses.schema.{path}"),
+     )
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    #[test]
++    fn reference_expansion_stops_before_exhausting_node_or_byte_work_limits() {
++        let root = json!({"$defs":{"leaf":{"type":"string"}},"type":"object","properties":{"a":{"$ref":"#/$defs/leaf"},"b":{"$ref":"#/$defs/leaf"}},"required":["a","b"],"additionalProperties":false});
++        for (nodes, bytes) in [(3, 32 * 1024), (1024, 16)] {
++            let mut budget = ExpansionBudget { nodes, bytes };
++            assert!(lower(&root, &root, false, 1, &mut BTreeSet::new(), &mut budget).is_none());
++        }
++        let mut budget = ExpansionBudget {
++            nodes: 1024,
++            bytes: 32 * 1024,
++        };
++        let expanded = lower(&root, &root, false, 1, &mut BTreeSet::new(), &mut budget).unwrap();
++        assert_eq!(expanded["properties"]["a"], json!({"type":"string"}));
++        assert_eq!(expanded["properties"]["b"], json!({"type":"string"}));
++    }
++}
+diff --git a/crates/wickle-state-sqlite/tests/agent_recovery.rs b/crates/wickle-state-sqlite/tests/agent_recovery.rs
+index 5d8348065a4fa092652085057e4254f7d89d1190..a0d2f40098de6cdf18e4495cce1ccbd9d475e3db 100644
+--- a/crates/wickle-state-sqlite/tests/agent_recovery.rs
++++ b/crates/wickle-state-sqlite/tests/agent_recovery.rs
+@@ -3,6 +3,8 @@
+ #[allow(dead_code)]
+ mod support;
+ use support as agent_support;
++#[path = "support/command_recovery.rs"]
++mod command_recovery;
+ #[path = "support/context_recovery.rs"]
+ mod context_recovery;
+ #[path = "support/recovery_store.rs"]
+@@ -86,7 +88,18 @@ fn worker(directory: &Path, mode: &str) -> std::process::ExitStatus {
+         .spawn()
+         .unwrap();
+     let end = std::time::Instant::now() + Duration::from_secs(30);
++    let mut killed = false;
+     loop {
++        if !killed
++            && mode.ends_with("-interrupt")
++            && std::fs::read_to_string(directory.join("kill-ready"))
++                .ok()
++                .as_deref()
++                == Some("ready\n")
++        {
++            child.kill().unwrap();
++            killed = true;
++        }
+         if let Some(status) = child.try_wait().unwrap() {
+             return status;
+         }
+@@ -122,6 +135,10 @@ fn recovery_worker() {
+     let directory =
+         std::path::PathBuf::from(std::env::var_os("WICKLE_RECOVERY_PROCESS_DIRECTORY").unwrap());
+     let mode = std::env::var("WICKLE_RECOVERY_PROCESS_MODE").unwrap();
++    if mode.starts_with("command-") {
++        command_recovery::run_worker(&directory, &mode);
++        return;
++    }
+     if mode.starts_with("context-") {
+         context_recovery::run_worker(&directory, &mode);
+         return;
+@@ -359,6 +376,11 @@ fn run_tool_worker(directory: &Path, mode: &str) {
+                 (true, Some(boundary)) => Arc::new(recovery_store::CrashStore {
+                     inner: store.clone(),
+                     boundary: boundary.into(),
++                    kill_marker: matches!(
++                        boundary,
++                        "admitted" | "before-prepared" | "prepared" | "reserved"
++                    )
++                    .then(|| directory.join("kill-ready")),
+                 }),
+                 _ => store.clone(),
+             };
+@@ -396,7 +418,7 @@ fn run_tool_worker(directory: &Path, mode: &str) {
+             bindings.tools = Some(Arc::new(ToolRegistry::new(scope(), registrations).unwrap()));
+             if !interrupt {
+                 let count = std::fs::read_to_string(directory.join("calls"))
+-                    .unwrap()
++                    .unwrap_or_default()
+                     .lines()
+                     .count();
+                 fixture.model.calls.store(count, Ordering::SeqCst);
+@@ -425,8 +447,39 @@ fn run_tool_worker(directory: &Path, mode: &str) {
+                 let outcome = handle.outcome(&context()).await;
+                 panic!("write did not terminate process: {outcome:?}");
+             }
+-            let run_id = id(&std::fs::read_to_string(directory.join("run")).unwrap());
++            let run_id = match std::fs::read_to_string(directory.join("run")) {
++                Ok(value) => id(&value),
++                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
++                    store
++                        .find_request(&scope(), &id("session"), &id("request"))
++                        .await
++                        .unwrap()
++                        .expect("durable admission")
++                        .snapshot
++                        .run_id
++                }
++                Err(error) => panic!("run identifier: {error}"),
++            };
+             let before = store.load(&scope(), &run_id).await.unwrap();
++            match boundary {
++                Some("admitted" | "before-prepared") => {
++                    assert!(before.snapshot.prepared_steps.is_empty());
++                    assert!(before.snapshot.model_ledger.is_empty());
++                }
++                Some("prepared") => {
++                    assert!(!before.snapshot.prepared_steps.is_empty());
++                    assert!(before.snapshot.model_ledger.is_empty());
++                }
++                Some("reserved") => {
++                    assert!(!before.snapshot.prepared_steps.is_empty());
++                    assert_eq!(before.snapshot.model_ledger.len(), 1);
++                    assert!(matches!(
++                        before.snapshot.model_ledger[0].state,
++                        ModelAttemptState::Reserved {}
++                    ));
++                }
++                _ => {}
++            }
+             if boundary == Some("terminal") {
+                 assert_eq!(before.snapshot.status, RunStatus::Succeeded);
+                 let replay = fixture.started(&agent).await;
+@@ -464,6 +517,25 @@ fn run_tool_worker(directory: &Path, mode: &str) {
+             );
+             assert_eq!(outcome.unresolved_effects.len(), usize::from(!known));
+             let after = store.load(&scope(), &run_id).await.unwrap();
++            if matches!(
++                boundary,
++                Some("admitted" | "before-prepared" | "prepared" | "reserved")
++            ) {
++                assert_eq!(
++                    after.snapshot.usage.model_calls,
++                    if boundary == Some("reserved") { 3 } else { 2 }
++                );
++                for prepared in &before.snapshot.prepared_steps {
++                    assert!(after.snapshot.prepared_steps.contains(prepared));
++                }
++                if boundary == Some("reserved") {
++                    assert!(matches!(
++                        after.snapshot.model_ledger[0].state,
++                        ModelAttemptState::Interrupted { .. }
++                    ));
++                }
++            }
++
+             if boundary.is_none() || matches!(boundary, Some("bound" | "settled")) {
+                 assert_eq!(
+                     after.snapshot.tool_ledger[1].call.bound_input_ref,
+@@ -564,3 +636,91 @@ fn compression_revision_process_boundaries_restore_only_complete_context_without
+         std::fs::remove_dir_all(directory).unwrap();
+     }
+ }
++
++#[test]
++fn forced_process_termination_preserves_admission_preparation_and_dispatch_reservations() {
++    let _serial = PROCESS_TESTS.lock().unwrap();
++    for boundary in ["admitted", "before-prepared", "prepared", "reserved"] {
++        let directory = std::env::temp_dir().join(format!(
++            "wickle-prepared-kill-{}",
++            RandomIdSource.next_id().unwrap()
++        ));
++        std::fs::create_dir(&directory).unwrap();
++        let status = worker(&directory, &format!("tool-boundary-{boundary}-interrupt"));
++        assert!(!status.success(), "{boundary}");
++        #[cfg(unix)]
++        {
++            use std::os::unix::process::ExitStatusExt;
++            assert_eq!(
++                status.signal(),
++                Some(9),
++                "parent must SIGKILL the paused worker"
++            );
++        }
++        assert_eq!(
++            std::fs::read_to_string(directory.join("calls")).unwrap_or_default(),
++            ""
++        );
++        assert_eq!(
++            std::fs::read_to_string(directory.join("tool-calls")).unwrap_or_default(),
++            ""
++        );
++        assert!(
++            worker(&directory, &format!("tool-boundary-{boundary}-recover")).success(),
++            "{boundary}"
++        );
++        assert_eq!(
++            std::fs::read_to_string(directory.join("tool-calls")).unwrap(),
++            "before\ntarget\nafter\n"
++        );
++        assert_eq!(
++            std::fs::read_to_string(directory.join("calls"))
++                .unwrap()
++                .lines()
++                .count(),
++            2
++        );
++        assert!(directory.join("verified").exists());
++        std::fs::remove_dir_all(directory).unwrap();
++    }
++}
++
++#[test]
++fn forced_process_termination_never_half_consumes_an_input_command_or_replays_its_tool() {
++    let _serial = PROCESS_TESTS.lock().unwrap();
++    for boundary in ["wait", "before-command", "accepted-command"] {
++        let directory = std::env::temp_dir().join(format!(
++            "wickle-command-kill-{}",
++            RandomIdSource.next_id().unwrap()
++        ));
++        std::fs::create_dir(&directory).unwrap();
++        let status = worker(&directory, &format!("command-{boundary}-interrupt"));
++        assert!(!status.success());
++        #[cfg(unix)]
++        {
++            use std::os::unix::process::ExitStatusExt;
++            assert_eq!(status.signal(), Some(9));
++        }
++        assert_eq!(
++            std::fs::read_to_string(directory.join("tool-calls")).unwrap(),
++            "before\ntarget\n"
++        );
++        assert!(
++            worker(&directory, &format!("command-{boundary}-recover")).success(),
++            "{boundary}"
++        );
++        assert_eq!(
++            std::fs::read_to_string(directory.join("tool-calls")).unwrap(),
++            "before\ntarget\nafter\n"
++        );
++        assert_eq!(
++            std::fs::read_to_string(directory.join("calls"))
++                .unwrap()
++                .lines()
++                .count(),
++            2
++        );
++        assert!(directory.join("verified").exists());
++        std::fs::remove_dir_all(directory).unwrap();
++    }
++}
+diff --git a/crates/wickle-state-sqlite/tests/execution_store.rs b/crates/wickle-state-sqlite/tests/execution_store.rs
+index e60533bd31dc43174a0f1abf9bce39b057899271..8f630701352dd4ca915c9853a2effbaa0fe93949 100644
+--- a/crates/wickle-state-sqlite/tests/execution_store.rs
++++ b/crates/wickle-state-sqlite/tests/execution_store.rs
+@@ -121,3 +121,27 @@ async fn legacy_terminal_rows_are_read_without_rewrite_then_upgrade_on_new_admis
+     assert!(store.read_execution(&scope(), &id("legacy")).await.is_err());
+     assert!(store.read_execution(&scope(), &id("new")).await.is_ok());
+ }
++
++#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++async fn concurrent_conflicting_submissions_keep_only_the_winning_sqlite_snapshot() {
++    let database = support::Database::new();
++    suite::conflicting_submissions_race([
++        Arc::new(SqliteStateStore::open(database.path()).unwrap()),
++        Arc::new(SqliteStateStore::open(database.path()).unwrap()),
++    ])
++    .await;
++    let reopened = SqliteStateStore::open(database.path()).unwrap();
++    let saved = reopened
++        .find_request(&scope(), &id("race-session"), &id("same-key"))
++        .await
++        .unwrap()
++        .unwrap();
++    assert_eq!(
++        reopened
++            .load_session(&scope(), &id("race-session"))
++            .await
++            .unwrap()
++            .active_run_id,
++        Some(saved.snapshot.run_id)
++    );
++}
+diff --git a/crates/wickle-state-sqlite/tests/state_store.rs b/crates/wickle-state-sqlite/tests/state_store.rs
+index 4d00dcbd64b5345fe4d70e2ad9b67752e2eb04b9..f6c0da574d9225d07d273b4369ab5800ef52f638 100644
+--- a/crates/wickle-state-sqlite/tests/state_store.rs
++++ b/crates/wickle-state-sqlite/tests/state_store.rs
+@@ -1090,3 +1090,99 @@ async fn a_failed_sql_write_never_publishes_mutated_cached_lease_state() {
+         .unwrap();
+     assert_eq!(store.load(&scope(), &id("run")).await.unwrap(), initial);
+ }
++
++#[tokio::test]
++async fn killing_an_uncommitted_legacy_upgrade_preserves_old_data_and_allows_one_later_upgrade() {
++    let database = Database::new();
++    let store = SqliteStateStore::open(database.path()).unwrap();
++    let initial = store
++        .admit(
++            &scope(),
++            core::admission("legacy", "legacy-request", "legacy-session", "old", "1").await,
++        )
++        .await
++        .unwrap();
++    let lease = store
++        .acquire_lease(&scope(), &id("legacy"), &id("owner"), 0, 1000)
++        .await
++        .unwrap();
++    let terminal = store
++        .commit(
++            &scope(),
++            &id("legacy"),
++            finished(&initial.state.snapshot, lease, 1),
++        )
++        .await
++        .unwrap();
++    drop(store);
++    let connection = Connection::open(database.path()).unwrap();
++    let text: String = connection
++        .query_row(
++            "SELECT checkpoint_json FROM wickle_scope_checkpoints",
++            [],
++            |row| row.get(0),
++        )
++        .unwrap();
++    let mut legacy: Value = serde_json::from_str(&text).unwrap();
++    legacy["schema_version"] = json!("wickle.state-store.v1");
++    legacy.as_object_mut().unwrap().remove("executions");
++    connection
++        .execute(
++            "UPDATE wickle_scope_checkpoints SET checkpoint_json=?1,checksum=?2",
++            rusqlite::params![legacy.to_string(), canonical_digest(&legacy).as_str()],
++        )
++        .unwrap();
++    // The real shared state engine builds the upgrade image. The subprocess
++    // pauses its SQLite image write before COMMIT, without a production test hook.
++    let memory = MemoryStateStore::from_checkpoint(
++        StateStoreCheckpoint::from_json(&legacy.to_string(), &scope(), &canonical_digest(&legacy))
++            .unwrap(),
++    );
++    let input = core::admission("new", "new-request", "new-session", "new", "1").await;
++    memory.admit(&scope(), input.clone()).await.unwrap();
++    let upgraded = serde_json::to_value(memory.export_checkpoint(&scope()).unwrap()).unwrap();
++    assert_eq!(upgraded["schema_version"], "wickle.state-store.v2");
++    let old_reader = SqliteStateStore::open(database.path()).unwrap();
++    let mut worker = workers::Worker::spawn(
++        &database,
++        "upgrade",
++        "uncommitted-upgrade",
++        json!({"image":upgraded}),
++    );
++    workers::wait(&worker.ready);
++    assert_eq!(
++        old_reader.load(&scope(), &id("legacy")).await.unwrap(),
++        terminal
++    );
++    worker.terminate();
++    drop(old_reader);
++    let after_kill: String = connection
++        .query_row(
++            "SELECT checkpoint_json FROM wickle_scope_checkpoints",
++            [],
++            |row| row.get(0),
++        )
++        .unwrap();
++    assert_eq!(after_kill, legacy.to_string());
++    let reopened = SqliteStateStore::open(database.path()).unwrap();
++    let accepted = reopened.admit(&scope(), input.clone()).await.unwrap();
++    assert!(accepted.created);
++    let replay = reopened.admit(&scope(), input).await.unwrap();
++    assert!(!replay.created);
++    assert_eq!(accepted.state, replay.state);
++    assert_eq!(
++        reopened.load(&scope(), &id("legacy")).await.unwrap(),
++        terminal
++    );
++    let after_commit: String = connection
++        .query_row(
++            "SELECT checkpoint_json FROM wickle_scope_checkpoints",
++            [],
++            |row| row.get(0),
++        )
++        .unwrap();
++    assert_eq!(
++        serde_json::from_str::<Value>(&after_commit).unwrap(),
++        upgraded
++    );
++}
+diff --git a/crates/wickle-state-sqlite/tests/support/command_recovery.rs b/crates/wickle-state-sqlite/tests/support/command_recovery.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..e4a372329d16b526bb38b22c320c012ee4415551
+--- /dev/null
++++ b/crates/wickle-state-sqlite/tests/support/command_recovery.rs
+@@ -0,0 +1,193 @@
++//! Actual kill/restart at saved wait and atomic input-command/segment boundaries.
++use super::*;
++use serde_json::json;
++use std::sync::atomic::Ordering;
++struct LoggedTool {
++    inner: Arc<dyn ToolExecutor>,
++    name: &'static str,
++    directory: std::path::PathBuf,
++}
++impl ToolExecutor for LoggedTool {
++    fn execute<'a>(
++        &'a self,
++        args: &'a JsonObject,
++        context: &'a ToolExecutionContext,
++    ) -> PortFuture<'a, ToolExecutionResult> {
++        Box::pin(async move {
++            append(&self.directory.join("tool-calls"), self.name);
++            self.inner.execute(args, context).await
++        })
++    }
++}
++pub fn run_worker(directory: &Path, mode: &str) {
++    let interrupt = mode.ends_with("-interrupt");
++    let boundary = mode
++        .strip_prefix("command-")
++        .unwrap()
++        .rsplit_once('-')
++        .unwrap()
++        .0;
++    tokio::runtime::Builder::new_current_thread()
++        .enable_all()
++        .build()
++        .unwrap()
++        .block_on(async {
++            let mut fixture = tool_support::Fixture::new(tool_support::Mode::Input);
++            fixture.profile.limits.max_elapsed_ms = 60000.try_into().unwrap();
++            fixture.profile.limits.max_recovery_attempts = 4;
++            let store = Arc::new(SqliteStateStore::open(directory.join("state.sqlite")).unwrap());
++            let mut bindings = fixture.bindings();
++            bindings.state = if interrupt {
++                Arc::new(recovery_store::CrashStore {
++                    inner: store.clone(),
++                    boundary: boundary.into(),
++                    kill_marker: Some(directory.join("kill-ready")),
++                })
++            } else {
++                store.clone()
++            };
++            bindings.clock = Arc::new(ProcessClock::new(!interrupt));
++            bindings.ids = Arc::new(RandomIdSource);
++            let registrations = ["before", "target", "after"]
++                .into_iter()
++                .enumerate()
++                .map(|(index, name)| ToolRegistration {
++                    compiled: fixture.registry.get(&id(name)).unwrap().compiled.clone(),
++                    executor: Arc::new(LoggedTool {
++                        inner: fixture.tools[index].clone(),
++                        name,
++                        directory: directory.to_owned(),
++                    }),
++                })
++                .collect();
++            bindings.tools = Some(Arc::new(ToolRegistry::new(scope(), registrations).unwrap()));
++            if !interrupt {
++                fixture.model.calls.store(
++                    std::fs::read_to_string(directory.join("calls"))
++                        .unwrap()
++                        .lines()
++                        .count(),
++                    Ordering::SeqCst,
++                );
++            }
++            bindings.model_exchange = Arc::new(
++                ModelExchange::new(
++                    Arc::new(ProcessModel {
++                        inner: fixture.model.clone(),
++                        directory: directory.to_owned(),
++                        interrupt: false,
++                    }),
++                    bindings.policy.clone(),
++                )
++                .with_route_inspector(fixture.base.inspector.clone(), Duration::from_secs(1))
++                .unwrap(),
++            );
++            let agent = create_agent(fixture.profile.clone(), bindings).unwrap();
++            if interrupt {
++                let handle = fixture.started(&agent).await;
++                let outcome = completed(handle.outcome(&context()).await.unwrap());
++                assert_eq!(outcome.result.status(), RunStatus::Waiting);
++            }
++            let saved = store
++                .find_request(&scope(), &id("session"), &id("request"))
++                .await
++                .unwrap()
++                .unwrap();
++            let run_id = saved.snapshot.run_id.clone();
++            let before = store.read_execution(&scope(), &run_id).await.unwrap();
++            let old_wait = before.segments[0].outcome.clone();
++            let command_path = directory.join("answer.json");
++            let answer: ResumeCommand = match std::fs::read_to_string(&command_path) {
++                Ok(text) => serde_json::from_str(&text).unwrap(),
++                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
++                    let command = ResumeCommand {
++                        run_id: run_id.clone(),
++                        expected_revision: saved.snapshot.revision,
++                        command_id: id("answer"),
++                        action: ResumeAction::Input {
++                            wait_id: saved.snapshot.wait.as_ref().unwrap().wait_id.clone(),
++                            answer: json!({"selection":"annual"}),
++                        },
++                    };
++                    std::fs::write(&command_path, serde_json::to_vec(&command).unwrap()).unwrap();
++                    command
++                }
++                Err(error) => panic!("saved command: {error}"),
++            };
++            if !interrupt {
++                assert_eq!(
++                    before.accepted_commands.len(),
++                    usize::from(boundary == "accepted-command")
++                );
++                assert_eq!(
++                    before.segments.len(),
++                    if boundary == "accepted-command" { 2 } else { 1 }
++                );
++            }
++            let handle = if !interrupt && boundary == "accepted-command" {
++                let source = saved
++                    .snapshot
++                    .recovery_record(id("command-recovery-source"))
++                    .unwrap();
++                completed(
++                    agent
++                        .resume(
++                            ResumeCommand {
++                                run_id: run_id.clone(),
++                                expected_revision: saved.snapshot.revision,
++                                command_id: id("recover-answer"),
++                                action: ResumeAction::Recover {
++                                    recovery_ref: source.reference().clone(),
++                                },
++                            },
++                            context(),
++                        )
++                        .await
++                        .unwrap(),
++                )
++            } else {
++                completed(agent.resume(answer.clone(), context()).await.unwrap())
++            };
++            let outcome = completed(handle.outcome(&context()).await.unwrap());
++            if interrupt {
++                panic!("command boundary failed to pause");
++            }
++            assert_eq!(
++                outcome.result.status(),
++                RunStatus::Succeeded,
++                "{:?}",
++                outcome
++            );
++            let finished = store.load(&scope(), &run_id).await.unwrap();
++            let target = &finished.snapshot.tool_ledger[1];
++            let ToolCallState::Settled { result } = &target.state else {
++                panic!("input not settled")
++            };
++            assert_eq!(
++                result.content,
++                vec![InputContent::Json {
++                    value: json!({"selection":"annual"})
++                }]
++            );
++            let history = store.read_execution(&scope(), &run_id).await.unwrap();
++            assert_eq!(history.segments[0].outcome, old_wait);
++            assert_eq!(
++                finished
++                    .snapshot
++                    .resume_receipts
++                    .iter()
++                    .filter(|receipt| receipt.command.command_id == id("answer"))
++                    .count(),
++                1
++            );
++            let checkpoint = store.load(&scope(), &run_id).await.unwrap();
++            let duplicate = completed(agent.resume(answer, context()).await.unwrap());
++            let _old_interval = completed(duplicate.outcome(&context()).await.unwrap());
++            assert_eq!(store.load(&scope(), &run_id).await.unwrap(), checkpoint);
++            std::fs::write(
++                directory.join("verified"),
++                b"input command atomically consumed without reexecution",
++            )
++            .unwrap();
++        });
++}
+diff --git a/crates/wickle-state-sqlite/tests/support/context_recovery.rs b/crates/wickle-state-sqlite/tests/support/context_recovery.rs
+index c0f97646e02695dcd128337f88f3e148c2df4df2..4b51e2f0f179b2dd415fb9f03f238a60f97e40a4 100644
+--- a/crates/wickle-state-sqlite/tests/support/context_recovery.rs
++++ b/crates/wickle-state-sqlite/tests/support/context_recovery.rs
+@@ -94,6 +94,7 @@ pub fn run_worker(directory: &Path, mode: &str) {
+             let mut bindings = fixture.bindings();
+             bindings.state = if interrupt {
+                 Arc::new(recovery_store::CrashStore {
++                    kill_marker: None,
+                     inner: store.clone(),
+                     boundary: if committed {
+                         "context"
+diff --git a/crates/wickle-state-sqlite/tests/support/recovery_store.rs b/crates/wickle-state-sqlite/tests/support/recovery_store.rs
+index b07614029bc9629a3026844b25f0b1560cfc1443..37fe45025f0b5e98f81a4a6e53ac5800e516c7d8 100644
+--- a/crates/wickle-state-sqlite/tests/support/recovery_store.rs
++++ b/crates/wickle-state-sqlite/tests/support/recovery_store.rs
+@@ -5,6 +5,16 @@ use wickle_state_sqlite::SqliteStateStore;
+ pub struct CrashStore {
+     pub inner: Arc<SqliteStateStore>,
+     pub boundary: String,
++    pub kill_marker: Option<std::path::PathBuf>,
++}
++impl CrashStore {
++    async fn stop(&self, code: i32) -> ! {
++        if let Some(marker) = &self.kill_marker {
++            std::fs::write(marker, b"ready\n").unwrap();
++            std::future::pending::<()>().await;
++        }
++        std::process::exit(code)
++    }
+ }
+ impl StateStore for CrashStore {
+     fn capabilities(&self) -> StateStoreCapabilities {
+@@ -23,7 +33,13 @@ impl StateStore for CrashStore {
+         scope: &'a Scope,
+         input: AdmissionInput,
+     ) -> PortFuture<'a, AdmissionResult> {
+-        self.inner.admit(scope, input)
++        Box::pin(async move {
++            let result = self.inner.admit(scope, input).await?;
++            if self.boundary == "admitted" {
++                self.stop(75).await;
++            }
++            Ok(result)
++        })
+     }
+     fn load<'a>(&'a self, scope: &'a Scope, run_id: &'a Id) -> PortFuture<'a, StoredRun> {
+         self.inner.load(scope, run_id)
+@@ -81,6 +97,11 @@ impl StateStore for CrashStore {
+         input: CommitInput,
+     ) -> PortFuture<'a, StoredRun> {
+         Box::pin(async move {
++            let prepared =
++                !input.snapshot.prepared_steps.is_empty() && input.snapshot.model_ledger.is_empty();
++            if self.boundary == "before-prepared" && prepared {
++                self.stop(75).await;
++            }
+             let planned = input
+                 .events
+                 .iter()
+@@ -96,6 +117,13 @@ impl StateStore for CrashStore {
+                 std::process::exit(76);
+             }
+             let stop = match self.boundary.as_str() {
++                "wait" => input.snapshot.status == RunStatus::Waiting,
++                "prepared" => prepared,
++                "reserved" => input
++                    .snapshot
++                    .model_ledger
++                    .iter()
++                    .any(|entry| matches!(entry.state, ModelAttemptState::Reserved {})),
+                 "context" => rewritten,
+                 "plan" => planned,
+                 "bound" => input.snapshot.tool_ledger.iter().any(|entry| {
+@@ -112,7 +140,8 @@ impl StateStore for CrashStore {
+             };
+             let result = self.inner.commit(scope, run_id, input).await?;
+             if stop {
+-                std::process::exit(if self.boundary == "context" { 76 } else { 75 });
++                self.stop(if self.boundary == "context" { 76 } else { 75 })
++                    .await;
+             }
+             Ok(result)
+         })
+@@ -171,6 +200,16 @@ impl wickle::ExecutionTransactions for CrashStore {
+         scope: &'a wickle::Scope,
+         request: wickle::BeginSegmentRequest,
+     ) -> wickle::PortFuture<'a, wickle::BeginSegmentResult> {
+-        self.inner.begin_segment(scope, request)
++        Box::pin(async move {
++            let answer = matches!(&request.start, SegmentStart::Resume(command) if matches!(command.action, ResumeAction::Input { .. }));
++            if answer && self.boundary == "before-command" {
++                self.stop(75).await;
++            }
++            let result = self.inner.begin_segment(scope, request).await?;
++            if answer && self.boundary == "accepted-command" {
++                self.stop(75).await;
++            }
++            Ok(result)
++        })
+     }
+ }
+diff --git a/crates/wickle-state-sqlite/tests/support/workers.rs b/crates/wickle-state-sqlite/tests/support/workers.rs
+index bad18762f4ce685886c471abc29f213c08af296b..25b69904f5d0fa7d09580bd98e973a9b4baea03d 100644
+--- a/crates/wickle-state-sqlite/tests/support/workers.rs
++++ b/crates/wickle-state-sqlite/tests/support/workers.rs
+@@ -98,6 +98,21 @@ pub fn run() {
+     let ready = Path::new(config["ready"].as_str().unwrap());
+     let actor = config["actor"].as_str().unwrap();
+     let mode = config["mode"].as_str().unwrap();
++    if mode == "uncommitted-upgrade" {
++        let connection = rusqlite::Connection::open(database).unwrap();
++        let image = &config["details"]["image"];
++        connection.execute_batch("BEGIN IMMEDIATE").unwrap();
++        connection
++            .execute(
++                "UPDATE wickle_scope_checkpoints SET checkpoint_json=?1,checksum=?2",
++                rusqlite::params![image.to_string(), canonical_digest(image).as_str()],
++            )
++            .unwrap();
++        signal(ready);
++        loop {
++            std::thread::park();
++        }
++    }
+     if mode == "uncommitted" {
+         let connection = rusqlite::Connection::open(database).unwrap();
+         connection.execute_batch("BEGIN IMMEDIATE; UPDATE wickle_scope_checkpoints SET checkpoint_json='uncommitted invalid image', checksum='uncommitted';").unwrap();
+diff --git a/crates/wickle/src/agent.rs b/crates/wickle/src/agent.rs
+index 1d82948bf508660a8fe87df50f2c762291f38b47..e69e58e1b6d08f5c4fefdebeb57d3427db1fd1ba 100644
+--- a/crates/wickle/src/agent.rs
++++ b/crates/wickle/src/agent.rs
+@@ -382,7 +382,12 @@ impl Agent {
+         self.inner
+             .bindings
+             .policy
+-            .run_view(&saved.snapshot, context, None)
++            .run_view(
++                &saved.snapshot,
++                self.inner.bindings.clock.as_ref(),
++                context,
++                None,
++            )
+             .await
+     }
+     /// Read protected saved state under the separate details permission.
+diff --git a/crates/wickle/src/views.rs b/crates/wickle/src/views.rs
+index 56263baa41292a3e75147c4c7f871d06c5d8751d..ba5f0a2136de61e00d6a2f43f3ef3472c2ed3b21 100644
+--- a/crates/wickle/src/views.rs
++++ b/crates/wickle/src/views.rs
+@@ -19,6 +19,9 @@ pub struct RunView {
+     pub phase: RunPhase,
+     /// Snapshot revision.
+     pub revision: u64,
++    /// Whether the original Run deadline has elapsed while this Run is nonterminal.
++    /// This observation does not expire the Run or advance its saved usage.
++    pub deadline_expired: bool,
+     /// Saved usage, not inferred provider consumption.
+     pub usage: BudgetUsage,
+ }
+@@ -58,6 +61,7 @@ impl PolicyGate {
+     pub async fn run_view(
+         &self,
+         snapshot: &RunSnapshot,
++        clock: &dyn crate::Clock,
+         context: &ExecutionContext,
+         deadline: Option<Instant>,
+     ) -> Result<Guarded<RunView>, ContractError> {
+@@ -67,6 +71,18 @@ impl PolicyGate {
+             action: PolicyAction::ReadRun {},
+         };
+         self.guard(&request, context, deadline, None, || async {
++            let deadline_expired = if snapshot.status.is_terminal() {
++                false
++            } else {
++                let now = clock.now()?.utc_ms;
++                if now < snapshot.timing.last_observed_at_ms {
++                    return Err(ContractError::new(
++                        crate::ErrorCode::ClockRegression,
++                        "views.run_clock",
++                    ));
++                }
++                now >= snapshot.timing.deadline_at_ms
++            };
+             Ok(RunView {
+                 run_id: snapshot.run_id.clone(),
+                 session_id: snapshot.request.session_id.clone(),
+@@ -74,6 +90,7 @@ impl PolicyGate {
+                 phase: snapshot.phase,
+                 revision: snapshot.revision,
+                 usage: snapshot.usage.clone(),
++                deadline_expired,
+             })
+         })
+         .await
+diff --git a/crates/wickle/tests/agent_control.rs b/crates/wickle/tests/agent_control.rs
+index fff7c74e99f238942172a2d00e0791515f16bded..dd722fb5b04e5065033b11081558e9762fa98198 100644
+--- a/crates/wickle/tests/agent_control.rs
++++ b/crates/wickle/tests/agent_control.rs
+@@ -552,3 +552,86 @@ async fn denied_worker_processing_and_receipt_reads_leave_the_pending_command_un
+     );
+     assert_eq!(fixture.tools[1].calls.load(Ordering::SeqCst), 0);
+ }
++
++#[tokio::test(start_paused = true)]
++async fn idle_deadline_observation_does_not_settle_waits_or_change_saved_state() {
++    let mut fixture = Fixture::new(Mode::Approval);
++    fixture.profile.limits.max_elapsed_ms = 100.try_into().unwrap();
++    let agent = fixture.agent();
++    let handle = fixture.started(&agent).await;
++    let waiting = fixture.outcome(&handle).await;
++    let before = fixture.base.store.export_checkpoint(&scope()).unwrap();
++    let usage = fixture.saved(&handle).await.snapshot.usage;
++    assert!(!completed(agent.get_run(handle.run_id(), &context()).await.unwrap()).deadline_expired);
++    let saved = fixture.saved(&handle).await;
++    let remaining =
++        (saved.snapshot.timing.deadline_at_ms - fixture.base.clock.now().unwrap().utc_ms) as u64;
++    tokio::time::advance(Duration::from_millis(remaining - 1)).await;
++    assert!(!completed(agent.get_run(handle.run_id(), &context()).await.unwrap()).deadline_expired);
++    tokio::time::advance(Duration::from_millis(1)).await;
++    for _ in 0..2 {
++        let view = completed(agent.get_run(handle.run_id(), &context()).await.unwrap());
++        assert_eq!(view.status, RunStatus::Waiting);
++        assert!(view.deadline_expired);
++        assert_eq!(view.usage, usage);
++    }
++    assert_eq!(
++        fixture
++            .base
++            .store
++            .export_checkpoint(&scope())
++            .unwrap()
++            .digest(),
++        before.digest()
++    );
++    assert_eq!(fixture.outcome(&handle).await, waiting);
++    assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 1);
++    assert_eq!(fixture.tools[1].calls.load(Ordering::SeqCst), 0);
++    completed(
++        agent
++            .submit_control_command(
++                handle.run_id().clone(),
++                command("expire-observed", ControlAction::Expire),
++                context(),
++            )
++            .await
++            .unwrap(),
++    );
++    let view = completed(agent.get_run(handle.run_id(), &context()).await.unwrap());
++    assert_eq!(view.status, RunStatus::Exhausted);
++    assert!(!view.deadline_expired);
++}
++
++#[tokio::test(start_paused = true)]
++async fn interrupted_deadline_observation_is_read_only_at_the_original_deadline() {
++    let fixture = agent_support::Fixture::new(agent_support::Response::Text, true);
++    let mut profile = agent_support::profile();
++    profile.limits.max_elapsed_ms = 100.try_into().unwrap();
++    let agent = create_agent(profile, fixture.bindings()).unwrap();
++    let handle = fixture.started(&agent, "request").await;
++    fixture.model.entered.notified().await;
++    completed(
++        handle
++            .stop_execution(InterruptionCause::HostShutdown, &context())
++            .await
++            .unwrap(),
++    );
++    let interrupted = completed(handle.outcome(&context()).await.unwrap());
++    let before = fixture.store.export_checkpoint(&scope()).unwrap();
++    let saved = fixture.store.load(&scope(), handle.run_id()).await.unwrap();
++    let remaining =
++        (saved.snapshot.timing.deadline_at_ms - fixture.clock.now().unwrap().utc_ms) as u64;
++    tokio::time::advance(Duration::from_millis(remaining)).await;
++    let view = completed(agent.get_run(handle.run_id(), &context()).await.unwrap());
++    assert_eq!(view.status, RunStatus::Interrupted);
++    assert!(view.deadline_expired);
++    assert_eq!(
++        fixture.store.export_checkpoint(&scope()).unwrap().digest(),
++        before.digest()
++    );
++    assert_eq!(
++        completed(handle.outcome(&context()).await.unwrap()),
++        interrupted
++    );
++    assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 1);
++}
+diff --git a/crates/wickle/tests/agent_tool_loop.rs b/crates/wickle/tests/agent_tool_loop.rs
+index 08985fb3c0ba46d8f0fc788e6c8babf593749869..0d18b7d140a2bf2193ef6d86a642988a81c78b30 100644
+--- a/crates/wickle/tests/agent_tool_loop.rs
++++ b/crates/wickle/tests/agent_tool_loop.rs
+@@ -2629,3 +2629,162 @@ async fn execution_stop_preserves_an_uncertain_write_and_the_unstarted_remainder
+             .is_err()
+     );
+ }
++
++struct DependentModel {
++    calls: AtomicUsize,
++}
++impl ModelPort for DependentModel {
++    fn binding(&self) -> ModelPortBinding {
++        ModelPortBinding {
++            provider: id("fixture"),
++            adapter: reference("adapter"),
++            connection_ref: reference("connection"),
++        }
++    }
++    fn generate<'a>(
++        &'a self,
++        request: &'a ModelRequest,
++        _: &'a ModelCallContext,
++    ) -> PortStream<'a, ModelEvent> {
++        let step = self.calls.fetch_add(1, Ordering::SeqCst);
++        let observed = observations(request);
++        assert_eq!(observed.len(), step);
++        let (event, finish) = match step {
++            0 => (
++                ModelEvent::ToolArgumentsDelta {
++                    index: 0,
++                    provider_call_id: Some("search-call".into()),
++                    name: Some("search".into()),
++                    delta: json!({"query":"annual report"}).to_string(),
++                },
++                ModelFinish::ToolCalls,
++            ),
++            1 => {
++                assert_eq!(observed[0].0, &id("search-call"));
++                let key = observed[0].1["content"][0]["value"].as_str().unwrap();
++                (
++                    ModelEvent::ToolArgumentsDelta {
++                        index: 0,
++                        provider_call_id: Some("read-call".into()),
++                        name: Some("read".into()),
++                        delta: json!({"query":key}).to_string(),
++                    },
++                    ModelFinish::ToolCalls,
++                )
++            }
++            2 => {
++                assert_eq!(observed[1].0, &id("read-call"));
++                let body = observed[1].1["content"][0]["value"].as_str().unwrap();
++                (
++                    ModelEvent::TextDelta { text: body.into() },
++                    ModelFinish::Stop,
++                )
++            }
++            _ => panic!("unexpected extra model call"),
++        };
++        Box::pin(stream::iter(vec![
++            Ok(event),
++            Ok(ModelEvent::ResponseCompleted {
++                finish,
++                metadata: Default::default(),
++                continuation: vec![],
++            }),
++        ]))
++    }
++}
++struct DependentTool {
++    expected_query: String,
++    result: String,
++    calls: AtomicUsize,
++}
++impl ToolExecutor for DependentTool {
++    fn execute<'a>(
++        &'a self,
++        args: &'a JsonObject,
++        _: &'a ToolExecutionContext,
++    ) -> PortFuture<'a, ToolExecutionResult> {
++        Box::pin(async move {
++            assert_eq!(args.get("query"), Some(&json!(self.expected_query)));
++            assert_eq!(args.get("workspace_id"), Some(&json!(WORKSPACE)));
++            self.calls.fetch_add(1, Ordering::SeqCst);
++            Ok(ToolExecutionResult {
++                outcome: ToolExecutionOutcome::Succeeded {
++                    value: json!(self.result),
++                },
++                effect: ToolEffect::NotApplied,
++                receipt: None,
++            })
++        })
++    }
++}
++#[tokio::test]
++async fn search_observation_drives_a_later_read_call_before_the_final_answer() {
++    let fixture = Fixture::new(vec![], Behavior::Success);
++    let key = format!("report-{}", RandomIdSource.next_id().unwrap());
++    let body = format!("document-{}", RandomIdSource.next_id().unwrap());
++    let search = Arc::new(DependentTool {
++        expected_query: "annual report".into(),
++        result: key.clone(),
++        calls: AtomicUsize::new(0),
++    });
++    let read = Arc::new(DependentTool {
++        expected_query: key,
++        result: body.clone(),
++        calls: AtomicUsize::new(0),
++    });
++    let model = Arc::new(DependentModel {
++        calls: AtomicUsize::new(0),
++    });
++    let mut bindings = fixture.bindings();
++    bindings.model_exchange = Arc::new(
++        ModelExchange::new(model.clone(), bindings.policy.clone())
++            .with_route_inspector(fixture.base.inspector.clone(), Duration::from_secs(1))
++            .unwrap(),
++    );
++    let mut profile = fixture.profile.clone();
++    profile.tools.clear();
++    let mut tools = vec![];
++    for (name, executor) in [("search", search.clone()), ("read", read.clone())] {
++        let mut descriptor = fixture
++            .registry
++            .get(&id("read"))
++            .unwrap()
++            .compiled
++            .descriptor()
++            .clone();
++        descriptor.tool = reference(name);
++        descriptor.name = id(name);
++        tools.push(ToolRegistration {
++            compiled: SchemaCompiler::new()
++                .compile(descriptor, &fixture.inputs)
++                .unwrap(),
++            executor,
++        });
++        profile.tools.push(ToolBindingRef::Catalog(CatalogToolRef {
++            tool_id: id(name),
++            version: id("1"),
++            bindings: None,
++            config: None,
++        }));
++    }
++    bindings.tools = Some(Arc::new(ToolRegistry::new(scope(), tools).unwrap()));
++    let agent = create_agent(profile, bindings).unwrap();
++    let handle = fixture.start(&agent).await;
++    let outcome = fixture.outcome(&handle).await;
++    assert_eq!(outcome.result.status(), RunStatus::Succeeded);
++    assert_eq!(outcome.output, vec![InputContent::Text { text: body }]);
++    assert_eq!(model.calls.load(Ordering::SeqCst), 3);
++    assert_eq!(search.calls.load(Ordering::SeqCst), 1);
++    assert_eq!(read.calls.load(Ordering::SeqCst), 1);
++    let saved = fixture
++        .base
++        .store
++        .load(&scope(), handle.run_id())
++        .await
++        .unwrap();
++    assert_eq!(saved.snapshot.tool_ledger.len(), 2);
++    assert_ne!(
++        saved.snapshot.tool_ledger[0].call.model_request_id,
++        saved.snapshot.tool_ledger[1].call.model_request_id
++    );
++}
+diff --git a/crates/wickle/tests/context_projection.rs b/crates/wickle/tests/context_projection.rs
+index 25cfc0aa97313924c3a03ed40fe68b3f64f32181..482e4c559ca90d0baf5531f4dd53f013129bc1c4 100644
+--- a/crates/wickle/tests/context_projection.rs
++++ b/crates/wickle/tests/context_projection.rs
+@@ -1431,3 +1431,32 @@ async fn loaded_skill_context_uses_its_pinned_version_without_gaining_system_aut
+             .is_err()
+     );
+ }
++
++#[tokio::test]
++async fn a_saved_prompt_from_another_assembler_is_rejected_even_with_its_authentic_digest() {
++    let fixture = Fixture::new().await;
++    let original = serde_json::to_value(&fixture.prompt).unwrap();
++    let mut changed = original.clone();
++    changed["assembler_version"] = json!("wickle.context-assembler.v999");
++    let changed_digest = canonical_digest(&changed);
++    assert_ne!(changed_digest, fixture.prompt_digest);
++    assert_eq!(
++        PromptSnapshot::restore(
++            &changed.to_string(),
++            &changed_digest,
++            &fixture.profile,
++            &fixture.scope
++        )
++        .unwrap_err()
++        .code,
++        ErrorCode::ContextMismatch
++    );
++    let restored = PromptSnapshot::restore(
++        &original.to_string(),
++        &fixture.prompt_digest,
++        &fixture.profile,
++        &fixture.scope,
++    )
++    .unwrap();
++    assert_eq!(serde_json::to_value(restored).unwrap(), original);
++}
+diff --git a/crates/wickle/tests/execution_store.rs b/crates/wickle/tests/execution_store.rs
+index 8b431c811b333fc4d463d863febb5cd89790ac70..809d9107a7c567580b0c3eb113c8b8c2d23a085a 100644
+--- a/crates/wickle/tests/execution_store.rs
++++ b/crates/wickle/tests/execution_store.rs
+@@ -151,3 +151,9 @@ async fn version_two_cannot_silently_reclassify_new_terminal_runs_as_legacy() {
+             .is_err()
+     );
+ }
++
++#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++async fn concurrent_conflicting_submissions_keep_only_the_winning_request_snapshot() {
++    let store: Arc<dyn StateStore> = Arc::new(MemoryStateStore::new());
++    suite::conflicting_submissions_race([store.clone(), store]).await;
++}
+diff --git a/crates/wickle/tests/policy.rs b/crates/wickle/tests/policy.rs
+index 44f252a723d9777c07fe0d463dfb0d433bedb2fd..7b047aae6dd858529e57871b43176c1eeba20188 100644
+--- a/crates/wickle/tests/policy.rs
++++ b/crates/wickle/tests/policy.rs
+@@ -797,12 +797,16 @@ async fn authorized_minimal_views_serialize_only_public_metadata_and_use_distinc
+     let context = context(scope());
+     let snapshot = snapshot().await;
+     snapshot.validate().unwrap();
+-    let Guarded::Completed(run) = gate.run_view(&snapshot, &context, None).await.unwrap() else {
++    let Guarded::Completed(run) = gate
++        .run_view(&snapshot, &SystemClock::new(), &context, None)
++        .await
++        .unwrap()
++    else {
+         panic!("expected authorized public run view");
+     };
+     assert_eq!(
+         serde_json::to_value(run).unwrap(),
+-        json!({"run_id":"run","session_id":"session","status":"failed","phase":"finish","revision":3,
++        json!({"run_id":"run","session_id":"session","status":"failed","phase":"finish","revision":3,"deadline_expired":false,
+             "usage":{"model_calls":1,"tool_attempts":0,"repair_attempts":0,"recovery_attempts":0,"elapsed_ms":0}})
+     );
+     let Guarded::Completed(artifact) = gate
+@@ -843,7 +847,7 @@ async fn public_and_protected_views_reject_claimed_scopes_different_from_stored_
+     for wrong_scope in wrong_scopes {
+         let context = context(wrong_scope);
+         assert_eq!(
+-            gate.run_view(&snapshot, &context, None)
++            gate.run_view(&snapshot, &SystemClock::new(), &context, None)
+                 .await
+                 .unwrap_err()
+                 .code,
+@@ -899,7 +903,9 @@ async fn public_read_permission_does_not_grant_access_to_protected_run_details()
+     let context = context(scope());
+     let snapshot = snapshot().await;
+     assert!(matches!(
+-        gate.run_view(&snapshot, &context, None).await.unwrap(),
++        gate.run_view(&snapshot, &SystemClock::new(), &context, None)
++            .await
++            .unwrap(),
+         Guarded::Completed(_)
+     ));
+     assert!(matches!(
+@@ -928,3 +934,79 @@ async fn public_read_permission_does_not_grant_access_to_protected_run_details()
+         PolicyAction::ReadRunDetails {}
+     );
+ }
++
++struct ViewClock {
++    calls: AtomicUsize,
++    utc_ms: Option<i64>,
++}
++impl Clock for ViewClock {
++    fn now(&self) -> Result<ClockReading, ContractError> {
++        self.calls.fetch_add(1, Ordering::SeqCst);
++        self.utc_ms
++            .map(|utc_ms| ClockReading {
++                utc_ms,
++                monotonic_ms: 0,
++            })
++            .ok_or_else(|| ContractError::new(ErrorCode::ClockUnavailable, "fixture.clock"))
++    }
++    fn sleep_until<'a>(&'a self, _: u64) -> PortFuture<'a, ()> {
++        Box::pin(pending())
++    }
++}
++#[tokio::test]
++async fn run_view_reads_clock_only_after_authorization_and_never_hides_clock_errors() {
++    let mut snapshot = snapshot().await;
++    let clock = ViewClock {
++        calls: AtomicUsize::new(0),
++        utc_ms: None,
++    };
++    let allowed = HostPolicy::new(Behavior::Decision(PolicyDecision::Allow {})).gate();
++    let terminal = match allowed
++        .run_view(&snapshot, &clock, &context(scope()), None)
++        .await
++        .unwrap()
++    {
++        Guarded::Completed(view) => view,
++        _ => panic!("unexpected approval"),
++    };
++    assert!(!terminal.deadline_expired);
++    assert_eq!(clock.calls.load(Ordering::SeqCst), 0);
++    snapshot.status = RunStatus::Running;
++    snapshot.phase = RunPhase::Prepare;
++    snapshot.outcome = None;
++    snapshot.validate().unwrap();
++    let denied = HostPolicy::new(Behavior::Decision(PolicyDecision::Deny {
++        reason: id("revoked"),
++    }))
++    .gate();
++    assert_eq!(
++        denied
++            .run_view(&snapshot, &clock, &context(scope()), None)
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::AccessDenied
++    );
++    assert_eq!(clock.calls.load(Ordering::SeqCst), 0);
++    assert_eq!(
++        allowed
++            .run_view(&snapshot, &clock, &context(scope()), None)
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::ClockUnavailable
++    );
++    assert_eq!(clock.calls.load(Ordering::SeqCst), 1);
++    let regressed = ViewClock {
++        calls: AtomicUsize::new(0),
++        utc_ms: Some(snapshot.timing.last_observed_at_ms - 1),
++    };
++    assert_eq!(
++        allowed
++            .run_view(&snapshot, &regressed, &context(scope()), None)
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::ClockRegression
++    );
++}
+diff --git a/crates/wickle/tests/support/execution_store.rs b/crates/wickle/tests/support/execution_store.rs
+index e2e37edc69b5e0f0a8f1c442df672df9258f9592..3633631b503146194add4c3ecdd4f0d32beeea26 100644
+--- a/crates/wickle/tests/support/execution_store.rs
++++ b/crates/wickle/tests/support/execution_store.rs
+@@ -308,3 +308,80 @@ pub async fn atomic_recovery_contract(store: Arc<dyn StateStore>) {
+     assert_eq!(after.accepted_commands.len(), 1);
+     assert_eq!(after.execution_principal_ref, id("execution-principal"));
+ }
++
++pub async fn conflicting_submissions_race(stores: [Arc<dyn StateStore>; 2]) {
++    let store = stores[0].clone();
++    let mut left = admission("race-left", "same-key", "race-session", "left input", "1").await;
++    let mut right = admission("race-right", "same-key", "race-session", "right input", "1").await;
++    for input in [&mut left, &mut right] {
++        let profile = input.snapshot.profile.profile();
++        input.submitted = Some(
++            RequestSnapshot::capture(
++                VersionedRef {
++                    id: profile.agent_id.clone(),
++                    version: profile.version.clone(),
++                },
++                &serde_json::to_string(&input.snapshot.request).unwrap(),
++                None,
++                Default::default(),
++            )
++            .unwrap(),
++        );
++    }
++    let submitted = [
++        left.submitted.clone().unwrap(),
++        right.submitted.clone().unwrap(),
++    ];
++    let expected = [left.snapshot.clone(), right.snapshot.clone()];
++    let gate = Arc::new(tokio::sync::Barrier::new(2));
++    let mut workers = Vec::new();
++    for (store, input) in stores.into_iter().zip([left, right]) {
++        let gate = gate.clone();
++        workers.push(tokio::spawn(async move {
++            gate.wait().await;
++            store.admit(&scope(), input).await
++        }));
++    }
++    let a = workers.pop().unwrap().await.unwrap();
++    let b = workers.pop().unwrap().await.unwrap();
++    let (winner, loser) = match (a, b) {
++        (Ok(winner), Err(loser)) | (Err(loser), Ok(winner)) => (winner, loser),
++        _ => panic!("conflicting submissions must have exactly one admitted winner"),
++    };
++    assert!(winner.created);
++    assert_eq!(loser.code, ErrorCode::RequestConflict);
++    let loaded = store
++        .find_request(&scope(), &id("race-session"), &id("same-key"))
++        .await
++        .unwrap()
++        .unwrap();
++    assert_eq!(loaded, winner.state);
++    assert!(expected.iter().any(|snapshot| snapshot == &loaded.snapshot));
++    let history = store
++        .read_execution(&scope(), &loaded.snapshot.run_id)
++        .await
++        .unwrap();
++    let winner_index = expected
++        .iter()
++        .position(|snapshot| snapshot.run_id == loaded.snapshot.run_id)
++        .unwrap();
++    assert_eq!(history.submitted.as_ref(), Some(&submitted[winner_index]));
++    let losing_id = expected
++        .iter()
++        .find(|snapshot| snapshot.run_id != loaded.snapshot.run_id)
++        .unwrap()
++        .run_id
++        .clone();
++    assert_eq!(
++        store.load(&scope(), &losing_id).await.unwrap_err().code,
++        ErrorCode::StateNotFound
++    );
++    assert_eq!(
++        store
++            .load_session(&scope(), &id("race-session"))
++            .await
++            .unwrap()
++            .active_run_id,
++        Some(loaded.snapshot.run_id)
++    );
++}
+diff --git a/docs/provider-tool-schemas.md b/docs/provider-tool-schemas.md
+index e782149b8bbb1732d2966a256650be4b60f7fb05..2f8f38c574ed80cd948d3a236524d6e0dd29a6a9 100644
+--- a/docs/provider-tool-schemas.md
++++ b/docs/provider-tool-schemas.md
+@@ -80,3 +80,8 @@ changing their exact decimal value are rejected with `InvalidArguments` at
+ `provider_tool.numeric_precision`. Equivalent exponent/decimal spellings are
+ accepted; large integers or high-precision decimals are never silently rounded.
+ The historical JSON parser and digest rules remain unchanged.
++
++OpenAI and Azure compiler revision 2 bounds reference-expansion work before building
++intermediate schemas. If that budget is exhausted, fields use their reversible
++JSON text representation. Previously saved compiler-revision-1 contracts still
++restore their own wire schema and codec without invoking revision 2.
+diff --git a/docs/run-controls.md b/docs/run-controls.md
+index 802a7d589b9aa3ae778b03732fa45b6c4aea01d5..113aea3f67e695798ff8c6f44b1bb343d9bfa245 100644
+--- a/docs/run-controls.md
++++ b/docs/run-controls.md
+@@ -8,8 +8,11 @@ a changed payload conflicts. Submission requires current authority for the actio
+ `ControlReceipt` contains the run ID, command ID and an optional processed segment
+ ID. An absent segment ID means pending. Use `get_control_receipt` for a read-only,
+ authorized lookup. `get_run` reads current metadata without expiring or cancelling
+-work. `RunHandle::cancel` is a convenience that generates a fresh command ID;
+-use explicit submission when the caller needs a stable retry key.
++work. Its `deadline_expired` flag observes the original Run deadline for nonterminal
++runs using the injected clock, without acquiring a lease or updating stored usage.
++A clock earlier than the stored high-water time returns `ClockRegression`.
++Terminal views report false. `RunHandle::cancel(command_id, context)` accepts the
++caller’s stable retry key.
+ 
+ The owning driver checks pending commands at dispatch boundaries and during its
+ heartbeat. It saves the outcome and command consumption in one fenced commit.

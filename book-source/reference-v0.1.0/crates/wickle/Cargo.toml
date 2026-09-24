@@ -1,0 +1,28 @@
+[package]
+name = "wickle"
+version.workspace = true
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+description = "An extensible agent engine for Rust applications"
+publish = false
+include = ["Cargo.toml", "LICENSE", "src/**"]
+
+[dependencies]
+getrandom.workspace = true
+futures-util.workspace = true
+jsonschema.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "test-util"] }
+serde_json = { workspace = true, features = ["preserve_order"] }
+
+[lints]
+workspace = true

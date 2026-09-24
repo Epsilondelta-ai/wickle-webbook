@@ -1,0 +1,5 @@
+# Optional content hosting only. Never push unrelated project settings.
+project_id = "wickle-webbook"
+[storage.buckets.wickle-webbook]
+public = true
+file_size_limit = "50MiB"

@@ -1,0 +1,3354 @@
+diff --git a/.env.example b/.env.example
+index b5c0c922566d2b2da43045a2fac332f85af35e58..931a73bd60bb9a0f3c3e265dfe8fc3d756fdc5da 100644
+--- a/.env.example
++++ b/.env.example
+@@ -1,93 +1,88 @@
+-# Model-specific live integration test configuration only.
+-# See docs/env/README.md and each provider guide. Wickle core does not load this file.
+-# Provider adapters and model-specific live tests are not implemented yet.
+-# These variable names are test-harness conventions, not library runtime settings.
+-# Each numbered model slot is an independent model/version test case.
++# Live integration test configuration only. The library does not read this file.
++# See docs/env/README.md. Model-specific live adapters/tests are being implemented.
++# Enter each actual model ID (including its version/snapshot) once.
++# Azure uses the deployment name; Bedrock accepts the actual modelId/profile/ARN.
++# Add MODEL_2_..., MODEL_3_... slots to test more models or different options.
++# A nonblank ID/deployment defines a test case. Blank optional options are omitted.
++# Effort/thinking options must be supported by the selected model and API.
+ # Share credentials within a provider; use another .env file for another resource.
+ # Never commit the resulting .env.
+ 
+-# *_MODEL_<N>_ID is the provider ID; *_MODEL_<N>_VERSION is verified release metadata.
+-# Add _MODEL_2_ID / _MODEL_2_VERSION, _MODEL_3_..., and so on for more cases.
+-# Use a separate slot for each version. A blank model ID does not configure a case.
+-# Do not invent a version or assume an alias/deployment is immutable.
+-# Leave unknown versions blank for preparation; resolve them before pinned tests.
+-
+ # OpenAI GPT
+ OPENAI_API_KEY=
+ OPENAI_BASE_URL=https://api.openai.com/v1
+ OPENAI_MODEL_1_ID=
+-OPENAI_MODEL_1_VERSION=
+-# Optional headers, only when needed for the selected key:
++OPENAI_MODEL_1_REASONING_EFFORT=
++OPENAI_MODEL_1_MAX_OUTPUT_TOKENS=4096
+ # OPENAI_ORG_ID=
+ # OPENAI_PROJECT_ID=
+ 
+-# Azure Foundry OpenAI GPT
+-# Resource origin only, e.g. https://<resource>.openai.azure.com
+-# The v1 request base appends /openai/v1/ to this origin.
++# Azure Foundry OpenAI GPT: resource origin, without /openai/v1/.
+ AZURE_OPENAI_ENDPOINT=
+-AZURE_OPENAI_MODEL_1_ID=
+-AZURE_OPENAI_MODEL_1_VERSION=
+ AZURE_OPENAI_MODEL_1_DEPLOYMENT=
++AZURE_OPENAI_MODEL_1_REASONING_EFFORT=
++AZURE_OPENAI_MODEL_1_MAX_OUTPUT_TOKENS=4096
+ AZURE_OPENAI_API_MODE=v1
+-# Only dated API mode uses an api-version query parameter; leave empty for v1.
++# Only dated API mode requires this protocol version; leave empty for v1.
+ AZURE_OPENAI_API_VERSION=
+-# api_key or entra; choose exactly one authentication method.
+ AZURE_OPENAI_AUTH_MODE=api_key
+ AZURE_OPENAI_API_KEY=
+-# Entra mode: use Azure CLI/managed identity, or configure a service principal.
++# Entra mode: Azure CLI/managed identity, or an explicit service principal.
+ # AZURE_TENANT_ID=
+ # AZURE_CLIENT_ID=
+ # AZURE_CLIENT_SECRET=
+ # AZURE_OPENAI_ENTRA_SCOPE=https://ai.azure.com/.default
+ 
+-# Anthropic Claude (direct API)
++# Anthropic Claude
+ ANTHROPIC_API_KEY=
+ ANTHROPIC_BASE_URL=https://api.anthropic.com
+ ANTHROPIC_API_VERSION=2023-06-01
+ ANTHROPIC_MODEL_1_ID=
+-ANTHROPIC_MODEL_1_VERSION=
+-# Required for an identity-linked key that is not scoped to one workspace:
++ANTHROPIC_MODEL_1_EFFORT=
++ANTHROPIC_MODEL_1_MAX_OUTPUT_TOKENS=4096
++# Only when the selected model requires an explicit thinking configuration:
++# ANTHROPIC_MODEL_1_THINKING_MODE=
++# ANTHROPIC_MODEL_1_THINKING_BUDGET_TOKENS=
+ # ANTHROPIC_WORKSPACE_ID=
+ 
+-# AWS Bedrock Claude, using the AWS SDK credential provider chain.
+-# Set the invocation/source region explicitly for a selected Bedrock test.
++# AWS Bedrock Claude: actual modelId, inference profile ID, or ARN.
+ AWS_REGION=
+ BEDROCK_MODEL_1_ID=
+-BEDROCK_MODEL_1_VERSION=
+-# Optional routing target: inference profile ID or ARN; underlying model above.
+-# BEDROCK_MODEL_1_INFERENCE_PROFILE_ID=
+-# Optional endpoint override; otherwise the SDK resolves it from AWS_REGION.
++BEDROCK_MODEL_1_EFFORT=
++BEDROCK_MODEL_1_MAX_OUTPUT_TOKENS=4096
++# BEDROCK_MODEL_1_THINKING_MODE=
++# BEDROCK_MODEL_1_THINKING_BUDGET_TOKENS=
+ # BEDROCK_ENDPOINT=
+-# Select a named profile, or leave unset for the default/cloud identity chain.
+ # AWS_PROFILE=
+-# Optional temporary credentials instead of a profile/cloud identity:
+ # AWS_ACCESS_KEY_ID=
+ # AWS_SECRET_ACCESS_KEY=
+ # AWS_SESSION_TOKEN=
+ 
+-# Google AI Studio / Gemini API (API-key authentication)
++# Google AI Studio / Gemini API
+ GEMINI_API_KEY=
+ GEMINI_BASE_URL=https://generativelanguage.googleapis.com
+ GEMINI_API_VERSION=v1
+ GEMINI_MODEL_1_ID=
+-GEMINI_MODEL_1_VERSION=
++GEMINI_MODEL_1_THINKING_LEVEL=
++GEMINI_MODEL_1_MAX_OUTPUT_TOKENS=4096
++# Use a token budget only for a model/API supporting it; omit thinking level then.
++# GEMINI_MODEL_1_THINKING_BUDGET_TOKENS=
+ 
+ # Google Cloud Vertex AI Gemini (Application Default Credentials)
+ GOOGLE_CLOUD_PROJECT=
+ GOOGLE_CLOUD_LOCATION=
+ VERTEX_API_VERSION=v1
+ VERTEX_MODEL_1_ID=
+-VERTEX_MODEL_1_VERSION=
+-# Optional endpoint origin; normally derived from the chosen location.
++VERTEX_MODEL_1_THINKING_LEVEL=
++VERTEX_MODEL_1_MAX_OUTPUT_TOKENS=4096
++# VERTEX_MODEL_1_THINKING_BUDGET_TOKENS=
+ # VERTEX_ENDPOINT=
+-# Only set for a specific credential/configuration file. Leave unset for local
+-# gcloud ADC or an attached cloud identity. Keep the file outside this repository.
+ # GOOGLE_APPLICATION_CREDENTIALS=
+-# Optional quota project override for ADC:
+ # GOOGLE_CLOUD_QUOTA_PROJECT=
+ 
+ # xAI Grok
+ XAI_API_KEY=
+ XAI_BASE_URL=https://api.x.ai/v1
+ XAI_MODEL_1_ID=
+-XAI_MODEL_1_VERSION=
++XAI_MODEL_1_REASONING_EFFORT=
++XAI_MODEL_1_MAX_OUTPUT_TOKENS=4096
+diff --git a/Cargo.lock b/Cargo.lock
+index 56ac6e12ac4924b1343ef509e2f3ffc4363da2e1..8763d7b84aeebdd58a97d1b1d7faed5790de02e6 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -882,6 +882,16 @@ dependencies = [
+  "tokio-util",
+ ]
+ 
++[[package]]
++name = "wickle-model-router"
++version = "0.1.0"
++dependencies = [
++ "serde",
++ "serde_json",
++ "tokio",
++ "wickle",
++]
++
+ [[package]]
+ name = "windows-link"
+ version = "0.2.1"
+diff --git a/Cargo.toml b/Cargo.toml
+index 74257ede5149a4d27a82523862a19b9a8205ff86..3da48fac74378d4587f1d694b61cc4bcadf05f7a 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -1,5 +1,5 @@
+ [workspace]
+-members = ["crates/wickle"]
++members = ["crates/wickle", "crates/wickle-model-router"]
+ default-members = ["crates/wickle"]
+ resolver = "3"
+ 
+diff --git a/crates/wickle-model-router/Cargo.toml b/crates/wickle-model-router/Cargo.toml
+new file mode 100644
+index 0000000000000000000000000000000000000000..cc9c1a22496ef240e626138f462923723448fe45
+--- /dev/null
++++ b/crates/wickle-model-router/Cargo.toml
+@@ -0,0 +1,20 @@
++[package]
++name = "wickle-model-router"
++version.workspace = true
++edition.workspace = true
++rust-version.workspace = true
++repository.workspace = true
++description = "Immutable model catalogs and routing components for Wickle"
++publish = false
++include = ["Cargo.toml", "src/**"]
++
++[dependencies]
++wickle = { path = "../wickle", version = "=0.1.0" }
++serde.workspace = true
++serde_json.workspace = true
++
++[dev-dependencies]
++tokio = { workspace = true, features = ["rt-multi-thread", "test-util"] }
++
++[lints]
++workspace = true
+diff --git a/crates/wickle-model-router/src/lib.rs b/crates/wickle-model-router/src/lib.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..e0ad104e2324c811a9701f3e510f7a7375e558c8
+--- /dev/null
++++ b/crates/wickle-model-router/src/lib.rs
+@@ -0,0 +1,136 @@
++//! Immutable, scope-bound model catalog for Wickle applications.
++//!
++//! Catalog lookups do not invoke models, load environment variables, or select a
++//! fallback. Metadata contracts live in `wickle`; this crate depends on the core.
++
++use serde::{Serialize, Serializer};
++use wickle::{
++    ContractError, ErrorCode, Id, JsonDigest, ModelCatalog, ModelCatalogSnapshot, ModelDefinition,
++    ModelDefinitionRef, PortFuture, ResolvedCatalogBinding, Scope, VersionedRef,
++};
++
++/// Privately owned, validated catalog revision. Returned records are independent
++/// copies; editing them cannot change future lookups or an already pinned revision.
++#[derive(Debug, Clone)]
++pub struct ImmutableModelCatalog {
++    snapshot: ModelCatalogSnapshot,
++}
++
++impl Serialize for ImmutableModelCatalog {
++    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
++        self.snapshot.serialize(serializer)
++    }
++}
++
++impl ImmutableModelCatalog {
++    /// Validate and own a catalog without network, model, or environment access.
++    pub fn new(snapshot: ModelCatalogSnapshot) -> Result<Self, ContractError> {
++        snapshot.validate()?;
++        Ok(Self { snapshot })
++    }
++    /// Inspect the immutable snapshot without obtaining mutable access.
++    pub fn snapshot(&self) -> &ModelCatalogSnapshot {
++        &self.snapshot
++    }
++    /// Identity of the protected serialized snapshot.
++    pub fn digest(&self) -> JsonDigest {
++        self.snapshot.digest()
++    }
++    /// Restore against a trusted expected digest and revalidate every contract.
++    pub fn restore(input: &str, expected_digest: &JsonDigest) -> Result<Self, ContractError> {
++        let snapshot: ModelCatalogSnapshot = serde_json::from_value(wickle::parse_json(input)?)
++            .map_err(|_| ContractError::new(ErrorCode::ModelCatalogMismatch, "catalog"))?;
++        if &snapshot.digest() != expected_digest {
++            return Err(ContractError::new(
++                ErrorCode::ModelCatalogMismatch,
++                "catalog.digest",
++            ));
++        }
++        Self::new(snapshot)
++    }
++    fn check(&self, scope: &Scope, revision: &Id) -> Result<(), ContractError> {
++        if scope != &self.snapshot.scope {
++            return Err(ContractError::new(ErrorCode::AccessDenied, "catalog.scope"));
++        }
++        if revision != &self.snapshot.revision {
++            return Err(ContractError::new(
++                ErrorCode::ModelCatalogMismatch,
++                "catalog.revision",
++            ));
++        }
++        Ok(())
++    }
++}
++
++impl ModelCatalog for ImmutableModelCatalog {
++    fn revision(&self) -> &Id {
++        &self.snapshot.revision
++    }
++    fn scope(&self) -> &Scope {
++        &self.snapshot.scope
++    }
++    fn get_model<'a>(
++        &'a self,
++        scope: &'a Scope,
++        revision: &'a Id,
++        reference: &'a ModelDefinitionRef,
++    ) -> PortFuture<'a, ModelDefinition> {
++        Box::pin(async move {
++            self.check(scope, revision)?;
++            self.snapshot
++                .models
++                .iter()
++                .find(|model| model.reference() == *reference)
++                .cloned()
++                .ok_or_else(|| ContractError::new(ErrorCode::ModelNotRegistered, "catalog.model"))
++        })
++    }
++    fn get_binding<'a>(
++        &'a self,
++        scope: &'a Scope,
++        revision: &'a Id,
++        reference: &'a VersionedRef,
++    ) -> PortFuture<'a, ResolvedCatalogBinding> {
++        Box::pin(async move {
++            self.check(scope, revision)?;
++            let binding = self
++                .snapshot
++                .bindings
++                .iter()
++                .find(|binding| binding.binding == *reference)
++                .ok_or_else(|| {
++                    ContractError::new(ErrorCode::ModelNotRegistered, "catalog.binding")
++                })?;
++            let model = self
++                .snapshot
++                .models
++                .iter()
++                .find(|model| model.reference() == binding.model)
++                .ok_or_else(|| {
++                    ContractError::new(ErrorCode::ModelNotRegistered, "catalog.model")
++                })?;
++            Ok(ResolvedCatalogBinding {
++                catalog_revision: self.snapshot.revision.clone(),
++                model: model.clone(),
++                binding: binding.clone(),
++            })
++        })
++    }
++    fn resolve_alias<'a>(
++        &'a self,
++        scope: &'a Scope,
++        revision: &'a Id,
++        provider: &'a Id,
++        alias: &'a Id,
++    ) -> PortFuture<'a, ModelDefinitionRef> {
++        Box::pin(async move {
++            self.check(scope, revision)?;
++            self.snapshot
++                .aliases
++                .iter()
++                .find(|entry| &entry.provider == provider && &entry.alias == alias)
++                .map(|entry| entry.target.clone())
++                .ok_or_else(|| ContractError::new(ErrorCode::ModelNotRegistered, "catalog.alias"))
++        })
++    }
++}
+diff --git a/crates/wickle-model-router/tests/catalog.rs b/crates/wickle-model-router/tests/catalog.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..003d4592cdf193e5e780fb6395ccb0f8ad856206
+--- /dev/null
++++ b/crates/wickle-model-router/tests/catalog.rs
+@@ -0,0 +1,884 @@
++//! Versioned catalog identity, exact binding validation, and immutable scoped lookups.
++
++use serde_json::{Value, json};
++use std::{
++    collections::BTreeSet,
++    sync::{
++        Arc,
++        atomic::{AtomicUsize, Ordering},
++    },
++};
++use wickle::*;
++use wickle_model_router::ImmutableModelCatalog;
++
++fn id(value: &str) -> Id {
++    Id::new(value).unwrap()
++}
++fn scope() -> Scope {
++    Scope {
++        tenant_id: id("tenant"),
++        workspace_id: id("workspace"),
++        user_id: None,
++    }
++}
++fn reference(name: &str, version: &str) -> VersionedRef {
++    VersionedRef {
++        id: id(name),
++        version: id(version),
++    }
++}
++fn object(value: Value) -> JsonObject {
++    value
++        .as_object()
++        .unwrap()
++        .iter()
++        .map(|(key, value)| (key.clone(), value.clone()))
++        .collect()
++}
++fn features(values: &[&str]) -> BTreeSet<Id> {
++    values.iter().map(|value| id(value)).collect()
++}
++
++fn model(provider: &str, version: &str) -> ModelDefinition {
++    ModelDefinition {
++        model_key: id("shared"),
++        family: id("family"),
++        provider: id(provider),
++        model_id: id("wire-model"),
++        model_version: id(version),
++        version_semantics: VersionSemantics::Pinned,
++        lifecycle: ModelLifecycle::Active,
++        capabilities: ModelCapabilities {
++            revision: id("model-capabilities"),
++            features: features(&["text", "tools", "streaming"]),
++            options_schema: json!({"type":"object","properties":{"temperature":{"type":"number","minimum":0,"maximum":2},"reasoning":{"enum":["low","high"]}},"required":[],"additionalProperties":false}),
++            context_window: 4096.try_into().unwrap(),
++            max_output_tokens: 512.try_into().unwrap(),
++        },
++        evidence: vec![ModelEvidence {
++            source_ref: id("synthetic-release-metadata"),
++            observed_at_ms: 1000,
++        }],
++    }
++}
++fn model_ref(model: &ModelDefinition) -> ModelDefinitionRef {
++    ModelDefinitionRef {
++        provider: model.provider.clone(),
++        model_key: model.model_key.clone(),
++        model_version: model.model_version.clone(),
++    }
++}
++fn proof(binding: &mut ModelBinding, model: &ModelDefinition) {
++    binding.evidence = vec![ModelValidationEvidence {
++        kind: ModelValidationKind::ContractTest,
++        binding_digest: binding.contract_digest(model).unwrap(),
++        checked_at_ms: 1000,
++        evidence_ref: id("synthetic-contract-proof"),
++        passed: true,
++    }];
++}
++fn binding(name: &str, version: &str, model: &ModelDefinition) -> ModelBinding {
++    let mut binding = ModelBinding {
++        binding: reference(name, version),
++        model: model_ref(model),
++        requested_model: model.model_id.clone(),
++        adapter: reference("adapter", "1"),
++        connection_ref: reference("connection", "1"),
++        target: object(json!({"deployment":"deployment-a","region":"region-a"})),
++        target_schema: json!({"type":"object","properties":{"deployment":{"type":"string","minLength":1},"region":{"enum":["region-a"]}},"required":["deployment","region"],"additionalProperties":false}),
++        api_contract: ApiContract {
++            operation: id("messages"),
++            version: id("v1"),
++        },
++        deployment_revision: Some(id("deployment-revision-1")),
++        version_semantics: VersionSemantics::Pinned,
++        capabilities: ModelCapabilities {
++            revision: id("binding-capabilities"),
++            features: features(&["text", "tools"]),
++            options_schema: json!({"type":"object","properties":{"temperature":{"type":"number","minimum":0,"maximum":1}},"required":[],"additionalProperties":false}),
++            context_window: 1024.try_into().unwrap(),
++            max_output_tokens: 128.try_into().unwrap(),
++        },
++        support: ModelSupportStatus::ContractTested,
++        evidence: vec![],
++    };
++    proof(&mut binding, model);
++    binding
++}
++fn snapshot(
++    models: Vec<ModelDefinition>,
++    bindings: Vec<ModelBinding>,
++    aliases: Vec<ModelAlias>,
++) -> ModelCatalogSnapshot {
++    ModelCatalogSnapshot {
++        revision: id("catalog-1"),
++        scope: scope(),
++        models,
++        bindings,
++        aliases,
++    }
++}
++fn requirements() -> CatalogRequirements {
++    CatalogRequirements {
++        features: features(&["text"]),
++        options: JsonObject::new(),
++        input_tokens: 100,
++        max_output_tokens: 32.try_into().unwrap(),
++        version_policy: VersionPolicy::RequirePinned,
++        min_support: ModelSupportStatus::ContractTested,
++    }
++}
++
++#[tokio::test]
++async fn the_same_provider_and_model_id_keep_two_releases_and_binding_revisions_available() {
++    let first = model("provider-a", "release-one");
++    let second = model("provider-a", "release-two");
++    let first_binding = binding("primary", "first-binding-revision", &first);
++    let second_binding = binding("primary", "second-binding-revision", &second);
++    let catalog = ImmutableModelCatalog::new(snapshot(
++        vec![first.clone(), second.clone()],
++        vec![first_binding.clone(), second_binding.clone()],
++        vec![],
++    ))
++    .unwrap();
++    assert_eq!(
++        catalog
++            .get_model(&scope(), &id("catalog-1"), &model_ref(&first))
++            .await
++            .unwrap()
++            .model_version,
++        id("release-one")
++    );
++    assert_eq!(
++        catalog
++            .get_model(&scope(), &id("catalog-1"), &model_ref(&second))
++            .await
++            .unwrap()
++            .model_version,
++        id("release-two")
++    );
++    let first_resolved = catalog
++        .get_binding(&scope(), &id("catalog-1"), &first_binding.binding)
++        .await
++        .unwrap();
++    let second_resolved = catalog
++        .get_binding(&scope(), &id("catalog-1"), &second_binding.binding)
++        .await
++        .unwrap();
++    assert_eq!(
++        first_resolved.model.model_id,
++        second_resolved.model.model_id
++    );
++    assert_eq!(first_resolved.model.model_version, id("release-one"));
++    assert_eq!(second_resolved.model.model_version, id("release-two"));
++    assert_ne!(
++        first_resolved
++            .binding
++            .contract_digest(&first_resolved.model)
++            .unwrap(),
++        second_resolved
++            .binding
++            .contract_digest(&second_resolved.model)
++            .unwrap()
++    );
++    let mut missing = model_ref(&first);
++    missing.model_version = id("unregistered-release");
++    assert!(
++        catalog
++            .get_model(&scope(), &id("catalog-1"), &missing)
++            .await
++            .is_err()
++    );
++    assert!(
++        catalog
++            .get_binding(
++                &scope(),
++                &id("catalog-1"),
++                &reference("primary", "unregistered-revision")
++            )
++            .await
++            .is_err()
++    );
++}
++
++#[tokio::test]
++async fn provider_api_deployment_and_adapter_combinations_do_not_collapse_into_one_model_identity()
++{
++    let direct = model("provider-a", "release-one");
++    let hosted = model("provider-b", "release-one");
++    let first = binding("first", "1", &direct);
++    let mut second = binding("second", "1", &direct);
++    second.api_contract = ApiContract {
++        operation: id("other-operation"),
++        version: id("other-api-version"),
++    };
++    second.adapter = reference("adapter", "2");
++    second.connection_ref = reference("another-connection", "2");
++    second
++        .target
++        .insert("deployment".into(), json!("deployment-b"));
++    second.deployment_revision = Some(id("deployment-revision-2"));
++    proof(&mut second, &direct);
++    let third = binding("third", "1", &hosted);
++    let catalog = ImmutableModelCatalog::new(snapshot(
++        vec![direct, hosted],
++        vec![first.clone(), second.clone(), third.clone()],
++        vec![],
++    ))
++    .unwrap();
++    let mut digests = BTreeSet::new();
++    for expected in [first, second, third] {
++        let actual = catalog
++            .get_binding(&scope(), &id("catalog-1"), &expected.binding)
++            .await
++            .unwrap();
++        assert_eq!(actual.binding, expected);
++        assert_eq!(actual.model.provider, expected.model.provider);
++        digests.insert(actual.binding.contract_digest(&actual.model).unwrap());
++    }
++    assert_eq!(digests.len(), 3);
++}
++
++#[tokio::test]
++async fn explicit_aliases_keep_requested_names_separate_from_resolved_release_metadata() {
++    let first = model("provider-a", "release-one");
++    let second = model("provider-b", "release-two");
++    let aliases = vec![
++        ModelAlias {
++            provider: first.provider.clone(),
++            alias: id("friendly"),
++            target: model_ref(&first),
++        },
++        ModelAlias {
++            provider: second.provider.clone(),
++            alias: id("friendly"),
++            target: model_ref(&second),
++        },
++    ];
++    let mut selected = binding("primary", "1", &first);
++    selected.requested_model = id("friendly");
++    proof(&mut selected, &first);
++    let catalog = ImmutableModelCatalog::new(snapshot(
++        vec![first.clone(), second.clone()],
++        vec![selected.clone()],
++        aliases,
++    ))
++    .unwrap();
++    assert_eq!(
++        catalog
++            .resolve_alias(
++                &scope(),
++                &id("catalog-1"),
++                &id("provider-a"),
++                &id("friendly")
++            )
++            .await
++            .unwrap(),
++        model_ref(&first)
++    );
++    assert_eq!(
++        catalog
++            .resolve_alias(
++                &scope(),
++                &id("catalog-1"),
++                &id("provider-b"),
++                &id("friendly")
++            )
++            .await
++            .unwrap(),
++        model_ref(&second)
++    );
++    let resolved = catalog
++        .get_binding(&scope(), &id("catalog-1"), &selected.binding)
++        .await
++        .unwrap();
++    assert_eq!(resolved.binding.requested_model, id("friendly"));
++    assert_eq!(resolved.model.model_id, id("wire-model"));
++    assert_eq!(resolved.model.model_version, id("release-one"));
++    assert!(
++        catalog
++            .resolve_alias(
++                &scope(),
++                &id("catalog-1"),
++                &id("provider-a"),
++                &id("unregistered")
++            )
++            .await
++            .is_err()
++    );
++}
++
++#[test]
++fn aliases_require_exact_registered_leaves_and_do_not_follow_alias_chains_or_cycles() {
++    let model = model("provider-a", "release-one");
++    let alias_target = |name: &str| ModelDefinitionRef {
++        model_key: id(name),
++        ..model_ref(&model)
++    };
++    for aliases in [
++        vec![ModelAlias {
++            provider: model.provider.clone(),
++            alias: id("first"),
++            target: alias_target("missing"),
++        }],
++        vec![
++            ModelAlias {
++                provider: model.provider.clone(),
++                alias: id("first"),
++                target: alias_target("second"),
++            },
++            ModelAlias {
++                provider: model.provider.clone(),
++                alias: id("second"),
++                target: model_ref(&model),
++            },
++        ],
++        vec![
++            ModelAlias {
++                provider: model.provider.clone(),
++                alias: id("first"),
++                target: alias_target("second"),
++            },
++            ModelAlias {
++                provider: model.provider.clone(),
++                alias: id("second"),
++                target: alias_target("first"),
++            },
++        ],
++    ] {
++        assert!(
++            ImmutableModelCatalog::new(snapshot(vec![model.clone()], vec![], aliases)).is_err()
++        );
++    }
++    for name in [model.model_key.clone(), model.model_id.clone()] {
++        assert!(
++            ImmutableModelCatalog::new(snapshot(
++                vec![model.clone()],
++                vec![],
++                vec![ModelAlias {
++                    provider: model.provider.clone(),
++                    alias: name,
++                    target: model_ref(&model)
++                }]
++            ))
++            .is_err()
++        );
++    }
++}
++
++#[tokio::test]
++async fn pinned_semantics_come_from_metadata_instead_of_dates_in_model_names() {
++    for semantics in [
++        VersionSemantics::Pinned,
++        VersionSemantics::Alias,
++        VersionSemantics::MutableDeployment,
++        VersionSemantics::Unverified,
++    ] {
++        let mut model = model("custom-provider", "opaque-release-label");
++        model.model_id = id(if semantics == VersionSemantics::Pinned {
++            "undated-fixed-model"
++        } else {
++            "model-2026-09-12"
++        });
++        model.version_semantics = semantics;
++        let mut selected = binding("primary", "1", &model);
++        selected.version_semantics = semantics;
++        proof(&mut selected, &model);
++        let catalog =
++            ImmutableModelCatalog::new(snapshot(vec![model], vec![selected.clone()], vec![]))
++                .unwrap();
++        let resolved = catalog
++            .get_binding(&scope(), &id("catalog-1"), &selected.binding)
++            .await
++            .unwrap();
++        assert_eq!(resolved.effective_version_semantics(), semantics);
++        assert_eq!(
++            resolved.validate(&requirements()).is_ok(),
++            semantics == VersionSemantics::Pinned
++        );
++        let mut mutable = requirements();
++        mutable.version_policy = VersionPolicy::AllowMutable;
++        resolved.validate(&mutable).unwrap();
++    }
++}
++
++#[tokio::test]
++async fn each_binding_checks_its_own_features_options_and_token_limits() {
++    let model = model("provider-a", "release-one");
++    let first = binding("first", "1", &model);
++    let mut second = binding("second", "1", &model);
++    second.capabilities.revision = id("second-capabilities");
++    second.capabilities.features = features(&["text"]);
++    second.capabilities.options_schema = json!({"type":"object","properties":{"reasoning":{"enum":["low","high"]}},"required":[],"additionalProperties":false});
++    second.capabilities.max_output_tokens = 64.try_into().unwrap();
++    proof(&mut second, &model);
++    let catalog = ImmutableModelCatalog::new(snapshot(
++        vec![model],
++        vec![first.clone(), second.clone()],
++        vec![],
++    ))
++    .unwrap();
++    let first = catalog
++        .get_binding(&scope(), &id("catalog-1"), &first.binding)
++        .await
++        .unwrap();
++    let second = catalog
++        .get_binding(&scope(), &id("catalog-1"), &second.binding)
++        .await
++        .unwrap();
++    let mut request = requirements();
++    request.options = object(json!({"temperature":0.5}));
++    first.validate(&request).unwrap();
++    assert!(second.validate(&request).is_err());
++    request.options = object(json!({"reasoning":"high"}));
++    second.validate(&request).unwrap();
++    assert!(first.validate(&request).is_err());
++    request.options = JsonObject::new();
++    request.features.insert(id("tools"));
++    first.validate(&request).unwrap();
++    assert!(second.validate(&request).is_err());
++    request.features = features(&["text"]);
++    request.max_output_tokens = 96.try_into().unwrap();
++    first.validate(&request).unwrap();
++    assert!(second.validate(&request).is_err());
++    request = requirements();
++    request.input_tokens = 1000;
++    assert!(first.validate(&request).is_err());
++    request.input_tokens = u64::MAX;
++    assert!(first.validate(&request).is_err());
++}
++
++#[test]
++fn bindings_cannot_advertise_features_or_limits_beyond_the_model_definition() {
++    let original = model("provider-a", "release-one");
++    for variant in 0..3 {
++        let mut model = original.clone();
++        let mut selected = binding("primary", "1", &model);
++        selected.support = ModelSupportStatus::Planned;
++        selected.evidence.clear();
++        match variant {
++            0 => model.capabilities.features = features(&["text"]),
++            1 => model.capabilities.context_window = 768.try_into().unwrap(),
++            2 => model.capabilities.max_output_tokens = 64.try_into().unwrap(),
++            _ => unreachable!(),
++        }
++        assert!(ImmutableModelCatalog::new(snapshot(vec![model], vec![selected], vec![])).is_err());
++    }
++}
++
++#[tokio::test]
++async fn requested_options_must_satisfy_both_model_and_binding_schemas_without_coercion() {
++    let mut model = model("provider-a", "release-one");
++    model.capabilities.options_schema["properties"]["temperature"]["maximum"] = json!(0.2);
++    let selected = binding("primary", "1", &model);
++    let catalog =
++        ImmutableModelCatalog::new(snapshot(vec![model], vec![selected.clone()], vec![])).unwrap();
++    let resolved = catalog
++        .get_binding(&scope(), &id("catalog-1"), &selected.binding)
++        .await
++        .unwrap();
++    let mut request = requirements();
++    request.options = object(json!({"temperature":0.1}));
++    resolved.validate(&request).unwrap();
++    for options in [
++        json!({"temperature":0.5}),
++        json!({"temperature":"0.1"}),
++        json!({"unknown_option":true}),
++    ] {
++        request.options = object(options);
++        assert!(resolved.validate(&request).is_err());
++    }
++}
++
++#[tokio::test]
++async fn a_pinned_binding_or_model_alone_cannot_upgrade_unpinned_metadata() {
++    for (model_semantics, binding_semantics, expected) in [
++        (
++            VersionSemantics::Pinned,
++            VersionSemantics::MutableDeployment,
++            VersionSemantics::MutableDeployment,
++        ),
++        (
++            VersionSemantics::Unverified,
++            VersionSemantics::Pinned,
++            VersionSemantics::Unverified,
++        ),
++    ] {
++        let mut model = model("provider-a", "release-one");
++        model.version_semantics = model_semantics;
++        let mut selected = binding("primary", "1", &model);
++        selected.version_semantics = binding_semantics;
++        proof(&mut selected, &model);
++        let catalog =
++            ImmutableModelCatalog::new(snapshot(vec![model], vec![selected.clone()], vec![]))
++                .unwrap();
++        let resolved = catalog
++            .get_binding(&scope(), &id("catalog-1"), &selected.binding)
++            .await
++            .unwrap();
++        assert_eq!(resolved.effective_version_semantics(), expected);
++        assert!(resolved.validate(&requirements()).is_err());
++    }
++}
++
++#[test]
++fn target_schemas_and_model_references_reject_mixed_or_unregistered_bindings() {
++    let model = model("provider-a", "release-one");
++    let mut wrong_target = binding("primary", "1", &model);
++    wrong_target.target.insert("deployment".into(), json!(42));
++    wrong_target.support = ModelSupportStatus::Planned;
++    wrong_target.evidence.clear();
++    assert!(
++        ImmutableModelCatalog::new(snapshot(vec![model.clone()], vec![wrong_target], vec![]))
++            .is_err()
++    );
++    let mut wrong_model = binding("primary", "1", &model);
++    wrong_model.model.model_version = id("missing-release");
++    wrong_model.support = ModelSupportStatus::Planned;
++    wrong_model.evidence.clear();
++    assert!(
++        ImmutableModelCatalog::new(snapshot(vec![model.clone()], vec![wrong_model], vec![]))
++            .is_err()
++    );
++    let mut wrong_provider = binding("primary", "1", &model);
++    wrong_provider.model.provider = id("unregistered-provider");
++    wrong_provider.support = ModelSupportStatus::Planned;
++    wrong_provider.evidence.clear();
++    assert!(
++        ImmutableModelCatalog::new(snapshot(vec![model], vec![wrong_provider], vec![])).is_err()
++    );
++}
++
++#[test]
++fn duplicate_definitions_binding_revisions_and_aliases_are_registration_errors() {
++    let model = model("provider-a", "release-one");
++    let selected = binding("primary", "1", &model);
++    assert!(
++        ImmutableModelCatalog::new(snapshot(
++            vec![model.clone(), model.clone()],
++            vec![selected.clone()],
++            vec![]
++        ))
++        .is_err()
++    );
++    assert!(
++        ImmutableModelCatalog::new(snapshot(
++            vec![model.clone()],
++            vec![selected.clone(), selected],
++            vec![]
++        ))
++        .is_err()
++    );
++    let alias = ModelAlias {
++        provider: model.provider.clone(),
++        alias: id("friendly"),
++        target: model_ref(&model),
++    };
++    assert!(
++        ImmutableModelCatalog::new(snapshot(vec![model], vec![], vec![alias.clone(), alias]))
++            .is_err()
++    );
++}
++
++#[tokio::test]
++async fn inspection_preserves_lifecycle_while_execution_requirements_reject_unavailable_models() {
++    for lifecycle in [
++        ModelLifecycle::Active,
++        ModelLifecycle::Deprecated,
++        ModelLifecycle::Retired,
++        ModelLifecycle::Unavailable,
++    ] {
++        let mut model = model("provider-a", "release-one");
++        model.lifecycle = lifecycle;
++        let selected = binding("primary", "1", &model);
++        let catalog =
++            ImmutableModelCatalog::new(snapshot(vec![model], vec![selected.clone()], vec![]))
++                .unwrap();
++        let resolved = catalog
++            .get_binding(&scope(), &id("catalog-1"), &selected.binding)
++            .await
++            .unwrap();
++        assert_eq!(resolved.model.lifecycle, lifecycle);
++        assert_eq!(
++            resolved.validate(&requirements()).is_ok(),
++            matches!(
++                lifecycle,
++                ModelLifecycle::Active | ModelLifecycle::Deprecated
++            )
++        );
++    }
++}
++
++#[tokio::test]
++async fn support_status_requires_matching_successful_evidence_and_is_not_promoted_implicitly() {
++    let model = model("provider-a", "release-one");
++    let mut planned = binding("planned", "1", &model);
++    planned.support = ModelSupportStatus::Planned;
++    planned.evidence.clear();
++    let catalog =
++        ImmutableModelCatalog::new(snapshot(vec![model.clone()], vec![planned.clone()], vec![]))
++            .unwrap();
++    let resolved = catalog
++        .get_binding(&scope(), &id("catalog-1"), &planned.binding)
++        .await
++        .unwrap();
++    assert_eq!(resolved.binding.support, ModelSupportStatus::Planned);
++    assert!(resolved.validate(&requirements()).is_err());
++    let mut preparation = requirements();
++    preparation.min_support = ModelSupportStatus::Planned;
++    resolved.validate(&preparation).unwrap();
++
++    let contract = binding("primary", "1", &model);
++    let mut no_contract_proof = contract.clone();
++    no_contract_proof.evidence.clear();
++    assert!(
++        ImmutableModelCatalog::new(snapshot(
++            vec![model.clone()],
++            vec![no_contract_proof],
++            vec![]
++        ))
++        .is_err()
++    );
++    let mut live = contract.clone();
++    live.support = ModelSupportStatus::LiveVerified;
++    assert!(
++        ImmutableModelCatalog::new(snapshot(vec![model.clone()], vec![live.clone()], vec![]))
++            .is_err()
++    );
++    live.evidence.push(ModelValidationEvidence {
++        kind: ModelValidationKind::LiveCheck,
++        binding_digest: live.contract_digest(&model).unwrap(),
++        checked_at_ms: 2000,
++        evidence_ref: id("synthetic-live-proof"),
++        passed: false,
++    });
++    assert!(
++        ImmutableModelCatalog::new(snapshot(vec![model.clone()], vec![live.clone()], vec![]))
++            .is_err()
++    );
++    live.evidence.last_mut().unwrap().passed = true;
++    let catalog =
++        ImmutableModelCatalog::new(snapshot(vec![model.clone()], vec![live.clone()], vec![]))
++            .unwrap();
++    let resolved = catalog
++        .get_binding(&scope(), &id("catalog-1"), &live.binding)
++        .await
++        .unwrap();
++    let mut requirements = requirements();
++    requirements.min_support = ModelSupportStatus::LiveVerified;
++    resolved.validate(&requirements).unwrap();
++    live.evidence.last_mut().unwrap().binding_digest = canonical_digest(&json!("another-binding"));
++    assert!(ImmutableModelCatalog::new(snapshot(vec![model], vec![live], vec![])).is_err());
++}
++
++#[test]
++fn proof_for_one_binding_cannot_be_reused_after_a_target_api_or_adapter_change() {
++    let model = model("provider-a", "release-one");
++    let mut verified = binding("primary", "same-revision", &model);
++    verified.support = ModelSupportStatus::LiveVerified;
++    verified.evidence.push(ModelValidationEvidence {
++        kind: ModelValidationKind::LiveCheck,
++        binding_digest: verified.contract_digest(&model).unwrap(),
++        checked_at_ms: 2000,
++        evidence_ref: id("synthetic-live-proof"),
++        passed: true,
++    });
++    ImmutableModelCatalog::new(snapshot(
++        vec![model.clone()],
++        vec![verified.clone()],
++        vec![],
++    ))
++    .unwrap();
++    for variant in 0..5 {
++        let mut changed = verified.clone();
++        match variant {
++            0 => {
++                changed
++                    .target
++                    .insert("deployment".into(), json!("another-valid-deployment"));
++            }
++            1 => changed.api_contract.operation = id("another-operation"),
++            2 => changed.api_contract.version = id("another-api-version"),
++            3 => changed.adapter.version = id("another-adapter-version"),
++            4 => changed.deployment_revision = Some(id("another-deployment-revision")),
++            _ => unreachable!(),
++        }
++        // The binding reference and its previously valid proof are deliberately unchanged.
++        assert!(
++            ImmutableModelCatalog::new(snapshot(vec![model.clone()], vec![changed], vec![]))
++                .is_err()
++        );
++    }
++}
++
++#[tokio::test]
++async fn catalog_revision_and_full_scope_are_required_for_every_lookup() {
++    let model = model("provider-a", "release-one");
++    let selected = binding("primary", "1", &model);
++    let alias = ModelAlias {
++        provider: model.provider.clone(),
++        alias: id("friendly"),
++        target: model_ref(&model),
++    };
++    let catalog = ImmutableModelCatalog::new(snapshot(
++        vec![model.clone()],
++        vec![selected.clone()],
++        vec![alias],
++    ))
++    .unwrap();
++    for (owner, revision) in [
++        (
++            Scope {
++                tenant_id: id("foreign"),
++                ..scope()
++            },
++            id("catalog-1"),
++        ),
++        (
++            Scope {
++                user_id: Some(id("user")),
++                ..scope()
++            },
++            id("catalog-1"),
++        ),
++        (scope(), id("catalog-2")),
++    ] {
++        assert!(
++            catalog
++                .get_model(&owner, &revision, &model_ref(&model))
++                .await
++                .is_err()
++        );
++        assert!(
++            catalog
++                .get_binding(&owner, &revision, &selected.binding)
++                .await
++                .is_err()
++        );
++        assert!(
++            catalog
++                .resolve_alias(&owner, &revision, &model.provider, &id("friendly"))
++                .await
++                .is_err()
++        );
++    }
++}
++
++#[tokio::test]
++async fn restoring_a_catalog_keeps_the_pinned_revision_and_revalidates_changed_content() {
++    let model = model("provider-a", "release-one");
++    let first = binding("primary", "1", &model);
++    let original =
++        ImmutableModelCatalog::new(snapshot(vec![model.clone()], vec![first.clone()], vec![]))
++            .unwrap();
++    let serialized = serde_json::to_string(&original).unwrap();
++    let restored = ImmutableModelCatalog::restore(&serialized, &original.digest()).unwrap();
++    assert_eq!(
++        restored
++            .get_binding(&scope(), &id("catalog-1"), &first.binding)
++            .await
++            .unwrap()
++            .binding,
++        first
++    );
++    let mut next_binding = binding("primary", "2", &model);
++    next_binding
++        .target
++        .insert("deployment".into(), json!("replacement"));
++    proof(&mut next_binding, &model);
++    let mut next = snapshot(vec![model], vec![next_binding], vec![]);
++    next.revision = id("catalog-2");
++    let next = ImmutableModelCatalog::new(next).unwrap();
++    assert!(
++        ImmutableModelCatalog::restore(&serde_json::to_string(&next).unwrap(), &original.digest())
++            .is_err()
++    );
++    assert_eq!(
++        original
++            .get_binding(&scope(), &id("catalog-1"), &first.binding)
++            .await
++            .unwrap()
++            .binding
++            .target["deployment"],
++        json!("deployment-a")
++    );
++    assert!(
++        next.get_binding(&scope(), &id("catalog-2"), &first.binding)
++            .await
++            .is_err()
++    );
++
++    let mut corrupt = original.snapshot().clone();
++    corrupt.bindings[0]
++        .target
++        .insert("unexpected".into(), json!(true));
++    corrupt.bindings[0].support = ModelSupportStatus::Planned;
++    corrupt.bindings[0].evidence.clear();
++    let encoded = serde_json::to_value(&corrupt).unwrap();
++    assert!(
++        ImmutableModelCatalog::restore(&encoded.to_string(), &canonical_digest(&encoded)).is_err()
++    );
++}
++
++struct CountingCatalog {
++    inner: Arc<ImmutableModelCatalog>,
++    reads: AtomicUsize,
++}
++impl ModelCatalog for CountingCatalog {
++    fn revision(&self) -> &Id {
++        self.inner.revision()
++    }
++    fn scope(&self) -> &Scope {
++        self.inner.scope()
++    }
++    fn get_model<'a>(
++        &'a self,
++        scope: &'a Scope,
++        revision: &'a Id,
++        model: &'a ModelDefinitionRef,
++    ) -> PortFuture<'a, ModelDefinition> {
++        Box::pin(async move {
++            self.reads.fetch_add(1, Ordering::SeqCst);
++            self.inner.get_model(scope, revision, model).await
++        })
++    }
++    fn get_binding<'a>(
++        &'a self,
++        scope: &'a Scope,
++        revision: &'a Id,
++        binding: &'a VersionedRef,
++    ) -> PortFuture<'a, ResolvedCatalogBinding> {
++        self.inner.get_binding(scope, revision, binding)
++    }
++    fn resolve_alias<'a>(
++        &'a self,
++        scope: &'a Scope,
++        revision: &'a Id,
++        provider: &'a Id,
++        alias: &'a Id,
++    ) -> PortFuture<'a, ModelDefinitionRef> {
++        self.inner.resolve_alias(scope, revision, provider, alias)
++    }
++}
++
++#[tokio::test]
++async fn distinct_concrete_catalogs_can_be_read_through_the_public_dynamic_trait() {
++    let model = model("new-provider-without-core-changes", "release/opaque");
++    let inner = Arc::new(
++        ImmutableModelCatalog::new(snapshot(vec![model.clone()], vec![], vec![])).unwrap(),
++    );
++    let counted = Arc::new(CountingCatalog {
++        inner: inner.clone(),
++        reads: AtomicUsize::new(0),
++    });
++    let catalogs: Vec<Arc<dyn ModelCatalog>> = vec![inner, counted.clone()];
++    for catalog in catalogs {
++        let actual = catalog
++            .get_model(&scope(), &id("catalog-1"), &model_ref(&model))
++            .await
++            .unwrap();
++        assert_eq!(actual.model_version, id("release/opaque"));
++        assert_eq!(actual.provider, model.provider);
++    }
++    assert_eq!(counted.reads.load(Ordering::SeqCst), 1);
++}
+diff --git a/crates/wickle/src/context_projection.rs b/crates/wickle/src/context_projection.rs
+index cfa1fae06d5eccc0acc1a26ecbc0ed0732b3e2b8..3c70304c1f1bf51aab7d1f2c4b015d6d5f49ac89 100644
+--- a/crates/wickle/src/context_projection.rs
++++ b/crates/wickle/src/context_projection.rs
+@@ -9,9 +9,9 @@ use serde_json::{Value, json};
+ 
+ use crate::{
+     AgentProfile, CompiledTool, ComponentKind, ContentBlock, ContractError, ErrorCode, Id,
+-    InputContent, Instructions, JsonDigest, Message, MessageOrigin, MessageRole, ModelContent,
+-    ModelMessage, ModelOutput, ModelPurpose, ModelRequest, ModelResponseLimits, ModelRole,
+-    ModelTool, OpaqueContinuation, RecordRef, ResolvedComponent, ResolvedModelRoute,
++    InputContent, Instructions, JsonDigest, JsonObject, Message, MessageOrigin, MessageRole,
++    ModelContent, ModelMessage, ModelOutput, ModelPurpose, ModelRequest, ModelResponseLimits,
++    ModelRole, ModelTool, OpaqueContinuation, RecordRef, ResolvedComponent, ResolvedModelRoute,
+     ResolvedProfile, RunRequest, Scope, ToolBindingRef, ToolResultStatus, VersionedRef, Visibility,
+     parse_json, serialization::data_digest,
+ };
+@@ -552,6 +552,9 @@ pub struct ProjectionInput<'a> {
+     pub output: ModelOutput,
+     /// Provider output-token request, not an estimate of input bytes.
+     pub max_output_tokens: NonZeroU64,
++    /// Host-owned logical options preserved in the final ModelRequest, outside prompt content.
++    /// The selected catalog schemas and adapter define supported keys and wire mapping.
++    pub options: JsonObject,
+     /// Provider request/response decoding bounds.
+     pub response_limits: ModelResponseLimits,
+     /// Byte/item projection bounds, not a tokenizer or model context-window check.
+@@ -720,6 +723,7 @@ impl ContextAssembler {
+                     .collect(),
+                 output: input.output.clone(),
+                 max_output_tokens: input.max_output_tokens,
++                options: input.options.clone(),
+                 limits: input.response_limits.clone(),
+             }
+         };
+diff --git a/crates/wickle/src/error.rs b/crates/wickle/src/error.rs
+index 1f51e5825e41ab866422d22142c2b53317982558..4f8b1d1206130d3539fb130afa2e6ccd6d445d67 100644
+--- a/crates/wickle/src/error.rs
++++ b/crates/wickle/src/error.rs
+@@ -27,6 +27,24 @@ pub enum ErrorCode {
+     InvalidJson,
+     /// Input does not match a data contract.
+     InvalidContract,
++    /// The requested model, version, binding or alias is not registered.
++    ModelNotRegistered,
++    /// An exact model/API/adapter/target binding or its evidence is inconsistent.
++    ModelBindingInvalid,
++    /// The required feature or declared capability limit is unsupported.
++    ModelCapabilityUnsupported,
++    /// Provider options do not satisfy the model and exact-binding contracts.
++    ModelOptionUnsupported,
++    /// The model or deployment is not verified immutable under the requested policy.
++    ModelVersionUnpinned,
++    /// The selected release is retired or otherwise unavailable.
++    ModelUnavailable,
++    /// Catalog scope-independent revision, identity or serialized integrity differs.
++    ModelCatalogMismatch,
++    /// Required support evidence is absent, failed, or of an insufficient kind.
++    ModelSupportInsufficient,
++    /// Estimated input plus reserved output exceeds this model/binding context budget.
++    ModelContextIncompatible,
+     /// Tool exposure, binding metadata, or a registered input schema is inconsistent.
+     InvalidToolInputContract,
+     /// The compiler cannot safely project this input schema or reference form.
+diff --git a/crates/wickle/src/lib.rs b/crates/wickle/src/lib.rs
+index bbbec7c5735c3ba0740b8b30115c3c31c9b210c7..e0f527a1668d578db97cdedd1c522f96b4a2079d 100644
+--- a/crates/wickle/src/lib.rs
++++ b/crates/wickle/src/lib.rs
+@@ -20,6 +20,7 @@ mod error;
+ mod input_binding;
+ mod message;
+ mod model;
++mod model_catalog;
+ mod model_execution;
+ mod model_protocol;
+ mod policy;
+@@ -43,6 +44,11 @@ pub use input_binding::{
+     RunSystemInputs, SystemInputResolveContext, SystemInputResolveRequest, SystemInputResolver,
+     ToolBindingResult,
+ };
++pub use model_catalog::{
++    CatalogRequirements, ModelAlias, ModelBinding, ModelCapabilities, ModelCatalog,
++    ModelCatalogSnapshot, ModelDefinition, ModelDefinitionRef, ModelEvidence, ModelLifecycle,
++    ModelSupportStatus, ModelValidationEvidence, ModelValidationKind, ResolvedCatalogBinding,
++};
+ pub use model_protocol::{
+     ModelCallContext, ModelContent, ModelEvent, ModelFinish, ModelMessage, ModelOutput, ModelPort,
+     ModelPortBinding, ModelProtocolError, ModelProtocolErrorCode, ModelRequest, ModelResponse,
+diff --git a/crates/wickle/src/model.rs b/crates/wickle/src/model.rs
+index 1639a1bf72239af3f97baa38441e1544f55feca6..0b0e8a3f737152c8dbc98b335c06dabbe16d6b7c 100644
+--- a/crates/wickle/src/model.rs
++++ b/crates/wickle/src/model.rs
+@@ -3,7 +3,7 @@ use crate::{
+     serialization::{data_digest, optional},
+ };
+ use serde::{Deserialize, Serialize};
+-use std::{collections::BTreeSet, num::NonZeroU64};
++use std::{collections::BTreeSet, fmt, num::NonZeroU64};
+ 
+ /// Logical purpose of a model call; all purposes consume the run's model budget.
+ #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+@@ -120,7 +120,7 @@ pub enum ModelFailureKind {
+ }
+ 
+ /// Selection request; the router returns data and does not invoke a model.
+-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
++#[derive(Clone, PartialEq, Serialize, Deserialize)]
+ #[serde(deny_unknown_fields)]
+ pub struct RouteRequest {
+     /// Profile's Host binding/routing configuration name.
+@@ -133,6 +133,10 @@ pub struct RouteRequest {
+     pub input_tokens: u64,
+     /// Reserved output tokens.
+     pub max_output_tokens: NonZeroU64,
++    /// Host-owned logical options that each candidate's catalog schemas must accept.
++    /// No provider wire format or reasoning-effort vocabulary is implied by these keys.
++    #[serde(default, skip_serializing_if = "JsonObject::is_empty")]
++    pub options: JsonObject,
+     /// Authenticated routing/data scope.
+     pub scope: Scope,
+     /// Explicitly allowed binding names.
+@@ -156,6 +160,20 @@ pub struct RouteRequest {
+     pub previous_failure: Option<ModelFailureKind>,
+ }
+ 
++impl fmt::Debug for RouteRequest {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_struct("RouteRequest")
++            .field("model_binding", &self.model_binding)
++            .field("purpose", &self.purpose)
++            .field("required_capabilities", &self.required_capabilities)
++            .field("input_tokens", &self.input_tokens)
++            .field("max_output_tokens", &self.max_output_tokens)
++            .field("option_count", &self.options.len())
++            .field("version_policy", &self.version_policy)
++            .finish_non_exhaustive()
++    }
++}
++
+ /// Whether token counts were measured by the provider or estimated by the Host.
+ #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+ #[serde(rename_all = "snake_case")]
+diff --git a/crates/wickle/src/model_catalog.rs b/crates/wickle/src/model_catalog.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..7ced4c7b1b7a2b9daec0ea0927a762ea6017129e
+--- /dev/null
++++ b/crates/wickle/src/model_catalog.rs
+@@ -0,0 +1,551 @@
++use crate::{
++    ApiContract, ContractError, ErrorCode, Id, JsonDigest, JsonObject, PortFuture, Scope,
++    VersionPolicy, VersionSemantics, VersionedRef, serialization::data_digest,
++    tool_schema::compile_validator,
++};
++use serde::{Deserialize, Serialize};
++use serde_json::Value;
++use std::{
++    collections::{BTreeMap, BTreeSet},
++    fmt,
++    num::NonZeroU64,
++};
++
++/// Exact provider-qualified catalog reference; version strings are opaque.
++#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct ModelDefinitionRef {
++    /// Registered service path, without a closed provider enum.
++    pub provider: Id,
++    /// Host catalog key, distinct from the provider model identifier.
++    pub model_key: Id,
++    /// Exact version selected within this key and provider.
++    pub model_version: Id,
++}
++
++/// Lifecycle known at this catalog revision, not a live availability probe.
++#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(rename_all = "snake_case")]
++pub enum ModelLifecycle {
++    /// Available according to supplied metadata.
++    Active,
++    /// Still usable but marked for replacement.
++    Deprecated,
++    /// Retired; invocation validation rejects it without finding a replacement.
++    Retired,
++    /// Known unavailable in this environment.
++    Unavailable,
++}
++
++/// Informational evidence supplied by the trusted Host; it is not fetched here.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct ModelEvidence {
++    /// Host record or documentation reference supporting this metadata.
++    pub source_ref: Id,
++    /// UTC milliseconds when the metadata was checked.
++    pub observed_at_ms: i64,
++}
++
++/// Feature and option contract for a model ceiling or one exact binding.
++#[derive(Clone, PartialEq, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct ModelCapabilities {
++    /// Revision of these features, schemas and token limits.
++    pub revision: Id,
++    /// Explicit supported features; provider/family names do not imply features.
++    pub features: BTreeSet<Id>,
++    /// Closed object schema for provider options. Defaults are not inserted.
++    pub options_schema: Value,
++    /// Finite input-plus-reserved-output token capacity.
++    pub context_window: NonZeroU64,
++    /// Finite maximum requested output tokens.
++    pub max_output_tokens: NonZeroU64,
++}
++impl fmt::Debug for ModelCapabilities {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_struct("ModelCapabilities")
++            .field("revision", &self.revision)
++            .field("features", &self.features)
++            .field("context_window", &self.context_window)
++            .field("max_output_tokens", &self.max_output_tokens)
++            .finish_non_exhaustive()
++    }
++}
++impl ModelCapabilities {
++    /// Validate finite limits and the closed option contract without I/O.
++    pub fn validate(&self) -> Result<(), ContractError> {
++        if self.max_output_tokens > self.context_window {
++            return Err(failure(
++                ErrorCode::ModelCapabilityUnsupported,
++                "capabilities.token_limits",
++            ));
++        }
++        closed_schema(
++            &self.options_schema,
++            ErrorCode::ModelOptionUnsupported,
++            "capabilities.options_schema",
++        )?;
++        Ok(())
++    }
++    /// Validate supplied options without dropping unsupported keys or inserting defaults.
++    pub fn validate_options(&self, options: &JsonObject) -> Result<(), ContractError> {
++        let validator = closed_schema(
++            &self.options_schema,
++            ErrorCode::ModelOptionUnsupported,
++            "capabilities.options_schema",
++        )?;
++        if !validator.is_valid(&Value::Object(options.clone().into_iter().collect())) {
++            return Err(failure(ErrorCode::ModelOptionUnsupported, "model.options"));
++        }
++        Ok(())
++    }
++}
++
++/// One exact release in one service path. Other versions/providers coexist explicitly.
++#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct ModelDefinition {
++    /// Local model key, optionally shared across explicitly registered versions.
++    pub model_key: Id,
++    /// Informational family; it grants no shared capabilities.
++    pub family: Id,
++    /// Registered service path.
++    pub provider: Id,
++    /// Exact provider model identifier, distinct from deployment name.
++    pub model_id: Id,
++    /// Opaque release/version identifier.
++    pub model_version: Id,
++    /// Explicit Host metadata; never inferred from the spelling of a model ID.
++    pub version_semantics: VersionSemantics,
++    /// Lifecycle at this revision.
++    pub lifecycle: ModelLifecycle,
++    /// Model ceilings, never a substitute for binding-specific checks.
++    pub capabilities: ModelCapabilities,
++    /// Metadata provenance, distinct from binding support verification.
++    pub evidence: Vec<ModelEvidence>,
++}
++impl ModelDefinition {
++    /// Exact lookup key for this release and provider.
++    pub fn reference(&self) -> ModelDefinitionRef {
++        ModelDefinitionRef {
++            provider: self.provider.clone(),
++            model_key: self.model_key.clone(),
++            model_version: self.model_version.clone(),
++        }
++    }
++    /// Check model metadata without contacting a provider.
++    pub fn validate(&self) -> Result<(), ContractError> {
++        self.capabilities.validate()
++    }
++}
++
++/// Recorded support stage. Registration alone is not live verification.
++#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
++#[serde(rename_all = "snake_case")]
++pub enum ModelSupportStatus {
++    /// Planned, with no execution-support claim.
++    Planned,
++    /// A successful matching contract or stronger live check is recorded.
++    ContractTested,
++    /// A successful matching live check is recorded.
++    LiveVerified,
++}
++
++/// Origin of a validation receipt; fixture tests cannot imply live provider support.
++#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(rename_all = "snake_case")]
++pub enum ModelValidationKind {
++    /// Offline protocol/contract verification.
++    ContractTest,
++    /// Actual provider/deployment verification reported by the trusted Host.
++    LiveCheck,
++}
++
++/// Evidence tied to the tested combination. Structure and target are checked here;
++/// the Host is responsible for the authenticity and truth of the external report.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct ModelValidationEvidence {
++    /// Contract fixture or live provider check.
++    pub kind: ModelValidationKind,
++    /// Exact model/API/adapter/connection/target/capability contract tested.
++    pub binding_digest: JsonDigest,
++    /// UTC milliseconds when the check completed.
++    pub checked_at_ms: i64,
++    /// Trusted Host validation record, never fetched by this catalog.
++    pub evidence_ref: Id,
++    /// A failed check never establishes support.
++    pub passed: bool,
++}
++
++/// Exact model/deployment/API/adapter contract. Credentials stay in connection
++/// bindings. Serialization is for Host configuration or protected storage.
++#[derive(Clone, PartialEq, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct ModelBinding {
++    /// Exact binding identity and revision.
++    pub binding: VersionedRef,
++    /// Exact provider-qualified model reference.
++    pub model: ModelDefinitionRef,
++    /// Original model ID/key or explicitly registered alias.
++    pub requested_model: Id,
++    /// Exact adapter implementation.
++    pub adapter: VersionedRef,
++    /// Host connection/credential reference, never a raw key or SDK client.
++    pub connection_ref: VersionedRef,
++    /// Nonsecret deployment/project/region target data.
++    pub target: JsonObject,
++    /// Closed target schema for this exact API/adapter.
++    pub target_schema: Value,
++    /// Exact operation and API version, independent of model release.
++    pub api_contract: ApiContract,
++    /// Independent deployment or inference-profile revision, when applicable.
++    pub deployment_revision: Option<Id>,
++    /// Target immutability; a pinned model does not upgrade this declaration.
++    pub version_semantics: VersionSemantics,
++    /// Exact-combination features/options, restricted by the model ceilings.
++    pub capabilities: ModelCapabilities,
++    /// Recorded support stage justified by matching evidence.
++    pub support: ModelSupportStatus,
++    /// Validation receipts for this exact contract.
++    pub evidence: Vec<ModelValidationEvidence>,
++}
++impl fmt::Debug for ModelBinding {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_struct("ModelBinding")
++            .field("binding", &self.binding)
++            .field("model", &self.model)
++            .field("adapter", &self.adapter)
++            .field("support", &self.support)
++            .finish_non_exhaustive()
++    }
++}
++impl ModelBinding {
++    /// Identity covered by evidence. Support labels/receipts and lifecycle annotations
++    /// are excluded to avoid circular evidence and preserve historical check records.
++    pub fn contract_digest(&self, model: &ModelDefinition) -> Result<JsonDigest, ContractError> {
++        if self.model != model.reference() {
++            return Err(failure(ErrorCode::ModelBindingInvalid, "binding.model"));
++        }
++        Ok(data_digest(&(
++            (
++                &model.model_key,
++                &model.family,
++                &model.provider,
++                &model.model_id,
++                &model.model_version,
++                model.version_semantics,
++                &model.capabilities,
++            ),
++            (
++                &self.binding,
++                &self.model,
++                &self.requested_model,
++                &self.adapter,
++                &self.connection_ref,
++                &self.target,
++                &self.target_schema,
++                &self.api_contract,
++                &self.deployment_revision,
++                self.version_semantics,
++                &self.capabilities,
++            ),
++        )))
++    }
++    /// Validate the exact target, capability ceilings and recorded support evidence.
++    pub fn validate(&self, model: &ModelDefinition) -> Result<(), ContractError> {
++        model.validate()?;
++        self.capabilities.validate()?;
++        if self.model != model.reference()
++            || !self
++                .capabilities
++                .features
++                .is_subset(&model.capabilities.features)
++            || self.capabilities.context_window > model.capabilities.context_window
++            || self.capabilities.max_output_tokens > model.capabilities.max_output_tokens
++        {
++            return Err(failure(
++                ErrorCode::ModelBindingInvalid,
++                "binding.capabilities",
++            ));
++        }
++        self.validate_target()?;
++        let digest = self.contract_digest(model)?;
++        if self
++            .evidence
++            .iter()
++            .any(|evidence| evidence.binding_digest != digest)
++        {
++            return Err(failure(
++                ErrorCode::ModelBindingInvalid,
++                "binding.evidence_target",
++            ));
++        }
++        let has_contract = self.evidence.iter().any(|evidence| evidence.passed);
++        let has_live = self
++            .evidence
++            .iter()
++            .any(|evidence| evidence.passed && evidence.kind == ModelValidationKind::LiveCheck);
++        if (self.support >= ModelSupportStatus::ContractTested && !has_contract)
++            || (self.support == ModelSupportStatus::LiveVerified && !has_live)
++        {
++            return Err(failure(
++                ErrorCode::ModelSupportInsufficient,
++                "binding.evidence",
++            ));
++        }
++        Ok(())
++    }
++    /// Validate target fields against this binding's own API/adapter schema.
++    pub fn validate_target(&self) -> Result<(), ContractError> {
++        let validator = closed_schema(
++            &self.target_schema,
++            ErrorCode::ModelBindingInvalid,
++            "binding.target_schema",
++        )?;
++        if !validator.is_valid(&Value::Object(self.target.clone().into_iter().collect())) {
++            return Err(failure(ErrorCode::ModelBindingInvalid, "binding.target"));
++        }
++        Ok(())
++    }
++}
++
++/// Direct alias mapping; its target is an exact definition, never another alias.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct ModelAlias {
++    /// Provider namespace for this alias.
++    pub provider: Id,
++    /// Explicit alias spelling.
++    pub alias: Id,
++    /// Exact same-provider release.
++    pub target: ModelDefinitionRef,
++}
++
++/// Complete catalog input. The concrete catalog privately owns a validated copy.
++#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct ModelCatalogSnapshot {
++    /// Exact revision required on each lookup.
++    pub revision: Id,
++    /// Exact tenant/workspace/user namespace.
++    pub scope: Scope,
++    /// Explicit versions; there is no implicit latest entry.
++    pub models: Vec<ModelDefinition>,
++    /// Independently versioned API/deployment bindings.
++    pub bindings: Vec<ModelBinding>,
++    /// Explicit direct mappings at this revision.
++    pub aliases: Vec<ModelAlias>,
++}
++impl ModelCatalogSnapshot {
++    /// Hash the complete snapshot, including scope, lifecycle and evidence.
++    pub fn digest(&self) -> JsonDigest {
++        data_digest(self)
++    }
++    /// Validate duplicate identities, references, alias consistency and binding contracts.
++    pub fn validate(&self) -> Result<(), ContractError> {
++        let mut models = BTreeMap::new();
++        for model in &self.models {
++            model.validate()?;
++            if models.insert(model.reference(), model).is_some() {
++                return Err(failure(ErrorCode::ModelCatalogMismatch, "catalog.models"));
++            }
++        }
++        let mut aliases = BTreeMap::new();
++        for alias in &self.aliases {
++            if alias.provider != alias.target.provider
++                || !models.contains_key(&alias.target)
++                || self.models.iter().any(|model| {
++                    model.provider == alias.provider
++                        && (model.model_key == alias.alias || model.model_id == alias.alias)
++                })
++                || aliases
++                    .insert((&alias.provider, &alias.alias), &alias.target)
++                    .is_some()
++            {
++                return Err(failure(ErrorCode::ModelCatalogMismatch, "catalog.aliases"));
++            }
++        }
++        let mut bindings = BTreeSet::new();
++        for binding in &self.bindings {
++            if !bindings.insert((&binding.binding.id, &binding.binding.version)) {
++                return Err(failure(ErrorCode::ModelCatalogMismatch, "catalog.bindings"));
++            }
++            let model = models
++                .get(&binding.model)
++                .ok_or_else(|| failure(ErrorCode::ModelNotRegistered, "binding.model"))?;
++            if binding.requested_model != model.model_id
++                && binding.requested_model != model.model_key
++                && aliases
++                    .get(&(&binding.model.provider, &binding.requested_model))
++                    .copied()
++                    != Some(&binding.model)
++            {
++                return Err(failure(
++                    ErrorCode::ModelBindingInvalid,
++                    "binding.requested_model",
++                ));
++            }
++            binding.validate(model)?;
++        }
++        Ok(())
++    }
++}
++
++/// Explicit request requirements. Input tokens are Host estimates, not bytes or reported usage.
++#[derive(Clone, PartialEq)]
++pub struct CatalogRequirements {
++    /// Features required by the prepared request.
++    pub features: BTreeSet<Id>,
++    /// Options that must pass both model and binding schemas unchanged.
++    pub options: JsonObject,
++    /// Host-estimated input tokens for this route.
++    pub input_tokens: u64,
++    /// Maximum output tokens reserved for this call.
++    pub max_output_tokens: NonZeroU64,
++    /// Explicit acceptance policy for mutable or unverified targets.
++    pub version_policy: VersionPolicy,
++    /// Minimum recorded support stage accepted for this call.
++    pub min_support: ModelSupportStatus,
++}
++impl fmt::Debug for CatalogRequirements {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_struct("CatalogRequirements")
++            .field("features", &self.features)
++            .field("input_tokens", &self.input_tokens)
++            .field("max_output_tokens", &self.max_output_tokens)
++            .finish_non_exhaustive()
++    }
++}
++
++/// Exact metadata lookup, not a selected runtime route or provider-reported result.
++#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct ResolvedCatalogBinding {
++    /// Revision from which this pair was read.
++    pub catalog_revision: Id,
++    /// Exact resolved release metadata.
++    pub model: ModelDefinition,
++    /// Exact binding, retaining requested_model separately from the resolved release.
++    pub binding: ModelBinding,
++}
++impl ResolvedCatalogBinding {
++    /// Preserve mutable/unverified semantics in either the model or target.
++    pub fn effective_version_semantics(&self) -> VersionSemantics {
++        match (self.model.version_semantics, self.binding.version_semantics) {
++            (VersionSemantics::Pinned, VersionSemantics::Pinned) => VersionSemantics::Pinned,
++            (VersionSemantics::Unverified, _) | (_, VersionSemantics::Unverified) => {
++                VersionSemantics::Unverified
++            }
++            (_, target) if target != VersionSemantics::Pinned => target,
++            (model, _) => model,
++        }
++    }
++    /// Reject unsupported/retired/unpinned choices without changing their model,
++    /// target, features or options. No routing or model invocation is performed.
++    pub fn validate(&self, requirements: &CatalogRequirements) -> Result<(), ContractError> {
++        self.binding.validate(&self.model)?;
++        if matches!(
++            self.model.lifecycle,
++            ModelLifecycle::Retired | ModelLifecycle::Unavailable
++        ) {
++            return Err(failure(ErrorCode::ModelUnavailable, "model.lifecycle"));
++        }
++        if self.binding.support < requirements.min_support {
++            return Err(failure(
++                ErrorCode::ModelSupportInsufficient,
++                "binding.support",
++            ));
++        }
++        if requirements.version_policy == VersionPolicy::RequirePinned
++            && self.effective_version_semantics() != VersionSemantics::Pinned
++        {
++            return Err(failure(
++                ErrorCode::ModelVersionUnpinned,
++                "binding.version_semantics",
++            ));
++        }
++        if !requirements
++            .features
++            .is_subset(&self.model.capabilities.features)
++            || !requirements
++                .features
++                .is_subset(&self.binding.capabilities.features)
++        {
++            return Err(failure(
++                ErrorCode::ModelCapabilityUnsupported,
++                "model.features",
++            ));
++        }
++        self.model
++            .capabilities
++            .validate_options(&requirements.options)?;
++        self.binding
++            .capabilities
++            .validate_options(&requirements.options)?;
++        if requirements.max_output_tokens > self.model.capabilities.max_output_tokens
++            || requirements.max_output_tokens > self.binding.capabilities.max_output_tokens
++            || requirements
++                .input_tokens
++                .checked_add(requirements.max_output_tokens.get())
++                .is_none_or(|tokens| {
++                    tokens > self.model.capabilities.context_window.get()
++                        || tokens > self.binding.capabilities.context_window.get()
++                })
++        {
++            return Err(failure(
++                ErrorCode::ModelContextIncompatible,
++                "model.token_limits",
++            ));
++        }
++        Ok(())
++    }
++}
++
++/// Scope- and revision-bound metadata port. The Host supplies trusted data;
++/// implementations do not infer releases, fetch credentials, or invoke models.
++pub trait ModelCatalog: Send + Sync {
++    /// Exact immutable revision represented by this instance.
++    fn revision(&self) -> &Id;
++    /// Exact metadata namespace, with no user-scope wildcards.
++    fn scope(&self) -> &Scope;
++    /// Read exact model metadata, including retired records for inspection.
++    fn get_model<'a>(
++        &'a self,
++        scope: &'a Scope,
++        revision: &'a Id,
++        reference: &'a ModelDefinitionRef,
++    ) -> PortFuture<'a, ModelDefinition>;
++    /// Read an exact binding and definition. Validate eligibility before execution.
++    fn get_binding<'a>(
++        &'a self,
++        scope: &'a Scope,
++        revision: &'a Id,
++        reference: &'a VersionedRef,
++    ) -> PortFuture<'a, ResolvedCatalogBinding>;
++    /// Resolve only a registered direct mapping, without fallback or latest lookup.
++    fn resolve_alias<'a>(
++        &'a self,
++        scope: &'a Scope,
++        revision: &'a Id,
++        provider: &'a Id,
++        alias: &'a Id,
++    ) -> PortFuture<'a, ModelDefinitionRef>;
++}
++
++fn closed_schema(
++    schema: &Value,
++    code: ErrorCode,
++    path: &str,
++) -> Result<jsonschema::Validator, ContractError> {
++    if schema.get("type").and_then(Value::as_str) != Some("object")
++        || schema.get("additionalProperties") != Some(&Value::Bool(false))
++    {
++        return Err(failure(code, path));
++    }
++    compile_validator(schema).map_err(|_| failure(code, path))
++}
++fn failure(code: ErrorCode, path: &str) -> ContractError {
++    ContractError::new(code, path)
++}
+diff --git a/crates/wickle/src/model_protocol.rs b/crates/wickle/src/model_protocol.rs
+index 500cc7d7eec45f8e19f8fc3d2521f4c6276e6898..49134009c81299faeb1dcbf9997ad7db1350e22f 100644
+--- a/crates/wickle/src/model_protocol.rs
++++ b/crates/wickle/src/model_protocol.rs
+@@ -256,6 +256,10 @@ pub struct ModelRequest {
+     pub output: ModelOutput,
+     /// Finite provider output-token request.
+     pub max_output_tokens: NonZeroU64,
++    /// Host-owned logical options; the Host/router must validate selected catalog schemas.
++    /// Adapters explicitly map supported keys to their API; this is not a raw wire-body merge.
++    #[serde(default, skip_serializing_if = "JsonObject::is_empty")]
++    pub options: JsonObject,
+     /// Input and response decoding limits selected for this route.
+     pub limits: ModelResponseLimits,
+ }
+diff --git a/crates/wickle/src/run.rs b/crates/wickle/src/run.rs
+index a7c41f8a93d8c0691b3b27054fe704f510212b89..667d0c3debdaa01b666d05723a38f18685899018 100644
+--- a/crates/wickle/src/run.rs
++++ b/crates/wickle/src/run.rs
+@@ -1,7 +1,8 @@
+ use crate::{
+     ArtifactRef, AttemptReservation, CompletionPolicy, ContractError, ErrorCode, Failure, Id,
+-    InputContent, JsonDigest, ModelAttemptState, ModelInvocationRecord, RecordRef, ReservationKind,
+-    ResolvedProfile, RunLimits, RunTiming, Scope, ToolCall, ToolResult, VersionedRef,
++    InputContent, JsonDigest, JsonObject, ModelAttemptState, ModelInvocationRecord, RecordRef,
++    ReservationKind, ResolvedProfile, RunLimits, RunTiming, Scope, ToolCall, ToolResult,
++    VersionedRef,
+     serialization::{data_digest, decode, optional},
+ };
+ use serde::{Deserialize, Serialize};
+@@ -74,6 +75,10 @@ pub struct RunRequest {
+     pub input: Vec<InputContent>,
+     /// Verified trigger provenance.
+     pub trigger: RunTrigger,
++    /// Logical model options authorized by the Host and pinned with the admitted request.
++    /// Catalog schemas define supported keys; credentials and raw provider bodies do not belong here.
++    #[serde(default, skip_serializing_if = "JsonObject::is_empty")]
++    pub model_options: JsonObject,
+     /// Optional output override; Host policy must authorize its use.
+     #[serde(
+         default,
+diff --git a/crates/wickle/tests/context_projection.rs b/crates/wickle/tests/context_projection.rs
+index ec7a0c0a6da591250d9cd692e986d8cac454bcc7..683d3f64300e354c94bfed7613a95a0ac15d629f 100644
+--- a/crates/wickle/tests/context_projection.rs
++++ b/crates/wickle/tests/context_projection.rs
+@@ -171,6 +171,7 @@ impl Fixture {
+                     text: "Current requested work".into(),
+                 }],
+                 trigger: RunTrigger::User {},
++                model_options: JsonObject::new(),
+                 output_contract: None,
+             },
+             run_id: id("current-run"),
+@@ -217,6 +218,7 @@ impl Fixture {
+             route: route(),
+             output: ModelOutput::Text {},
+             max_output_tokens: 128.try_into().unwrap(),
++            options: JsonObject::new(),
+             response_limits: ModelResponseLimits {
+                 max_input_bytes: 100_000,
+                 max_response_bytes: 4096,
+@@ -264,6 +266,71 @@ fn message(
+         visibility: Visibility::UserAndModel,
+     }
+ }
++
++#[tokio::test]
++async fn host_model_options_reach_the_port_without_becoming_prompt_content() {
++    use std::{sync::Mutex, time::Duration};
++    struct ObserveOptions(Mutex<Option<JsonObject>>);
++    impl ModelPort for ObserveOptions {
++        fn binding(&self) -> ModelPortBinding {
++            let route = route();
++            ModelPortBinding {
++                provider: route.provider,
++                adapter: route.adapter,
++                connection_ref: route.connection_ref,
++            }
++        }
++        fn generate<'a>(
++            &'a self,
++            request: &'a ModelRequest,
++            _: &'a ModelCallContext,
++        ) -> PortStream<'a, ModelEvent> {
++            *self.0.lock().unwrap() = Some(request.options.clone());
++            Box::pin(futures_util::stream::iter([Ok(
++                ModelEvent::ResponseCompleted {
++                    finish: ModelFinish::Stop,
++                    metadata: ModelResponseMetadata::default(),
++                    continuation: vec![],
++                },
++            )]))
++        }
++    }
++    let fixture = Fixture::new().await;
++    let transcript = vec![fixture.current_message(1)];
++    let assembler = ContextAssembler::new();
++    let baseline = assembler
++        .project(&fixture.prompt, fixture.input(&transcript, &[], &[]))
++        .unwrap();
++    let options = object(json!({"reasoning_effort":"high", "provider_mode":{"budget":32}}));
++    let mut input = fixture.input(&transcript, &[], &[]);
++    input.options = options.clone();
++    let projected = assembler.project(&fixture.prompt, input).unwrap();
++    assert_eq!(projected.request.messages, baseline.request.messages);
++    assert_eq!(projected.request.tools, baseline.request.tools);
++    assert_ne!(projected.request.digest(), baseline.request.digest());
++    let port = ObserveOptions(Mutex::new(None));
++    let call = ModelCallContext {
++        attempt_id: id("attempt"),
++        run_id: fixture.run_id.clone(),
++        scope: fixture.scope.clone(),
++        cancellation: Default::default(),
++        deadline: tokio::time::Instant::now() + Duration::from_secs(1),
++    };
++    collect_model_response(&projected.request, port.generate(&projected.request, &call))
++        .await
++        .unwrap();
++    assert_eq!(*port.0.lock().unwrap(), Some(options.clone()));
++    let mut limited = fixture.input(&transcript, &[], &[]);
++    limited.options = options;
++    limited.limits.max_bytes = serde_json::to_vec(&baseline.request).unwrap().len();
++    assert_eq!(
++        assembler
++            .project(&fixture.prompt, limited)
++            .unwrap_err()
++            .code,
++        ErrorCode::ContextBudgetExceeded
++    );
++}
+ fn text(value: &str) -> ContentBlock {
+     ContentBlock::Content {
+         content: InputContent::Text { text: value.into() },
+diff --git a/crates/wickle/tests/contracts.rs b/crates/wickle/tests/contracts.rs
+index 47771e79785bc19092526687b377668fb94bda78..dfc8af96370ce01fde1286d3c3e159ac64441525 100644
+--- a/crates/wickle/tests/contracts.rs
++++ b/crates/wickle/tests/contracts.rs
+@@ -691,10 +691,25 @@ fn request() -> RunRequest {
+             text: "Find supporting evidence".into(),
+         }],
+         trigger: RunTrigger::User {},
++        model_options: JsonObject::new(),
+         output_contract: None,
+     }
+ }
+ 
++#[test]
++fn absent_model_options_preserve_existing_request_encodings_and_digests() {
++    let mut legacy = serde_json::to_value(request()).unwrap();
++    legacy.as_object_mut().unwrap().remove("model_options");
++    let restored = RunRequest::from_json(&legacy.to_string()).unwrap();
++    assert!(restored.model_options.is_empty());
++    assert_eq!(
++        canonical_digest(&serde_json::to_value(restored).unwrap()),
++        canonical_digest(&legacy)
++    );
++    legacy["model_options"] = json!(null);
++    assert!(RunRequest::from_json(&legacy.to_string()).is_err());
++}
++
+ async fn checkpoint() -> RunSnapshot {
+     let p = resolved().await;
+     let request = request();
+diff --git a/crates/wickle/tests/model_execution.rs b/crates/wickle/tests/model_execution.rs
+index 7ec8813c982858763b80e1a404665010056bd7fe..300dc2dac9cd23d9cc1975d2b3c0bfdc2a35ee88 100644
+--- a/crates/wickle/tests/model_execution.rs
++++ b/crates/wickle/tests/model_execution.rs
+@@ -55,6 +55,7 @@ fn request(provider: &str) -> ModelRequest {
+         tools: vec![],
+         output: ModelOutput::Text {},
+         max_output_tokens: 32.try_into().unwrap(),
++        options: JsonObject::new(),
+         limits: ModelResponseLimits {
+             max_input_bytes: 8192,
+             max_response_bytes: 4096,
+@@ -296,7 +297,8 @@ async fn each_retry_has_its_own_saved_attempt_and_rechecks_policy() {
+         vec![Reply::Fail(ModelFailureKind::RateLimited), Reply::Complete],
+     );
+     let exchange = fixture.exchange(model.clone(), 2);
+-    let original = request("first");
++    let mut original = request("first");
++    original.options = JsonObject::from([("reasoning_effort".into(), json!("high"))]);
+     let result = exchange
+         .generate(&original, &fixture.context, &fixture.budget)
+         .await
+@@ -332,6 +334,7 @@ async fn each_retry_has_its_own_saved_attempt_and_rechecks_policy() {
+             assert_eq!(&request.request_id, attempt);
+             assert_eq!(request.route, original.route);
+             assert_eq!(request.messages, original.messages);
++            assert_eq!(request.options, original.options);
+             // A real Host value exists but no model request surface automatically copies it.
+             assert!(
+                 !serde_json::to_string(request)
+diff --git a/crates/wickle/tests/model_protocol.rs b/crates/wickle/tests/model_protocol.rs
+index 99a399cbdba2c5cfc183f33310379495e9d00485..8c5de178efad466c0ee4054248a4e32863806888 100644
+--- a/crates/wickle/tests/model_protocol.rs
++++ b/crates/wickle/tests/model_protocol.rs
+@@ -61,6 +61,7 @@ fn request() -> ModelRequest {
+         }],
+         output: ModelOutput::Text {},
+         max_output_tokens: 128.try_into().unwrap(),
++        options: JsonObject::new(),
+         limits: ModelResponseLimits {
+             max_input_bytes: 16_384,
+             max_response_bytes: 4096,
+@@ -539,3 +540,32 @@ async fn preflight_rejects_mismatched_port_bindings_and_oversized_input() {
+     oversized.limits.max_input_bytes = 1;
+     assert!(oversized.validate().is_err());
+ }
++
++#[test]
++fn host_options_affect_request_identity_and_bounds_without_changing_empty_request_encoding() {
++    let mut request = request();
++    let mut legacy = serde_json::to_value(&request).unwrap();
++    legacy.as_object_mut().unwrap().remove("options");
++    let restored: ModelRequest = serde_json::from_value(legacy.clone()).unwrap();
++    assert_eq!(restored.digest(), canonical_digest(&legacy));
++    assert_eq!(restored, request);
++    let original_digest = request.digest();
++    request
++        .options
++        .insert("reasoning_effort".into(), json!("high"));
++    request.validate().unwrap();
++    assert_ne!(request.digest(), original_digest);
++    let high_digest = request.digest();
++    request
++        .options
++        .insert("reasoning_effort".into(), json!("low"));
++    assert_ne!(request.digest(), high_digest);
++    request.options.insert(
++        "reasoning_effort".into(),
++        json!("x".repeat(request.limits.max_input_bytes)),
++    );
++    assert_eq!(
++        request.validate().unwrap_err().path,
++        "model_request.input_size"
++    );
++}
+diff --git a/crates/wickle/tests/policy.rs b/crates/wickle/tests/policy.rs
+index 8cce553504c191205f4f263bb9e4b0f62ace4248..63fd47955f9029cf13fbd867c8c46b6c73cfef74 100644
+--- a/crates/wickle/tests/policy.rs
++++ b/crates/wickle/tests/policy.rs
+@@ -676,6 +676,7 @@ async fn snapshot() -> RunSnapshot {
+             text: "private-user-input".into(),
+         }],
+         trigger: RunTrigger::User {},
++        model_options: JsonObject::new(),
+         output_contract: None,
+     };
+     let system_inputs = Some(SystemInputSnapshotRef {
+diff --git a/crates/wickle/tests/state.rs b/crates/wickle/tests/state.rs
+index 0d8eaf22b8605758a245d484da0981fc3cd53a19..07f47bf8f3c76345990e7d9e4f0a29044682e489 100644
+--- a/crates/wickle/tests/state.rs
++++ b/crates/wickle/tests/state.rs
+@@ -7,6 +7,86 @@ use wickle::*;
+ mod support;
+ use support::*;
+ 
++#[tokio::test]
++async fn admitted_model_options_are_fixed_for_replay_and_later_commits() {
++    fn with_effort(mut input: AdmissionInput, effort: &str) -> AdmissionInput {
++        input.snapshot.request.model_options =
++            JsonObject::from([("reasoning_effort".into(), json!(effort))]);
++        input.snapshot.request_digest =
++            admission_digest(&input.snapshot.request, &input.snapshot.profile, None);
++        let RunEventPayload::RunStarted { request_ref, .. } = &mut input.events[0].payload else {
++            unreachable!()
++        };
++        let record = ProtectedRecord::new(
++            request_ref.record_id.clone(),
++            request_ref.revision,
++            serde_json::to_value(&input.snapshot.request).unwrap(),
++        );
++        let old_ref = request_ref.clone();
++        *request_ref = record.reference().clone();
++        *input
++            .records
++            .iter_mut()
++            .find(|record| record.reference() == &old_ref)
++            .unwrap() = record;
++        input
++    }
++    let store = MemoryStateStore::new();
++    let first = with_effort(
++        admission("run", "request", "session", "input", "1").await,
++        "high",
++    );
++    let expected_options = first.snapshot.request.model_options.clone();
++    let original = store.admit(&scope(), first).await.unwrap().state;
++    let replay = with_effort(
++        admission("replacement", "request", "session", "input", "2").await,
++        "high",
++    );
++    let replay = store.admit(&scope(), replay).await.unwrap();
++    assert!(!replay.created);
++    assert_eq!(
++        replay.state.snapshot.request.model_options,
++        expected_options
++    );
++    let changed = with_effort(
++        admission("replacement", "request", "session", "input", "2").await,
++        "low",
++    );
++    assert_ne!(
++        changed.snapshot.request_digest,
++        original.snapshot.request_digest
++    );
++    assert_eq!(
++        store.admit(&scope(), changed).await.unwrap_err().code,
++        ErrorCode::RequestConflict
++    );
++
++    let lease = store
++        .acquire_lease(&scope(), &id("run"), &id("worker"), 1, 100)
++        .await
++        .unwrap();
++    let mut change = prepared(&original.snapshot, lease, 2);
++    change
++        .snapshot
++        .request
++        .model_options
++        .insert("reasoning_effort".into(), json!("low"));
++    change.snapshot.request_digest =
++        admission_digest(&change.snapshot.request, &change.snapshot.profile, None);
++    assert_eq!(
++        store
++            .commit(&scope(), &id("run"), change)
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::InvalidTransition
++    );
++    let saved = store.load(&scope(), &id("run")).await.unwrap().snapshot;
++    let restored = RunSnapshot::from_json(&serde_json::to_string(&saved).unwrap()).unwrap();
++    assert_eq!(restored.request.model_options, expected_options);
++    assert_eq!(restored.request_digest, original.snapshot.request_digest);
++}
++
+ #[tokio::test]
+ async fn identical_retries_return_the_original_run_without_replacing_resolved_metadata() {
+     let store = MemoryStateStore::new();
+diff --git a/crates/wickle/tests/support/mod.rs b/crates/wickle/tests/support/mod.rs
+index a1a3dbab878115c01332f816fb25dc8863455f31..e8dc920ca45d47762ad234b5b17668b912286d9b 100644
+--- a/crates/wickle/tests/support/mod.rs
++++ b/crates/wickle/tests/support/mod.rs
+@@ -87,6 +87,7 @@ pub async fn admission(
+         session_id: id(session),
+         input: vec![InputContent::Text { text: text.into() }],
+         trigger: RunTrigger::User {},
++        model_options: JsonObject::new(),
+         output_contract: None,
+     };
+     let request_record = ProtectedRecord::new(
+diff --git a/crates/wickle/tests/tool_schema.rs b/crates/wickle/tests/tool_schema.rs
+index fed5def3dfb5244621e70d90f32343d7b1106aae..b9f0cb679a5fa651a6c00538076cfa5615866844 100644
+--- a/crates/wickle/tests/tool_schema.rs
++++ b/crates/wickle/tests/tool_schema.rs
+@@ -518,6 +518,7 @@ async fn compiled_model_tool_rejects_a_model_supplied_hidden_uuid_in_real_respon
+         tools: vec![compiled.to_model_tool()],
+         output: ModelOutput::Text {},
+         max_output_tokens: 128.try_into().unwrap(),
++        options: JsonObject::new(),
+         limits: ModelResponseLimits {
+             max_input_bytes: 16384,
+             max_response_bytes: 4096,
+diff --git a/docs/context.md b/docs/context.md
+index d74c2b86be52ae024a8b195e835683b93e1b4d23..7d2aad047d9ae6535535385b3bd00f2a5b4225b1 100644
+--- a/docs/context.md
++++ b/docs/context.md
+@@ -58,6 +58,19 @@ The stored transcript already includes the current request. Supply its message I
+ so the assembler can verify the Run and exact input, include it once, and retain
+ later user steering. The logical model request ID and model step ID must agree.
+ 
++`RunRequest.model_options` stores request-specific logical options, such as
++`{"reasoning_effort":"high"}`, with the admitted request. Its digest and replay
++checks include those options. The Host prepares `ProjectionInput.options`; the
++assembler preserves it in `ModelRequest.options` outside the prompt content.
++Options count toward request bytes and remain unchanged on same-route retries.
++
++Supported keys and values come from the selected model and binding catalog
++schemas, not a core reasoning-effort enum. The Host must check those schemas
++before dispatch. An adapter maps accepted logical keys to its chosen provider
++API explicitly; the map is not a raw request-body merge. Output-token limits
++remain in `max_output_tokens`. Automatic Run-to-route option selection and
++provider wire mappings belong to the runtime driver and adapters.
++
+ The projection preserves model-owned Tool arguments and public Tool observations.
+ It omits bound-input references, effect receipts, raw diagnostics, internal-only
+ messages, and reference ownership scope. Artifact/evidence metadata is included
+diff --git a/docs/contracts.md b/docs/contracts.md
+index b61de42097936412941dfd79d96e5ae8d9bd31f3..28f73e8bca4db3238e413fbb4027832a43ee0635 100644
+--- a/docs/contracts.md
++++ b/docs/contracts.md
+@@ -92,6 +92,13 @@ adapter version, and Host connection revision. Credentials remain in the adapter
+ Host binding. `ModelRequest` contains an explicit model projection and finite
+ input/response limits; execution context and system tool inputs are not copied in.
+ 
++`RunRequest.model_options` pins Host-authorized, request-specific options at
++admission. `RouteRequest.options` carries them as candidate constraints, and
++`ProjectionInput.options` becomes `ModelRequest.options` unchanged. Empty maps
++remain omitted in saved JSON. Model options are included in request digests and
++byte limits; same-route retries preserve them. See the [context guide](context.md)
++for catalog validation and the explicit adapter-mapping boundary.
++
+ `collect_model_response` accepts complete text and tool proposals only after the
+ whole stream passes protocol validation. Missing completion, malformed or ambiguous
+ JSON, duplicate call IDs, contradictory finish reasons, and exceeded limits return
+@@ -121,6 +128,10 @@ adapters used through the same trait, with connection and continuation isolation
+ Session prompt reuse and bounded message projection are described in
+ [Pin and project model context](context.md).
+ 
++Versioned model definitions, bindings, capability checks, and the separate
++immutable catalog implementation are described in
++[Register versioned models](model-catalog.md).
++
+ ## Execution and storage data
+ 
+ | Contract | Purpose |
+diff --git a/docs/env/README.md b/docs/env/README.md
+index ed9e616beb2319ff3f71604b24c598ec531919b6..d836c399e02ec403ced0a99ba4a9eb8cf9db9676 100644
+--- a/docs/env/README.md
++++ b/docs/env/README.md
+@@ -1,26 +1,26 @@
+ # 모델 테스트용 `.env` 설정
+ 
+-접근 가능한 프로바이더의 모델만 준비하면 됩니다. 인증 정보는 프로바이더별로 한 번 설정하고, 테스트할 모델·버전은 번호를 붙여 각각 추가합니다. 에이전트 검증에는 텍스트 응답과 Tool calling을 지원하는 모델을 준비합니다. 공급자를 켜는 별도 환경변수는 사용하지 않습니다.
++접근 가능한 프로바이더의 인증 정보와 **실제 호출할 모델 ID 또는 배포명**을 준비합니다. 버전이 포함된 모델 ID는 그대로 한 번만 입력합니다. 별도의 모델 `VERSION` 입력은 없습니다. 모델별 effort/thinking 수준과 출력 토큰 한도도 설정할 수 있습니다.
+ 
+-**이 `.env`와 모델 번호 변수는 Wickle의 실제 연결 테스트 전용입니다. 라이브러리 사용자의 런타임 설정 규약이 아닙니다.**
+-
+-이 문서는 테스트 연결 설정을 준비하기 위한 규약입니다. 실제 어댑터와 모델별 테스트는 구현 중이며, 모델 등록·버전 확인과 실제 호출 결과를 별도로 기록합니다.
++**이 파일과 환경변수는 실제 연결 테스트 전용입니다. Wickle 라이브러리는 `.env`를 읽지 않으며, 실제 서비스에서는 Host가 구성한 어댑터와 호출 옵션을 전달합니다.** 제공 경로 어댑터와 live test runner는 구현 중입니다.
+ 
+ ## 프로바이더별 가이드
+ 
+-| 사용할 경로 | 설정 가이드 | 모델 변수 prefix |
++| 경로 | 호출 대상 | 추론 조절 옵션 |
+ | --- | --- | --- |
+-| OpenAI GPT | [OpenAI](openai.md) | `OPENAI_MODEL_<N>_` |
+-| Azure Foundry OpenAI GPT | [Azure OpenAI](azure-openai.md) | `AZURE_OPENAI_MODEL_<N>_` |
+-| Anthropic Claude 직접 API | [Claude](anthropic.md) | `ANTHROPIC_MODEL_<N>_` |
+-| AWS Bedrock Claude | [Bedrock](bedrock.md) | `BEDROCK_MODEL_<N>_` |
+-| Google AI Studio / Gemini API | [Gemini API](gemini.md) | `GEMINI_MODEL_<N>_` |
+-| Google Cloud Vertex AI Gemini | [Vertex AI](vertex-ai.md) | `VERTEX_MODEL_<N>_` |
+-| xAI Grok | [Grok](xai.md) | `XAI_MODEL_<N>_` |
++| [OpenAI GPT](openai.md) | `OPENAI_MODEL_<N>_ID` | `REASONING_EFFORT` |
++| [Azure OpenAI GPT](azure-openai.md) | `AZURE_OPENAI_MODEL_<N>_DEPLOYMENT` | `REASONING_EFFORT` |
++| [Anthropic Claude](anthropic.md) | `ANTHROPIC_MODEL_<N>_ID` | `EFFORT`, 필요한 모델의 thinking 설정 |
++| [AWS Bedrock Claude](bedrock.md) | `BEDROCK_MODEL_<N>_ID` | `EFFORT`, 필요한 모델의 thinking 설정 |
++| [Gemini API](gemini.md) | `GEMINI_MODEL_<N>_ID` | `THINKING_LEVEL` 또는 지원되는 thinking token budget |
++| [Vertex AI Gemini](vertex-ai.md) | `VERTEX_MODEL_<N>_ID` | `THINKING_LEVEL` 또는 지원되는 thinking token budget |
++| [xAI Grok](xai.md) | `XAI_MODEL_<N>_ID` | `REASONING_EFFORT` |
++
++추론 옵션 이름은 각 `MODEL_<N>_` 뒤에 붙입니다. 모든 경로에서 같은 번호의 `MAX_OUTPUT_TOKENS`로 출력 토큰 한도를 정합니다. 지원 옵션과 값은 모델·API별로 다릅니다. 빈 옵션은 전송하지 않고, 지정한 미지원 옵션은 오류로 처리합니다.
+ 
+ ## 파일 만들기
+ 
+-Wickle 저장소에서 [`.env.example`](../../.env.example)을 참고해 `.env`를 만듭니다. 기존 파일이 있으면 필요한 항목만 편집합니다.
++Wickle 저장소의 [`.env.example`](../../.env.example)을 참고해 `.env`를 만듭니다. 기존 파일이 있으면 필요한 항목만 편집합니다.
+ 
+ ```sh
+ if [ ! -e .env ]; then
+@@ -28,43 +28,37 @@ if [ ! -e .env ]; then
+ fi
+ ```
+ 
+-`.env`와 `.env.*`는 Git에서 제외됩니다. 실제 키나 credential JSON을 문서·커밋에 넣지 않습니다. 테스트 실행기가 `.env`를 읽어 모델별 어댑터를 구성합니다. Core 라이브러리는 파일을 읽거나 이 환경변수에 의존하지 않고 구성된 어댑터를 전달받습니다. `.env`와 `.env.example`은 배포용 `.crate` 패키지에도 포함하지 않습니다. 실제 서비스의 설정 방식은 Host 애플리케이션이 결정합니다.
+-
+-## 모델을 여러 개 추가하기
++`.env`와 `.env.*`는 Git에서 제외됩니다. 실제 키와 credential JSON은 커밋하지 않습니다. `.env`와 `.env.example`은 배포용 `.crate`에도 포함하지 않습니다.
+ 
+-예를 들어 OpenAI 계정 하나에서 두 모델을 테스트하려면 다음처럼 작성합니다. 빈칸에는 콘솔이나 공식 모델 문서에서 확인한 실제 값을 넣습니다.
++## 모델과 effort별로 설정하기
+ 
+ ```dotenv
+ OPENAI_API_KEY=
+ OPENAI_BASE_URL=https://api.openai.com/v1
+ 
+ OPENAI_MODEL_1_ID=
+-OPENAI_MODEL_1_VERSION=
++OPENAI_MODEL_1_REASONING_EFFORT=high
++OPENAI_MODEL_1_MAX_OUTPUT_TOKENS=4096
+ 
+ OPENAI_MODEL_2_ID=
+-OPENAI_MODEL_2_VERSION=
++OPENAI_MODEL_2_REASONING_EFFORT=low
++OPENAI_MODEL_2_MAX_OUTPUT_TOKENS=4096
+ ```
+ 
+-- 번호는 프로바이더별로 `1`, `2`, `3`처럼 붙입니다. 같은 모델의 서로 다른 버전도 번호를 나누어 작성합니다.
+-- 모델 ID가 입력된 각 항목이 독립 테스트 대상입니다. 사용할 수 없는 프로바이더와 아직 준비하지 않은 모델 항목은 비워 둡니다.
+-- `_VERSION`은 모델 release 정보입니다. API 버전·deployment 이름·SDK 버전과 구분합니다. 모르는 값은 준비 단계에서 비워 두고, 실제 테스트 전에 확인합니다. 임의 날짜나 버전을 만들어 넣지 않습니다.
+-- 공급자가 전체 모델 ID로 고정 release를 식별한다면, 공식적으로 확인한 그 ID를 `_VERSION`에도 사용할 수 있습니다. `latest` 같은 alias를 고정 버전으로 간주하지 않습니다.
+-- Azure deployment와 Bedrock inference profile처럼 모델마다 달라지는 호출 대상은 해당 번호의 항목으로 작성합니다. 각 가이드에 필요한 변수를 제시합니다.
+-- 다른 계정·endpoint·region·project를 사용해야 한다면 `.env.azure-dev`, `.env.bedrock-seoul`처럼 별도 파일로 나누어 같은 규약을 사용합니다. 공통 설정이 서로 다른 계정을 섞지 않습니다.
+-- 중복된 변수 이름을 추가하지 않습니다. 모델을 추가할 때는 해당 모델 블록의 번호를 바꾸고, 공통 API 키는 그대로 사용합니다.
+-
+-이전 예제의 `OPENAI_MODEL_ID` / `OPENAI_MODEL_VERSION`처럼 번호 없는 모델 변수는 각각 `OPENAI_MODEL_1_ID` / `OPENAI_MODEL_1_VERSION` 형태로 옮깁니다. 다른 프로바이더도 같은 규칙입니다. 인증 변수 이름은 유지됩니다.
+-
+-## 준비할 정보
+-
+-| 정보 | 필요한 경우 |
+-| --- | --- |
+-| API 키 또는 클라우드 인증 방식 | 각 프로바이더의 호출 권한 |
+-| 모델 ID | 모든 모델 항목 |
+-| 정확한 모델 release/version | 버전별 지원 및 고정 검증 |
+-| Deployment 이름 | Azure OpenAI의 각 모델 항목 |
+-| Inference profile ID/ARN | Bedrock 호출에 필요한 모델 항목 |
+-| Region·project·endpoint | 해당 클라우드 리소스 또는 별도 연결 설정 |
+-| API version/mode | 선택한 제공 경로의 HTTP 계약 |
+-
+-파일을 준비한 뒤에는 파일 경로와 작성한 프로바이더·모델 항목을 알려주면 됩니다. 키 값 자체를 메시지로 보낼 필요는 없습니다. 검증 결과는 `(제공 경로, 모델 ID, 모델 버전, API/배포 설정)`별로 기록하며, 설정 누락·호출 불가·미확인 버전을 성공으로 처리하지 않습니다.
++각 ID 칸에 접근 가능한 정확한 모델 이름을 넣습니다. 두 칸에 같은 모델 ID를 넣으면 effort별 비교가 되고, 서로 다른 모델 또는 snapshot ID를 넣으면 모델·버전별 비교가 됩니다. 위 `high`와 `low`도 선택한 모델이 지원할 때만 사용합니다.
++
++- 모델 ID가 입력된 각 번호가 독립 테스트 대상입니다. Azure는 배포명이 기준입니다. 공급자를 켜는 별도 변수는 없습니다.
++- 번호는 프로바이더별로 `1`, `2`, `3`처럼 늘립니다. 인증 정보는 한 번만 작성합니다.
++- `MAX_OUTPUT_TOKENS=4096`은 예시 출력 예산입니다. 큰 effort에서 출력이 한도에 걸리면 테스트 목적과 모델 한도에 맞춰 조정합니다.
++- API 버전, region, endpoint, 인증은 실제 연결에 필요한 값이므로 해당 가이드를 따릅니다. 계정·리소스·region이 다르면 별도 `.env` 파일로 나눕니다.
++- 모델 버전과 고정 여부는 모델 ID·배포 metadata를 확인해 결과에 기록합니다. 이름에서 날짜를 만들거나 요청값을 공급자가 보고한 버전으로 복사하지 않습니다.
++
++이전 설정에서 `*_MODEL_<N>_VERSION`은 삭제합니다. Azure는 실제 배포명만 유지하고, Bedrock은 profile로 호출한다면 그 profile ID/ARN을 `BEDROCK_MODEL_<N>_ID`에 넣습니다. 별도의 기반 모델 ID를 중복 입력하지 않습니다.
++
++## 호출 옵션 전달
++
++테스트 실행기는 effort/thinking 값을 Host 모델 옵션으로 구성하고, 출력 한도는 모델 요청의 별도 token budget으로 전달합니다. `REASONING_EFFORT`는 `reasoning_effort`, `EFFORT`는 `effort`, thinking 설정은 `thinking_mode`·`thinking_level`·`thinking_budget_tokens`라는 옵션 키로 다룹니다. 해당 키는 선택한 모델 binding의 schema가 허용해야 합니다.
++
++이 옵션 map을 HTTP body에 임의로 합치지 않습니다. 어댑터가 해당 모델·API의 필드로 변환합니다. 모델별 지원 검사는 옵션을 조용히 제거하거나 다른 수준으로 바꾸지 않고 실제 전송과 응답까지 확인해야 합니다.
++
++파일 준비 후 파일 경로와 작성한 모델 항목을 알려주면 됩니다. 비밀 키 자체를 메시지로 보낼 필요는 없습니다. 설정 누락·미지원 옵션·호출 실패·미확인 버전을 성공으로 기록하지 않습니다.
+diff --git a/docs/env/anthropic.md b/docs/env/anthropic.md
+index 4e1f35a94e7c3745d1b42238c61bf08dc7e1ff63..e8174ec252035179839ac40f3b121ec3d6362610 100644
+--- a/docs/env/anthropic.md
++++ b/docs/env/anthropic.md
+@@ -10,7 +10,10 @@ ANTHROPIC_BASE_URL=https://api.anthropic.com
+ ANTHROPIC_API_VERSION=2023-06-01
+ 
+ ANTHROPIC_MODEL_1_ID=
+-ANTHROPIC_MODEL_1_VERSION=
++ANTHROPIC_MODEL_1_EFFORT=
++ANTHROPIC_MODEL_1_THINKING_MODE=
++ANTHROPIC_MODEL_1_THINKING_BUDGET_TOKENS=
++ANTHROPIC_MODEL_1_MAX_OUTPUT_TOKENS=4096
+ 
+ # 키가 특정 workspace에 한정되지 않은 경우에만 설정합니다.
+ # ANTHROPIC_WORKSPACE_ID=
+@@ -19,7 +22,7 @@ ANTHROPIC_MODEL_1_VERSION=
+ 1. [Claude Console의 API keys](https://platform.claude.com/settings/keys)에서 키를 생성하고 `ANTHROPIC_API_KEY`에 넣습니다. 개인 개발에는 개인 키, 공동 서비스에는 서비스 계정 키를 사용합니다. 키 생성 시 선택한 workspace 범위도 확인합니다. [키 생성·인증 방식](https://platform.claude.com/docs/en/manage-claude/authentication).
+ 2. 특정 workspace에 한정되지 않은 키는 `ANTHROPIC_WORKSPACE_ID`도 필요합니다. Console의 **Settings → Workspaces**에서 ID를 확인합니다. 이 값은 HTTP의 `anthropic-workspace-id` 헤더에 대응합니다. [workspace 선택](https://platform.claude.com/docs/en/manage-claude/authentication#select-a-workspace).
+ 3. Console에서 사용할 모델을 고른 뒤 [Models API](https://platform.claude.com/docs/en/api/models/list)의 목록과 [모델 ID·버전 문서](https://platform.claude.com/docs/en/about-claude/models/model-ids-and-versions)를 확인합니다. 직접 API의 정확한 ID를 `ANTHROPIC_MODEL_1_ID`에 복사합니다. Bedrock의 모델 ID나 화면 표시 이름을 넣지 않습니다.
+-4. 해당 ID가 가리키는 release를 확인해 `ANTHROPIC_MODEL_1_VERSION`에 기록합니다. 별도 버전 필드가 없고 공식적으로 고정 release를 식별하는 전체 ID라면 그 ID를 사용할 수 있습니다. 이름에서 날짜를 추측하거나 목록의 `created_at`을 모델 버전으로 바꾸지 않습니다. [ID와 버전의 의미](https://platform.claude.com/docs/en/about-claude/models/model-ids-and-versions), [모델 목록의 필드](https://platform.claude.com/docs/en/api/models/list).
++4. 모델 식별자는 `ANTHROPIC_MODEL_1_ID` 하나만 입력합니다. 실제 release와 고정 여부는 해당 ID의 metadata를 검증해 내부 기록에 남깁니다. 별도 버전을 중복 입력하거나 이름에 날짜를 만들어 붙이지 않습니다. [ID와 버전의 의미](https://platform.claude.com/docs/en/about-claude/models/model-ids-and-versions).
+ 
+ 모델 목록을 직접 조회하려면 키와 API 버전을 셸 환경변수에도 준비한 뒤 실행합니다. `.env` 파일을 저장하는 것만으로 셸에 변수가 설정되지는 않습니다. workspace가 필요한 키는 마지막 헤더도 추가합니다.
+ 
+@@ -34,13 +37,26 @@ curl --fail-with-body --silent --show-error \
+ 
+ 이 명령은 공식 모델 목록 조회이며 Wickle 연결 검사를 대신하지 않습니다. `has_more`가 참이면 `last_id`를 다음 요청의 `after_id`로 전달해 나머지 목록을 확인합니다. [Models API](https://platform.claude.com/docs/en/api/models/list).
+ 
+-같은 키·workspace에서 다른 모델이나 버전도 검사하려면 다음 번호를 추가합니다.
++## Effort와 thinking 설정
++
++`ANTHROPIC_MODEL_1_EFFORT`는 논리 옵션 `effort`입니다. 직접 Messages API에서는 `output_config.effort`에 대응합니다. 지원 수준은 모델마다 다르므로 선택한 모델의 허용값을 확인해서 입력합니다. [Claude effort](https://platform.claude.com/docs/en/build-with-claude/effort).
++
++`THINKING_MODE`는 `thinking_mode`, `THINKING_BUDGET_TOKENS`는 `thinking_budget_tokens`에 대응하는 선택 설정입니다. `adaptive`는 thinking 모드이며 effort 수준이 아닙니다. 수동 thinking을 지원하는 모델은 모드와 토큰 예산의 조합도 확인해야 합니다. [Adaptive thinking](https://platform.claude.com/docs/en/build-with-claude/adaptive-thinking), [수동 thinking 예산](https://platform.claude.com/docs/en/build-with-claude/extended-thinking).
++
++옵션을 비워두면 전송하지 않습니다. 선택한 모델·API의 schema가 허용하지 않는 값이나 조합은 명시적인 오류로 처리하며, 조용히 무시하거나 다른 수준으로 바꾸지 않습니다. 논리 옵션을 실제 API 필드로 변환하는 부분은 해당 어댑터의 책임이며 실제 SDK 연결은 아직 구현 전입니다.
++
++`MAX_OUTPUT_TOKENS=4096`은 한 번의 모델 응답에 대한 출력 예산 예시입니다. 선택 모델의 요건과 thinking·도구 호출에 필요한 공간을 확인해 조정합니다. 모든 모델이나 긴 tool loop에 충분한 값이라는 뜻은 아닙니다.
++
++같은 키·workspace에서 다른 모델을 추가하거나, 같은 모델 ID에 서로 다른 effort를 적용해 비교하려면 다음 슬롯을 사용합니다. 같은 모델을 비교할 때는 두 ID 칸에 같은 실제 ID를 넣고 effort에 각각 다른 허용값을 넣습니다.
+ 
+ ```dotenv
+ ANTHROPIC_MODEL_2_ID=
+-ANTHROPIC_MODEL_2_VERSION=
++ANTHROPIC_MODEL_2_EFFORT=
++ANTHROPIC_MODEL_2_THINKING_MODE=
++ANTHROPIC_MODEL_2_THINKING_BUDGET_TOKENS=
++ANTHROPIC_MODEL_2_MAX_OUTPUT_TOKENS=4096
+ ```
+ 
+-번호는 `1`, `2`처럼 양의 정수이며, ID를 채운 각 번호가 독립된 모델·버전 검사 대상입니다. 확인하지 못한 VERSION은 준비 중에는 비워 두고 실제 검사 전에 확인합니다. 미확인 상태를 통과로 기록하지 않습니다. 계정·workspace·endpoint가 다르면 별도의 `.env` 파일에 공통 설정과 모델 목록을 작성합니다.
++번호는 `1`, `2`처럼 양의 정수이며, ID를 채운 각 번호가 독립된 모델·옵션 검사 대상입니다. 사용하지 않는 슬롯은 ID를 비워둡니다. 계정·workspace·endpoint가 다르면 별도의 `.env` 파일에 공통 설정과 모델 목록을 작성합니다.
+ 
+ `ANTHROPIC_API_VERSION`은 요청 헤더의 API 계약 버전입니다. 모델 release나 SDK 버전과는 별개입니다. [API 버전](https://platform.claude.com/docs/en/api/versioning).
+diff --git a/docs/env/azure-openai.md b/docs/env/azure-openai.md
+index 9717bb6c145d038316357770200aba1e24c0c38a..0e1a3a86c0ecaee3a4f612310f5a127a6ce4aab3 100644
+--- a/docs/env/azure-openai.md
++++ b/docs/env/azure-openai.md
+@@ -1,66 +1,49 @@
+ # Azure Foundry OpenAI GPT 환경 설정
+ 
+-Azure에서는 리소스의 인증·endpoint를 공통으로 설정하고, 각 모델 슬롯에 실제 배포 대상을 지정합니다. 같은 모델의 두 버전을 테스트할 때도 배포별 실제 버전을 확인해야 합니다.
+-
+-## 콘솔에서 확인할 값
+-
+-1. [Azure Portal](https://portal.azure.com/)에서 사용할 구독과 OpenAI 리소스를 엽니다. **Keys and endpoint**에서 endpoint와 `KEY1` 또는 `KEY2`를 확인합니다. endpoint의 리소스 주소를 `AZURE_OPENAI_ENDPOINT`에, 선택한 키를 `AZURE_OPENAI_API_KEY`에 넣습니다. [키와 endpoint 확인 방법](https://learn.microsoft.com/en-us/connectors/azureopenai/#get-your-credentials)
+-2. [Foundry](https://ai.azure.com/)의 해당 리소스 배포 목록에서 사용할 배포를 엽니다. 배포 이름과 **Details**의 모델 이름·현재 모델 버전을 각각 복사합니다. 같은 배포 이름으로 모델 버전이 변경될 수 있으므로 자동 업그레이드 설정도 확인합니다. [배포 버전 확인](https://learn.microsoft.com/en-us/azure/foundry/foundry-models/concepts/model-versions)
+-
+-| 설정 | 확인할 값 |
+-| --- | --- |
+-| `AZURE_OPENAI_MODEL_1_ID` | 배포의 underlying model name. 관리 API로 확인할 때는 `properties.model.name` |
+-| `AZURE_OPENAI_MODEL_1_VERSION` | 배포의 현재 model version. 관리 API의 `properties.model.version` |
+-| `AZURE_OPENAI_MODEL_1_DEPLOYMENT` | 실제 호출할 deployment name. 관리 API 배포 객체의 `name` |
+-
+-추론 요청의 `model`에는 배포 이름이 전달됩니다. 모델 이름·버전은 배포가 가리키는 대상을 확인하기 위한 별도 값입니다. `.env`의 `_VERSION`을 바꾸는 것만으로 Azure 배포가 변경되지는 않습니다. [모델과 배포 관리](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/working-with-models)
+-
+-## 복사할 `.env` 블록
++Azure에서는 **실제 호출할 deployment 이름**과 그 호출의 effort·출력 예산을 입력합니다. 기반 모델 ID와 버전을 별도 환경변수로 중복 입력하지 않습니다.
+ 
+ ```dotenv
+-# 공통 리소스 주소. 예: https://<resource>.openai.azure.com
+-# 여기에 /openai/v1/ 또는 deployment 경로를 붙이지 않습니다.
++# 리소스 origin. /openai/v1/ 또는 deployment 경로는 붙이지 않습니다.
+ AZURE_OPENAI_ENDPOINT=
+ AZURE_OPENAI_AUTH_MODE=api_key
+ AZURE_OPENAI_API_KEY=
+ 
+-# 공통 추론 API 계약. v1에서는 dated api-version을 비워둡니다.
+ AZURE_OPENAI_API_MODE=v1
++# dated API 경로에서만 해당 프로토콜 버전을 입력
+ AZURE_OPENAI_API_VERSION=
+ 
+-# 첫 번째 배포
+-AZURE_OPENAI_MODEL_1_ID=
+-AZURE_OPENAI_MODEL_1_VERSION=
+ AZURE_OPENAI_MODEL_1_DEPLOYMENT=
++AZURE_OPENAI_MODEL_1_REASONING_EFFORT=high
++AZURE_OPENAI_MODEL_1_MAX_OUTPUT_TOKENS=4096
+ 
+-# 두 번째 배포: 다른 모델 또는 같은 모델의 다른 버전
+-AZURE_OPENAI_MODEL_2_ID=
+-AZURE_OPENAI_MODEL_2_VERSION=
+ AZURE_OPENAI_MODEL_2_DEPLOYMENT=
++AZURE_OPENAI_MODEL_2_REASONING_EFFORT=low
++AZURE_OPENAI_MODEL_2_MAX_OUTPUT_TOKENS=4096
+ ```
+ 
+-`v1` 경로에서는 리소스 주소 뒤에 `/openai/v1/`을 붙여 호출하며, 날짜 형태의 `api-version`은 필요하지 않습니다. 별도로 구현된 dated API 경로를 사용할 때만 `AZURE_OPENAI_API_MODE=dated`와 해당 경로가 요구하는 정확한 `AZURE_OPENAI_API_VERSION`을 함께 설정합니다. 리소스·배포를 관리하는 Azure 관리 API 버전을 여기에 넣지 않습니다. [Azure 추론 API 버전](https://learn.microsoft.com/en-us/azure/foundry/openai/api-version-lifecycle?view=foundry-classic)
++## 입력할 값
++
++1. [Azure Portal](https://portal.azure.com/)의 OpenAI 리소스에서 **Keys and endpoint**를 확인합니다. endpoint origin과 key를 위 공통 항목에 넣습니다. [리소스 인증 정보](https://learn.microsoft.com/en-us/connectors/azureopenai/#get-your-credentials).
++2. [Foundry](https://ai.azure.com/)에서 사용할 배포의 이름을 `MODEL_1_DEPLOYMENT`에 복사합니다. 추론 요청의 `model`에는 이 배포 이름이 들어갑니다. 기반 모델과 현재 버전·업그레이드 정책은 배포 metadata 검증 결과로 기록합니다. [모델과 배포](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/working-with-models), [모델 버전](https://learn.microsoft.com/en-us/azure/foundry/foundry-models/concepts/model-versions).
++3. `REASONING_EFFORT`는 해당 배포 모델·API가 지원하는 수준을 입력합니다. 허용 수준은 모델별로 다르며 빈 값은 미전송입니다. `MAX_OUTPUT_TOKENS`는 모델의 한도 안에서 정합니다. [Azure reasoning 모델](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/reasoning?view=foundry-classic).
+ 
+-## Microsoft Entra ID를 사용하는 경우
++같은 배포와 서로 다른 effort를 두 슬롯에 넣어 비교할 수 있습니다. 모델 버전 두 개를 비교할 때는 각 버전을 배포한 서로 다른 deployment를 선택합니다. 배포 이름이 고정돼 있어도 기반 모델은 업그레이드될 수 있으므로, 확인할 수 없는 버전을 pinned 또는 live 검증 완료로 기록하지 않습니다.
+ 
+-`AZURE_OPENAI_AUTH_MODE=entra`로 바꾸고 API key는 비워둡니다. 로컬에서는 `az login`으로 사용할 계정에 로그인하고, 해당 리소스의 모델 호출 권한을 확인합니다. Azure에서 실행할 때는 관리 ID를 사용할 수도 있습니다. 서비스 주체를 선택한 경우에만 아래 tenant·client·secret을 설정합니다. 토큰 발급·갱신은 Host의 인증 제공자가 처리합니다. [Entra 인증 설정](https://learn.microsoft.com/en-us/azure/foundry/foundry-models/how-to/configure-entra-id)
++`v1`에서는 리소스 주소에 `/openai/v1/`을 붙여 호출하고 날짜 형식의 `api-version`은 비워둡니다. dated API를 지원하는 어댑터 경로를 선택할 때만 `AZURE_OPENAI_API_MODE=dated`와 정확한 `AZURE_OPENAI_API_VERSION`을 설정합니다. 이 값은 모델 버전이 아닙니다. [API 버전](https://learn.microsoft.com/en-us/azure/foundry/openai/api-version-lifecycle?view=foundry-classic).
++
++## Microsoft Entra ID
++
++Entra 인증을 사용할 때는 `AZURE_OPENAI_AUTH_MODE=entra`로 바꾸고 API key를 비웁니다. 로컬 Azure CLI 로그인이나 관리 ID를 사용할 수 있습니다. 서비스 주체를 직접 구성하는 경우에만 tenant·client·secret을 설정합니다. 토큰 발급·갱신은 Host의 인증 제공자가 처리합니다. [Entra 인증](https://learn.microsoft.com/en-us/azure/foundry/foundry-models/how-to/configure-entra-id).
+ 
+ ```dotenv
+ AZURE_OPENAI_AUTH_MODE=entra
+ AZURE_OPENAI_API_KEY=
+-
+-# 서비스 주체를 사용하는 경우에만 주석을 해제하고 입력
+ # AZURE_TENANT_ID=
+ # AZURE_CLIENT_ID=
+ # AZURE_CLIENT_SECRET=
+-
+-# 선택한 리소스의 인증 안내에 맞는 scope
+-# Foundry v1 공식 예제의 값:
+ # AZURE_OPENAI_ENTRA_SCOPE=https://ai.azure.com/.default
+ ```
+ 
+-같은 모델의 버전 두 개를 비교하려면 각 버전을 대상으로 하는 **서로 다른 배포**를 준비하고 `_1_DEPLOYMENT`, `_2_DEPLOYMENT`에 넣습니다. 두 배포의 모델 이름이 같아도 됩니다. 추가 배포는 `_3_ID`, `_3_VERSION`, `_3_DEPLOYMENT`처럼 번호를 늘립니다.
+-
+-ID가 채워진 각 슬롯은 독립 테스트 대상입니다. 배포 이름도 함께 입력하고, 버전을 모르면 준비 중에만 비워둔 뒤 테스트 전에 Details에서 확인하세요. 다른 리소스·계정이나 다른 공통 API 설정을 사용할 때는 별도 `.env` 파일로 나눕니다.
++배포명이 채워진 번호가 독립 테스트 대상입니다. 다른 리소스·계정·API 설정은 별도 `.env` 파일로 나눕니다. 기반 모델 metadata 조회에 추가 권한이 필요한 경우에는 그 검증 상태를 별도로 기록하며, 확인하지 못한 정보를 사용자가 추측해서 채우도록 요구하지 않습니다.
+ 
+-이 문서는 모델별 실제 연결 테스트용 설정 규약이며 `.env` 저장만으로 호출이 실행되지 않습니다. 코어 라이브러리는 `.env`를 직접 읽지 않습니다. [공통 설정 안내](README.md)에서 준비 및 실행 범위를 확인하세요.
++이 설정은 live 테스트 전용이며 실제 어댑터와 runner는 구현 중입니다. 코어가 `.env`를 읽지 않습니다. [공통 안내](README.md).
+diff --git a/docs/env/bedrock.md b/docs/env/bedrock.md
+index 1056f0dcaa1130d933cec5e4696e3388b56e23cf..5c7d0fe50e124cc02219a2a8810d444eab5b166b 100644
+--- a/docs/env/bedrock.md
++++ b/docs/env/bedrock.md
+@@ -8,9 +8,10 @@ AWS 계정의 인증 정보, 호출을 시작할 리전, 해당 리전에서 사
+ AWS_REGION=
+ 
+ BEDROCK_MODEL_1_ID=
+-BEDROCK_MODEL_1_VERSION=
+-# 모델 호출에 inference profile을 사용할 때만 설정합니다.
+-# BEDROCK_MODEL_1_INFERENCE_PROFILE_ID=
++BEDROCK_MODEL_1_EFFORT=
++BEDROCK_MODEL_1_THINKING_MODE=
++BEDROCK_MODEL_1_THINKING_BUDGET_TOKENS=
++BEDROCK_MODEL_1_MAX_OUTPUT_TOKENS=4096
+ 
+ # 이름 있는 AWS profile을 사용할 때만 설정합니다.
+ # AWS_PROFILE=
+@@ -48,9 +49,9 @@ aws bedrock list-inference-profiles \
+   --output json
+ ```
+ 
+-첫 목록의 foundation model ID를 `BEDROCK_MODEL_1_ID`에 복사합니다. Console과 공식 모델 문서에서 확인한 release를 `BEDROCK_MODEL_1_VERSION`에 기록합니다. 공식적으로 고정 release를 식별하는 전체 model ID를 버전 식별자로 사용할 수 있지만, 임의의 날짜나 suffix를 만들지는 않습니다. [foundation model 목록](https://docs.aws.amazon.com/cli/latest/reference/bedrock/list-foundation-models.html), [제공 경로별 모델 ID](https://platform.claude.com/docs/en/about-claude/models/model-ids-and-versions).
++`BEDROCK_MODEL_1_ID`에는 실제 요청의 `modelId`로 사용할 식별자 하나를 입력합니다. Foundation model로 호출하면 그 model ID를, inference profile로 호출하면 해당 profile ID 또는 ARN을 넣습니다. 기반 모델 ID나 release를 별도 입력하지 않으며 임의의 suffix를 만들지 않습니다. [foundation model 목록](https://docs.aws.amazon.com/cli/latest/reference/bedrock/list-foundation-models.html), [profile로 추론하기](https://docs.aws.amazon.com/bedrock/latest/userguide/inference-profiles-use.html).
+ 
+-Inference profile로 호출한다면 그 ID 또는 ARN을 같은 번호의 `BEDROCK_MODEL_1_INFERENCE_PROFILE_ID`에 넣고, 아래 명령으로 실제 연결된 모델과 리전을 확인합니다. `BEDROCK_MODEL_1_ID`에는 기반 foundation model을 유지합니다. 호출 시 profile이 `modelId` 대상이 되며, `AWS_REGION`은 요청의 출발 리전입니다. [profile 조회](https://docs.aws.amazon.com/cli/latest/reference/bedrock/get-inference-profile.html), [profile로 추론하기](https://docs.aws.amazon.com/bedrock/latest/userguide/inference-profiles-use.html).
++Inference profile이 가리키는 실제 모델·release·리전은 테스트 검증 단계에서 조회하여 내부 metadata로 기록합니다. 준비 중에는 아래 명령으로도 확인할 수 있습니다. `AWS_REGION`은 요청의 출발 리전입니다. [profile 조회](https://docs.aws.amazon.com/cli/latest/reference/bedrock/get-inference-profile.html).
+ 
+ ```sh
+ aws bedrock get-inference-profile \
+@@ -60,12 +61,24 @@ aws bedrock get-inference-profile \
+   --output json
+ ```
+ 
+-같은 계정·인증·출발 리전에서 다른 모델이나 버전을 검사하려면 다음 번호를 추가합니다.
++## Effort와 thinking 설정
++
++`BEDROCK_MODEL_1_EFFORT`는 논리 옵션 `effort`입니다. 같은 Claude 계열이라도 모델과 Bedrock API 경로에 따라 지원 여부·허용 수준이 다릅니다. [Claude effort](https://platform.claude.com/docs/en/build-with-claude/effort).
++
++`THINKING_MODE`와 `THINKING_BUDGET_TOKENS`는 각각 `thinking_mode`, `thinking_budget_tokens` 논리 옵션입니다. `adaptive`는 모드이고 effort 값이 아닙니다. 수동 thinking 예산을 지원하는 모델에서만 해당 토큰 설정을 사용합니다. [Adaptive thinking](https://platform.claude.com/docs/en/build-with-claude/adaptive-thinking), [수동 thinking](https://platform.claude.com/docs/en/build-with-claude/extended-thinking).
++
++빈 옵션은 전송하지 않습니다. 선택한 모델·API의 schema에 없는 값이나 조합은 명시적으로 거부하며, 직접 Claude API 설정을 Bedrock 요청에 그대로 복사하거나 지원하지 않는 옵션을 조용히 무시하지 않습니다. 실제 wire 필드 매핑은 Bedrock 어댑터가 담당하며 SDK 연결은 아직 구현 전입니다.
++
++`MAX_OUTPUT_TOKENS=4096`은 응답 한 번의 출력 예산 예시입니다. 모델의 요건과 thinking·도구 호출을 포함한 작업량에 맞춰 조정합니다. 긴 tool loop에 충분한 예산을 보장하는 값은 아닙니다.
++
++같은 계정·인증·출발 리전에서 다른 호출 대상을 추가하거나, 같은 `modelId`에 서로 다른 effort를 적용하려면 다음 번호를 사용합니다.
+ 
+ ```dotenv
+ BEDROCK_MODEL_2_ID=
+-BEDROCK_MODEL_2_VERSION=
+-# BEDROCK_MODEL_2_INFERENCE_PROFILE_ID=
++BEDROCK_MODEL_2_EFFORT=
++BEDROCK_MODEL_2_THINKING_MODE=
++BEDROCK_MODEL_2_THINKING_BUDGET_TOKENS=
++BEDROCK_MODEL_2_MAX_OUTPUT_TOKENS=4096
+ ```
+ 
+-번호는 양의 정수이며 ID를 채운 각 번호가 독립된 검사 대상입니다. VERSION은 준비 중 미확인이면 비워 두되 실제 검사 전에 확인하고, 미확인을 통과로 기록하지 않습니다. 계정·role/profile·출발 리전·endpoint가 다르면 별도의 `.env` 파일을 사용합니다. 이 설정에는 직접 Anthropic API의 키나 `ANTHROPIC_API_VERSION`을 넣지 않습니다.
++번호는 양의 정수이며 ID를 채운 각 번호가 독립된 모델·옵션 검사 대상입니다. 같은 모델의 effort를 비교할 때는 두 슬롯에 같은 실제 호출 ID와 서로 다른 허용 effort 값을 넣습니다. 계정·role/profile·출발 리전·endpoint가 다르면 별도의 `.env` 파일을 사용합니다. 이 설정에는 직접 Anthropic API의 키나 `ANTHROPIC_API_VERSION`을 넣지 않습니다.
+diff --git a/docs/env/gemini.md b/docs/env/gemini.md
+index 51c5cda8a8ec61dc0764112ea1e8644f859285f2..5396907dfc3cce0bca97e62fa590e6abd266f8e9 100644
+--- a/docs/env/gemini.md
++++ b/docs/env/gemini.md
+@@ -10,13 +10,15 @@ GEMINI_BASE_URL=https://generativelanguage.googleapis.com
+ GEMINI_API_VERSION=v1
+ 
+ GEMINI_MODEL_1_ID=
+-GEMINI_MODEL_1_VERSION=
++GEMINI_MODEL_1_THINKING_LEVEL=
++GEMINI_MODEL_1_THINKING_BUDGET_TOKENS=
++GEMINI_MODEL_1_MAX_OUTPUT_TOKENS=4096
+ ```
+ 
+ 1. [Google AI Studio API Keys](https://aistudio.google.com/apikey)에서 사용할 프로젝트를 선택하고 키를 생성합니다. 기존 프로젝트가 보이지 않으면 **Dashboard → Projects → Import projects**에서 가져옵니다. 키는 해당 Google Cloud 프로젝트의 사용량·결제 설정과 연결됩니다. [프로젝트와 키 준비](https://ai.google.dev/gemini-api/docs/api-key).
+ 2. 새로 생성한 **auth key**를 `GEMINI_API_KEY`에 넣습니다. 공식 문서는 기존 Standard key의 전환을 안내하므로, 오래된 키를 재사용한다면 Key Type과 현재 제한 조건도 확인합니다. Google SDK는 `GOOGLE_API_KEY`가 함께 설정되면 이를 우선할 수 있어, 테스트 실행기는 선택한 `GEMINI_API_KEY`를 SDK 클라이언트에 명시적으로 전달해야 합니다. [키 유형·환경변수 우선순위](https://ai.google.dev/gemini-api/docs/api-key).
+ 3. AI Studio의 모델 선택 화면과 [Models API](https://ai.google.dev/api/models)에서 사용할 모델의 ID·버전·지원 작업을 확인합니다. `name`이 `models/…` 형식이면 `models/` 뒤의 정확한 모델 식별자를 `GEMINI_MODEL_1_ID`에 넣습니다. `supportedGenerationMethods`에 필요한 생성 방식이 있는지도 확인합니다.
+-4. 공급자가 공개한 버전 정보를 `GEMINI_MODEL_1_VERSION`에 기록합니다. Models API의 `version` 값은 공급자 버전 metadata이며, 이 값만으로 ID가 고정 snapshot이라는 의미가 되지는 않습니다. 선택한 ID의 release·alias 의미를 함께 확인합니다. [모델 metadata](https://ai.google.dev/api/models#Model).
++4. 모델 식별자는 `GEMINI_MODEL_1_ID` 하나만 입력합니다. 공급자가 공개한 `version`과 ID의 release·alias 의미는 검증 단계에서 확인해 내부 metadata로 기록합니다. 사용자가 버전을 별도로 중복 입력하지 않습니다. [모델 metadata](https://ai.google.dev/api/models#Model).
+ 
+ 키를 셸 환경변수에도 준비했다면 공식 모델 목록을 아래처럼 조회할 수 있습니다. 이 명령의 `v1beta`는 목록 조회 경로이며, `.env`의 생성 API 버전을 자동으로 변경하지 않습니다. `.env` 저장만으로 셸 변수가 설정되지는 않습니다.
+ 
+@@ -28,13 +30,23 @@ curl --fail-with-body --silent --show-error \
+ 
+ `nextPageToken`이 있으면 다음 요청에 `pageToken`을 넣어 나머지 모델도 확인합니다. 목록 조회는 Wickle의 실제 생성·Tool 호출 검사를 대신하지 않습니다. [모델 목록 API](https://ai.google.dev/api/models#method:-models.list).
+ 
+-같은 프로젝트·키·API 경로에서 두 번째 모델이나 버전을 검사하려면 다음 번호를 추가합니다.
++## Thinking 설정
++
++`GEMINI_MODEL_1_THINKING_LEVEL`은 논리 옵션 `thinking_level`이며, generateContent의 `generationConfig.thinkingConfig.thinkingLevel`에 대응합니다. 구형 모델에서 토큰 예산 방식을 사용할 때는 `THINKING_BUDGET_TOKENS`를 `thinking_budget_tokens`로 전달하고 어댑터가 `thinkingBudget`에 매핑합니다. 지원 수준·정수 범위·두 설정의 동시 사용 가능 여부는 선택한 모델·API schema를 확인합니다. [generateContent ThinkingConfig](https://ai.google.dev/api/generate-content#ThinkingConfig).
++
++옵션이 비어 있으면 전송하지 않습니다. 모든 Gemini 모델에 공통된 수준 목록을 가정하지 않으며, 지원되지 않는 설정이나 조합을 명시적으로 거부합니다. 실제 SDK 요청으로 변환하는 어댑터는 아직 구현 전입니다.
++
++`MAX_OUTPUT_TOKENS=4096`은 한 번의 응답에 대한 출력 예산 예시입니다. 모델의 요건과 thinking·도구 호출에 필요한 토큰을 고려해 조정합니다. 긴 tool loop 전체의 예산을 이 값 하나로 보장하지 않습니다.
++
++같은 프로젝트·키·API 경로에서 두 번째 모델을 추가하거나, 같은 모델 ID에 서로 다른 thinking level을 적용해 비교하려면 다음 슬롯을 사용합니다.
+ 
+ ```dotenv
+ GEMINI_MODEL_2_ID=
+-GEMINI_MODEL_2_VERSION=
++GEMINI_MODEL_2_THINKING_LEVEL=
++GEMINI_MODEL_2_THINKING_BUDGET_TOKENS=
++GEMINI_MODEL_2_MAX_OUTPUT_TOKENS=4096
+ ```
+ 
+-번호는 양의 정수이며 ID를 채운 각 번호가 독립된 모델·버전 검사 대상입니다. VERSION은 준비 중에는 비워 둘 수 있지만 실제 검사 전에 확인해야 하며, 미확인을 통과로 기록하지 않습니다. 프로젝트·키·endpoint 또는 필요한 API 버전이 다르면 별도의 `.env` 파일을 사용합니다.
++번호는 양의 정수이며 ID를 채운 각 번호가 독립된 모델·옵션 검사 대상입니다. 같은 모델을 비교할 때는 ID를 동일하게 넣고 thinking 설정에 각각 다른 허용값을 입력합니다. 프로젝트·키·endpoint 또는 필요한 API 버전이 다르면 별도의 `.env` 파일을 사용합니다.
+ 
+ `GEMINI_API_VERSION=v1`은 안정 API 경로를 뜻합니다. 선택한 기능이 `v1beta`를 요구한다면 그 기능을 지원하는 어댑터와 함께 설정해야 합니다. 모델 release와 API 버전은 별개입니다. [API 버전](https://ai.google.dev/gemini-api/docs/api-versions). 이 경로의 인증은 AI Studio 키이며, ADC로 준비하는 [Vertex AI 경로](vertex-ai.md)는 별도 설정입니다.
+diff --git a/docs/env/openai.md b/docs/env/openai.md
+index ce2f1b433c22a00194023c271474621b850dfce8..e60a3e0a19eaf550d4ea458e27dc72d86e13bada 100644
+--- a/docs/env/openai.md
++++ b/docs/env/openai.md
+@@ -1,37 +1,36 @@
+ # OpenAI GPT 환경 설정
+ 
+-OpenAI 직접 API의 인증 정보와 모델별 테스트 대상을 준비합니다. 키와 endpoint는 한 번 설정하고, 모델은 번호가 붙은 슬롯에 추가합니다. 아래 블록의 빈칸을 채워 `.env`에 넣으세요.
+-
+-## 콘솔에서 확인할 값
+-
+-1. [OpenAI Platform](https://platform.openai.com/)에서 사용할 조직과 프로젝트를 선택합니다. 해당 프로젝트의 **API Keys**에서 애플리케이션용 키를 만들고 `OPENAI_API_KEY`에 넣습니다. API 사용을 위한 프로젝트의 결제·사용 한도도 확인합니다. [공식 시작 안내](https://developers.openai.com/api/docs/quickstart)
+-2. [공식 모델 목록](https://developers.openai.com/api/docs/models)에서 테스트할 모델의 상세 페이지를 엽니다. 계정의 Playground 모델 선택 목록 또는 해당 키로 조회한 [Models API 목록](https://developers.openai.com/api/reference/resources/models/methods/list)과 대조해 접근 가능한 모델 ID를 확인합니다. 공개 모델 목록만으로 해당 프로젝트의 사용 권한이 확인되는 것은 아닙니다.
+-3. 버전을 고정하려면 상세 페이지의 **Snapshots**에 있는 정확한 ID를 확인합니다. 실제 요청 대상을 선택하는 값은 `OPENAI_MODEL_1_ID`입니다. `_VERSION`은 확인한 릴리스를 기록하는 값이며, 이것만 바꿔 alias의 호출 버전이 고정되지는 않습니다. OpenAI가 별도 버전 필드 없이 snapshot ID로 릴리스를 구분하는 경우에는 그 전체 ID를 두 칸에 동일하게 적습니다. [모델별 상세 페이지 진입](https://developers.openai.com/api/docs/models), [버전 고정과 호환성](https://developers.openai.com/api/reference/overview#backwards-compatibility)
+-
+-## 복사할 `.env` 블록
++인증 정보는 한 번 설정하고, 모델별로 정확한 ID와 호출 옵션을 입력합니다. **버전이 포함된 모델 이름을 ID에 넣으면 됩니다. 같은 값을 별도 VERSION에 다시 입력하지 않습니다.**
+ 
+ ```dotenv
+-# 공통 인증과 endpoint
+ OPENAI_API_KEY=
+ OPENAI_BASE_URL=https://api.openai.com/v1
+ 
+-# 첫 번째 모델: 계정에서 사용할 수 있는 정확한 ID와 확인한 릴리스
+ OPENAI_MODEL_1_ID=
+-OPENAI_MODEL_1_VERSION=
++OPENAI_MODEL_1_REASONING_EFFORT=high
++OPENAI_MODEL_1_MAX_OUTPUT_TOKENS=4096
+ 
+-# 두 번째 모델 또는 같은 모델의 다른 릴리스
++# 다른 모델·snapshot 또는 같은 모델의 다른 effort
+ OPENAI_MODEL_2_ID=
+-OPENAI_MODEL_2_VERSION=
++OPENAI_MODEL_2_REASONING_EFFORT=low
++OPENAI_MODEL_2_MAX_OUTPUT_TOKENS=4096
+ 
+-# 해당 키에 명시적인 조직·프로젝트 선택이 필요한 경우에만 설정
++# 해당 키에 명시적인 조직·프로젝트 선택이 필요한 경우만 설정
+ # OPENAI_ORG_ID=
+ # OPENAI_PROJECT_ID=
+ ```
+ 
+-`OPENAI_BASE_URL`의 `/v1`은 API 경로 버전입니다. 모델 릴리스와는 별개입니다. 선택적으로 사용하는 조직·프로젝트 ID는 Platform 설정에서 확인합니다. [OpenAI 인증과 프로젝트 선택](https://developers.openai.com/api/reference/overview#authentication)
++## 입력할 값
++
++1. [OpenAI Platform](https://platform.openai.com/)의 사용할 프로젝트에서 API key를 만들고 `OPENAI_API_KEY`에 넣습니다. [공식 시작 안내](https://developers.openai.com/api/docs/quickstart).
++2. [모델 목록](https://developers.openai.com/api/docs/models)이나 계정의 모델 선택 화면에서 실제 호출할 전체 ID를 `OPENAI_MODEL_1_ID`에 복사합니다. 고정 release를 원하면 해당 모델 페이지의 snapshot ID를 사용합니다. 버전 확인 결과는 테스트가 기록합니다.
++3. `REASONING_EFFORT`에 해당 모델이 지원하는 수준을 넣습니다. 지원 값은 모델에 따라 `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` 중 일부입니다. 모든 모델이 모든 값을 받는 것은 아닙니다. 비워 두면 명시적 effort를 전송하지 않습니다. [Reasoning effort](https://developers.openai.com/api/docs/guides/reasoning#reasoning-effort).
++4. `MAX_OUTPUT_TOKENS`는 해당 호출의 출력 예산입니다. 추론 토큰도 사용하는 모델에서는 최종 답변 전에 예산이 소진될 수 있으므로 테스트 목적에 맞게 조정합니다. [추론 모델의 토큰 예산](https://developers.openai.com/api/docs/guides/reasoning).
++
++Responses API의 실제 effort 필드는 `reasoning.effort`입니다. Wickle의 Host 옵션 `reasoning_effort`를 이 구조로 인코딩하는 것은 어댑터의 책임입니다. 모델·API가 지원하지 않는 옵션을 지정하면 오류로 처리하며, 자동으로 무시하지 않습니다. [Responses 요청](https://developers.openai.com/api/reference/resources/responses/methods/create).
+ 
+-두 모델을 비교하려면 `_1_ID`와 `_2_ID`에 각 모델의 실제 ID를 넣습니다. 같은 모델의 두 버전을 비교하려면 각 슬롯에 서로 다른 **실제 snapshot ID**를 넣습니다. 더 추가할 때는 `OPENAI_MODEL_3_ID`, `OPENAI_MODEL_3_VERSION`처럼 양의 정수 번호를 늘립니다.
++`OPENAI_BASE_URL`의 `/v1`은 API 경로이며 모델 버전과 별개입니다. 조직·프로젝트 헤더가 필요한 경우만 추가 값을 설정합니다. [인증과 프로젝트 선택](https://developers.openai.com/api/reference/overview#authentication).
+ 
+-ID가 채워진 슬롯마다 독립적인 테스트 대상이 됩니다. 사용하지 않는 슬롯은 ID를 비워둡니다. 버전이 아직 확인되지 않았다면 준비 중에는 `_VERSION`을 비워두고 실제 테스트 전에 확인하세요. 날짜나 버전을 임의로 만들지 않습니다. 다른 계정·프로젝트·endpoint 조합은 별도 `.env` 파일로 준비합니다.
++ID가 채워진 슬롯마다 독립 테스트를 실행하도록 준비합니다. 같은 ID와 서로 다른 effort를 넣어 비교할 수도 있습니다. 다른 계정·endpoint는 별도 `.env` 파일을 사용합니다.
+ 
+-이 문서는 모델별 실제 연결 테스트용 설정 규약입니다. `.env`를 저장하는 것만으로 호출이 실행되지 않으며, 코어 라이브러리가 파일을 직접 읽지 않습니다. 준비 및 실행 범위는 [공통 설정 안내](README.md)를 따릅니다.
++이 설정은 live 테스트 전용이며 실제 어댑터와 test runner는 구현 중입니다. `.env` 저장만으로 호출이 실행되지 않고 코어 라이브러리는 파일을 읽지 않습니다. [공통 안내](README.md).
+diff --git a/docs/env/vertex-ai.md b/docs/env/vertex-ai.md
+index d3b1efbbd3f463ac3d3ddd91841474b7a3678a55..1698afb492a76ef1a4590dc148226d68a30ed5ef 100644
+--- a/docs/env/vertex-ai.md
++++ b/docs/env/vertex-ai.md
+@@ -10,7 +10,9 @@ GOOGLE_CLOUD_LOCATION=
+ VERTEX_API_VERSION=v1
+ 
+ VERTEX_MODEL_1_ID=
+-VERTEX_MODEL_1_VERSION=
++VERTEX_MODEL_1_THINKING_LEVEL=
++VERTEX_MODEL_1_THINKING_BUDGET_TOKENS=
++VERTEX_MODEL_1_MAX_OUTPUT_TOKENS=4096
+ 
+ # 특정 credential/federation 설정 파일을 선택할 때만 설정합니다.
+ # GOOGLE_APPLICATION_CREDENTIALS=
+@@ -22,7 +24,7 @@ VERTEX_MODEL_1_VERSION=
+ 
+ 1. Google Cloud Console에서 사용할 프로젝트를 선택합니다. **프로젝트 ID**를 `GOOGLE_CLOUD_PROJECT`에 복사하고, 결제 연결과 `aiplatform.googleapis.com` 활성화를 확인합니다. 호출 주체에는 `roles/aiplatform.user` 또는 필요한 추론 권한을 담은 별도 역할이 필요합니다. [프로젝트·권한 준비](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/start/quickstart).
+ 2. Console의 모델 카탈로그에서 Gemini 모델을 선택한 뒤 [모델 ID·release 목록](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/model-versions)과 [지원 위치](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/locations)를 확인합니다. 지원되는 리전 또는 `global`을 `GOOGLE_CLOUD_LOCATION`에 넣습니다. 같은 모델이라도 모든 위치에서 사용할 수 있다고 가정하지 않습니다.
+-3. 모델 요청에 사용할 정확한 Google 모델 ID를 `VERTEX_MODEL_1_ID`에 복사하고, 확인한 release 식별자를 `VERTEX_MODEL_1_VERSION`에 기록합니다. 표시 이름·프로젝트 ID·endpoint ID를 모델 ID 대신 넣지 않습니다. 별도 release 값이 없으면 공식적으로 고정 release를 식별한다고 확인한 전체 모델 ID를 사용할 수 있습니다. [모델 버전과 수명주기](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/model-versions).
++3. 모델 요청에 사용할 정확한 Google 모델 ID를 `VERTEX_MODEL_1_ID` 하나에 복사합니다. 표시 이름·프로젝트 ID·endpoint ID를 모델 ID 대신 넣지 않습니다. 실제 release와 고정 여부는 테스트 검증 단계에서 조회하여 내부 metadata로 기록하므로 별도 버전을 중복 입력하지 않습니다. [모델 버전과 수명주기](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/model-versions).
+ 
+ CLI에서 접근 가능한 프로젝트를 조회하고 로컬 ADC를 준비할 수도 있습니다. API 활성화 명령의 프로젝트 ID는 실제 값으로 바꿉니다.
+ 
+@@ -42,13 +44,23 @@ gcloud auth application-default login
+ gcloud auth application-default set-quota-project '<quota 프로젝트 ID>'
+ ```
+ 
+-같은 프로젝트·ADC·위치에서 다른 모델이나 버전도 검사하려면 다음 번호를 추가합니다.
++## Thinking 설정
++
++`VERTEX_MODEL_1_THINKING_LEVEL`은 논리 옵션 `thinking_level`입니다. 구형 모델의 토큰 예산 방식에는 `THINKING_BUDGET_TOKENS`를 사용해 `thinking_budget_tokens`를 전달합니다. 어댑터가 선택된 Vertex API의 `thinkingConfig`에 매핑하며, 지원 level·예산 범위·동시 설정 제약은 모델과 API별로 검사합니다. [Vertex Gemini thinking](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/thinking).
++
++빈 옵션은 전송하지 않습니다. 모든 모델에 공통 enum을 가정하거나 지원하지 않는 설정을 조용히 버리지 않고 명시적으로 거부합니다. 실제 SDK 매핑은 Vertex 어댑터의 책임이며 아직 구현 전입니다.
++
++`MAX_OUTPUT_TOKENS=4096`은 응답 한 번의 출력 예산 예시입니다. 모델별 호출 요건과 thinking·도구 호출에 필요한 공간에 맞춰 조정합니다. 긴 tool loop에 충분한 전체 예산을 뜻하지 않습니다.
++
++같은 프로젝트·ADC·위치에서 다른 모델을 추가하거나, 동일한 모델 ID에 서로 다른 thinking level을 적용해 비교하려면 다음 번호를 사용합니다.
+ 
+ ```dotenv
+ VERTEX_MODEL_2_ID=
+-VERTEX_MODEL_2_VERSION=
++VERTEX_MODEL_2_THINKING_LEVEL=
++VERTEX_MODEL_2_THINKING_BUDGET_TOKENS=
++VERTEX_MODEL_2_MAX_OUTPUT_TOKENS=4096
+ ```
+ 
+-번호는 양의 정수이며 ID를 채운 각 번호가 독립된 모델·버전 검사 대상입니다. 미확인 VERSION은 준비 중에는 비워 두고 실제 검사 전에 확인합니다. 미확인을 통과로 기록하지 않습니다. 프로젝트·인증 계정·리전·endpoint가 다르면 별도의 `.env` 파일을 사용합니다.
++번호는 양의 정수이며 ID를 채운 각 번호가 독립된 모델·옵션 검사 대상입니다. 같은 모델을 비교할 때는 ID를 동일하게 넣고 thinking 설정에 각각 다른 허용값을 입력합니다. 프로젝트·인증 계정·리전·endpoint가 다르면 별도의 `.env` 파일을 사용합니다.
+ 
+ `VERTEX_API_VERSION=v1`은 API 계약 버전입니다. 모델 버전과는 별개이며, 일반 endpoint는 선택한 location에 맞춰 구성합니다. [공식 호출 예제](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/start/quickstart). AI Studio 키를 준비한 경우에는 [Gemini API 가이드](gemini.md)의 경로를 사용합니다.
+diff --git a/docs/env/xai.md b/docs/env/xai.md
+index 7d35dad905ffc7eca016b79d756885171c6fdf37..47222f197d1c8b6d167183411fd38ae4ec16a5a6 100644
+--- a/docs/env/xai.md
++++ b/docs/env/xai.md
+@@ -15,13 +15,15 @@ xAI 직접 API의 인증 정보와 모델별 테스트 대상을 준비합니다
+ XAI_API_KEY=
+ XAI_BASE_URL=https://api.x.ai/v1
+ 
+-# 첫 번째 모델: 실제 사용 가능한 ID와 확인한 릴리스
++# 첫 번째 모델: 실제 사용 가능한 호출 ID
+ XAI_MODEL_1_ID=
+-XAI_MODEL_1_VERSION=
++XAI_MODEL_1_REASONING_EFFORT=
++XAI_MODEL_1_MAX_OUTPUT_TOKENS=4096
+ 
+ # 두 번째 모델 또는 같은 모델의 다른 릴리스
+ XAI_MODEL_2_ID=
+-XAI_MODEL_2_VERSION=
++XAI_MODEL_2_REASONING_EFFORT=
++XAI_MODEL_2_MAX_OUTPUT_TOKENS=4096
+ ```
+ 
+ | 설정 | 입력할 값 |
+@@ -29,12 +31,21 @@ XAI_MODEL_2_VERSION=
+ | `XAI_API_KEY` | 선택한 xAI 계정·팀에서 만든 API key |
+ | `XAI_BASE_URL` | `/v1`을 포함한 xAI API 주소 |
+ | `XAI_MODEL_1_ID` | 실제 요청의 `model`에 전달할 정확한 모델 ID |
+-| `XAI_MODEL_1_VERSION` | 공식 자료로 확인한 해당 모델의 릴리스 식별자 |
++| `XAI_MODEL_1_REASONING_EFFORT` | 선택한 모델·API에서 허용하는 reasoning effort |
++| `XAI_MODEL_1_MAX_OUTPUT_TOKENS` | 한 번의 모델 응답에 허용할 출력 토큰 수 |
+ 
+-`_VERSION`은 테스트 대상의 릴리스를 기록하는 값입니다. 실제 호출 버전은 `_ID`에 넣는 모델 ID로 선택하므로 `_VERSION`만 바꿔 alias를 특정 버전으로 고정할 수는 없습니다. 공급자가 전체 릴리스 ID로만 버전을 구분한다면, 확인한 그 ID를 `_ID`와 `_VERSION`에 동일하게 적습니다. `/v1`은 API 경로 버전이며 모델 릴리스와 별개입니다.
++모델 식별자는 `_ID` 하나만 입력합니다. 실제 release와 alias의 고정 여부는 검증 단계에서 확인하여 내부 metadata에 기록합니다. `/v1`은 API 경로 버전이며 모델 릴리스와 별개입니다.
+ 
+-두 모델은 각각 `_1_ID`와 `_2_ID`에 넣습니다. 같은 모델의 두 버전은 각 슬롯에 실제로 존재하는 서로 다른 릴리스 ID를 넣습니다. 더 필요하면 `XAI_MODEL_3_ID`, `XAI_MODEL_3_VERSION`처럼 양의 정수 번호를 늘립니다.
++## Reasoning effort 설정
+ 
+-ID가 채워진 슬롯마다 독립 테스트 대상이 됩니다. 사용하지 않는 슬롯은 ID를 비워둡니다. 릴리스를 아직 확인하지 못했다면 준비 중에는 `_VERSION`을 비워두고 실제 테스트 전에 확인하세요. 별도 계정이나 endpoint를 사용할 때는 별도 `.env` 파일로 준비합니다.
++`XAI_MODEL_1_REASONING_EFFORT`는 논리 옵션 `reasoning_effort`입니다. 현재 공식 Responses API 예제에서는 `reasoning.effort`에 대응합니다. 지원 여부와 허용 수준은 모델·API별로 다르므로 선택한 조합의 schema를 확인합니다. 구형 모델의 제한을 모든 Grok 모델에 적용하지 않습니다. [xAI reasoning](https://docs.x.ai/developers/model-capabilities/text/reasoning).
++
++빈 effort는 전송하지 않습니다. 지원하지 않는 값이 공급자에서 무시·대체될 수 있더라도 테스트에서는 명시적으로 거부하며 조용히 낮은 수준으로 바꾸지 않습니다. 논리 옵션을 실제 요청 필드로 변환하는 어댑터의 SDK 연결은 아직 구현 전입니다.
++
++`MAX_OUTPUT_TOKENS=4096`은 응답 한 번의 출력 예산 예시입니다. 모델의 요건과 reasoning·도구 호출에 필요한 토큰에 맞춰 조정합니다. 긴 tool loop 전체에 충분한 예산이라는 뜻은 아닙니다.
++
++두 모델은 각각 `_1_ID`와 `_2_ID`에 넣습니다. 같은 모델에 다른 effort를 비교하려면 두 ID를 동일하게 넣고 각 슬롯의 `REASONING_EFFORT`에 다른 허용값을 입력합니다. 더 필요하면 `XAI_MODEL_3_ID`, `XAI_MODEL_3_REASONING_EFFORT`, `XAI_MODEL_3_MAX_OUTPUT_TOKENS`처럼 양의 정수 번호를 늘립니다.
++
++ID가 채워진 슬롯마다 독립적인 모델·옵션 테스트 대상이 됩니다. 사용하지 않는 슬롯은 ID를 비워둡니다. 별도 계정이나 endpoint를 사용할 때는 별도 `.env` 파일로 준비합니다.
+ 
+ 이 문서는 모델별 실제 연결 테스트용 설정 규약입니다. `.env` 저장만으로 호출이 실행되지 않으며 코어 라이브러리가 파일을 직접 읽지 않습니다. 준비 및 실행 범위는 [공통 설정 안내](README.md)를 따릅니다.
+diff --git a/docs/model-catalog.md b/docs/model-catalog.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..cac9bb5011411d0c310f8d4e83cc35412df93ddf
+--- /dev/null
++++ b/docs/model-catalog.md
+@@ -0,0 +1,88 @@
++# Register versioned models
++
++`wickle` defines model catalog contracts. `wickle-model-router` provides
++`ImmutableModelCatalog`, an in-process implementation that a Host can construct
++from a validated snapshot. The catalog contains metadata and connection
++references. It does not read environment variables, load credentials, discover
++models over the network, or call an LLM.
++
++## Model definitions and bindings
++
++| Value | Meaning |
++| --- | --- |
++| `ModelDefinitionRef` | Exact provider, model key, and model version |
++| `ModelDefinition` | Provider model ID, family, version semantics, lifecycle, and model capabilities |
++| `ModelBinding` | Exact model definition plus adapter, connection, API contract, target, and deployment revision |
++| `ModelCapabilities` | Feature names, option schema, token limits, and metadata revision |
++| `ModelAlias` | Explicit provider alias mapped directly to one model definition |
++| `ModelCatalogSnapshot` | Definitions, bindings, and aliases under one scope and immutable revision |
++
++Version strings are opaque provider identifiers. Two versions of the same model
++ID can coexist, as can bindings for different API operations or deployments.
++Adding a provider or version uses string identifiers and registered metadata;
++there is no provider enum to extend in the core.
++
++Use a new snapshot revision when changing metadata. A catalog lookup requires
++the exact scope and revision. An unknown model version or binding fails; it is
++never replaced with another release. An alias points directly to a registered
++definition, so alias chains and cycles cannot form a lookup path.
++
++`requested_model` preserves the requested name separately from the definition's
++actual model ID and version. Set `version_semantics` from verified metadata.
++The presence of a date or the word `latest` in a name does not determine it.
++Binding semantics cannot upgrade an alias, mutable deployment, or unverified
++definition into a pinned model. A catalog also cannot establish which version a
++provider actually served; that belongs to response metadata and live checks.
++
++## Check a candidate
++
++Reading a binding and accepting it for execution are separate operations. A Host
++can inspect planned or retired entries. Before selecting a candidate, validate
++the returned `ResolvedCatalogBinding` against `CatalogRequirements`.
++
++Validation checks requested features against both the model definition and the
++binding. Options must satisfy both schemas. Input and output token budgets must
++fit both sets of limits. Targets must satisfy the binding's target schema, whose
++provider-specific meaning remains the adapter's responsibility. Unsupported
++options are rejected rather than removed.
++
++The requirements also specify a minimum support status and version policy.
++Require at least `ContractTested` when accepting execution candidates. A
++`Planned` minimum can inspect compatibility while preparing a registration; it
++does not establish that the combination has passed a test. Retired or unavailable
++models fail candidate validation. `RequirePinned` rejects mutable or unverified candidates;
++`AllowMutable` explicitly accepts their weaker version guarantee. Deprecation
++metadata remains available to the Host.
++
++Catalog validation does not send options or perform authorization. Routing,
++current policy checks, request projection, and adapter wire encoding must use the
++same selected combination when making a model call.
++Returned DTOs are editable copies. Their `validate` method checks consistency,
++not provenance; obtain candidates from the trusted catalog under the pinned
++scope and revision instead of accepting a caller-supplied DTO as a catalog result.
++
++## Support evidence and restoration
++
++Support status distinguishes `planned`, `contract_tested`, and `live_verified`.
++Validation evidence identifies a successful contract test or live check and the
++digest of the exact model, API, adapter, target, and capability combination.
++A support declaration without matching successful evidence is rejected. Evidence
++for an older deployment or a different API cannot validate a changed binding.
++
++Evidence references point to records maintained by the Host. The catalog checks
++their declared identity and consistency; it does not independently authenticate
++an external test report or run a live check. Register only evidence produced by
++your trusted verification process.
++
++Serialize the snapshot into Host-controlled storage together with its digest.
++`ImmutableModelCatalog::restore` validates its contents and compares the expected
++digest. Restoring a saved snapshot preserves its alias mapping and versions even
++after a newer catalog is constructed.
++
++The [standalone consumer](../tests/support/catalog_consumer.rs) registers two
++versions, validates their different capabilities, and restores an older snapshot.
++Run all extracted-package consumers with:
++
++```sh
++python3 scripts/check-package.py --allow-dirty
++```
+diff --git a/scripts/check-package.py b/scripts/check-package.py
+index 070990dc5e2c6c2b90b2a99e5203d7491ec9d8d9..2a041fed32ed62f48e579788bbd7a079164c53ee 100644
+--- a/scripts/check-package.py
++++ b/scripts/check-package.py
+@@ -1,5 +1,5 @@
+ #!/usr/bin/env python3
+-"""Verify the core dependency boundary and consume an extracted Cargo package."""
++"""Verify the core dependency boundary and consume extracted Cargo packages."""
+ 
+ import argparse
+ import hashlib
+@@ -36,6 +36,7 @@ def main():
+ 
+     workspace = metadata(ROOT)
+     core = next(p for p in workspace["packages"] if p["name"] == "wickle")
++    catalog = next(p for p in workspace["packages"] if p["name"] == "wickle-model-router")
+     versions = {d["name"]: d["req"] for d in core["dependencies"] if d["kind"] is None}
+     for dep in core["dependencies"]:
+         if dep["kind"] != "dev":
+@@ -57,15 +58,40 @@ def main():
+             raise RuntimeError("The consumer must be outside the source repository")
+         # The archive is produced by cargo package above, not supplied externally.
+         subprocess.run(["tar", "-xzf", str(archive), "-C", str(base)], check=True)
++        # Cargo 1.85 resolves unpublished path dependencies through the registry
++        # when packaging. Stage the sources so the temporary patch and its lock
++        # update cannot alter the checkout. The consumer verifies the archive.
++        staged = base / "staged"
++        staged.mkdir()
++        for filename in ["Cargo.toml", "Cargo.lock"]:
++            shutil.copyfile(ROOT / filename, staged / filename)
++        for package in [core, catalog]:
++            manifest = Path(package["manifest_path"])
++            destination = staged / manifest.parent.relative_to(ROOT)
++            destination.mkdir(parents=True)
++            shutil.copyfile(manifest, destination / "Cargo.toml")
++            shutil.copytree(manifest.parent / "src", destination / "src")
++        patch = f'patch.crates-io.wickle.path="{base / package_name}"'
++        subprocess.run(
++            ["cargo", "package", "-p", "wickle-model-router", "--allow-dirty",
++             "--offline", "--no-verify", "--config", patch],
++            cwd=staged, env={**env, "CARGO_TARGET_DIR": str(staged / "target")}, check=True,
++        )
++        catalog_name = f"wickle-model-router-{catalog['version']}"
++        catalog_archive = staged / "target/package" / f"{catalog_name}.crate"
++        print(f"Catalog package SHA-256: {hashlib.sha256(catalog_archive.read_bytes()).hexdigest()}", flush=True)
++        subprocess.run(["tar", "-xzf", str(catalog_archive), "-C", str(base)], check=True)
+         consumer = base / "consumer"
+         (consumer / "src").mkdir(parents=True)
+         (consumer / "Cargo.toml").write_text(
+             '[package]\nname = "wickle-package-consumer"\nversion = "0.0.0"\n'
+             'edition = "2024"\npublish = false\n\n[workspace]\n\n'
+             f'[dependencies]\nwickle = {{ path = "../{package_name}" }}\n'
++            f'wickle-model-router = {{ path = "../{catalog_name}" }}\n'
+             f'serde_json = "{versions["serde_json"]}"\n'
+             f'futures-util = {{ version = "{versions["futures-util"]}", default-features = false, features = ["std", "async-await"] }}\n'
+-            f'tokio = {{ version = "{versions["tokio"]}", features = ["rt", "macros"] }}\n',
++            f'tokio = {{ version = "{versions["tokio"]}", features = ["rt", "macros"] }}\n'
++            f'\n[patch.crates-io]\nwickle = {{ path = "../{package_name}" }}\n',
+             encoding="utf-8",
+         )
+         shutil.copyfile(ROOT / "tests/support/consumer.rs", consumer / "src/main.rs")
+@@ -79,17 +105,27 @@ def main():
+         subprocess.run(["cargo", "generate-lockfile", "--offline"],
+                        cwd=consumer, env=env, check=True)
+         resolved = metadata(consumer)
++        allowed_registry = {(p["name"], p["version"], p["source"])
++                            for p in workspace["packages"] if p["source"] is not None}
++        package_paths = {core["name"]: base / package_name,
++                         catalog["name"]: base / catalog_name}
+         for package in resolved["packages"]:
++            if package["name"] in package_paths:
++                expected = package_paths[package["name"]] / "Cargo.toml"
++                if Path(package["manifest_path"]).resolve() != expected:
++                    raise RuntimeError(f"Consumer substituted a package: {package['name']}")
+             if package["source"] is None:
+                 manifest = Path(package["manifest_path"]).resolve()
+                 if not manifest.is_relative_to(base):
+                     raise RuntimeError(f"Consumer depends on an external path: {manifest}")
++            elif (package["name"], package["version"], package["source"]) not in allowed_registry:
++                raise RuntimeError(f"Consumer resolved an unpinned dependency: {package['name']} {package['version']}")
+         subprocess.run(["cargo", "run", "--locked", "--offline", "--bin", "wickle-package-consumer"],
+                        cwd=consumer, env=env, check=True)
+         for example in examples:
+             subprocess.run(["cargo", "run", "--locked", "--offline", "--bin", example.stem],
+                            cwd=consumer, env=env, check=True)
+-    print("Independent package consumer: passed (profile validation and restore)", flush=True)
++    print("Independent package consumers: passed (core and model catalog)", flush=True)
+ 
+ 
+ if __name__ == "__main__":
+diff --git a/tests/support/budget_consumer.rs b/tests/support/budget_consumer.rs
+index 584503998804cc34c268555375f2fac956295626..9fcf84ab118432b9c546278d75762e8287398e5c 100644
+--- a/tests/support/budget_consumer.rs
++++ b/tests/support/budget_consumer.rs
+@@ -74,6 +74,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+             text: "Count available records".into(),
+         }],
+         trigger: RunTrigger::User {},
++        model_options: JsonObject::new(),
+         output_contract: None,
+     };
+     let request_record =
+diff --git a/tests/support/catalog_consumer.rs b/tests/support/catalog_consumer.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..c19a5831b822ef22b47612dfcfbd2be108e8666f
+--- /dev/null
++++ b/tests/support/catalog_consumer.rs
+@@ -0,0 +1,179 @@
++use serde_json::json;
++use std::collections::{BTreeMap, BTreeSet};
++use std::sync::Arc;
++use wickle::*;
++use wickle_model_router::ImmutableModelCatalog;
++
++fn id(value: &str) -> Id {
++    Id::new(value).expect("example identifier")
++}
++
++fn reference(value: &str) -> VersionedRef {
++    VersionedRef {
++        id: id(value),
++        version: id("1"),
++    }
++}
++
++fn definition(version: &str, features: &[&str]) -> ModelDefinition {
++    ModelDefinition {
++        model_key: id("example-model"),
++        family: id("example-family"),
++        provider: id("example-provider"),
++        model_id: id("provider-model"),
++        model_version: id(version),
++        version_semantics: VersionSemantics::Pinned,
++        lifecycle: ModelLifecycle::Active,
++        capabilities: ModelCapabilities {
++            revision: id(version),
++            features: features.iter().map(|value| id(value)).collect(),
++            options_schema: json!({
++                "type":"object", "properties":{}, "additionalProperties":false
++            }),
++            context_window: 8192.try_into().unwrap(),
++            max_output_tokens: 2048.try_into().unwrap(),
++        },
++        evidence: vec![ModelEvidence {
++            source_ref: id("example-provider-manifest"),
++            observed_at_ms: 1000,
++        }],
++    }
++}
++
++fn definition_ref(model: &ModelDefinition) -> ModelDefinitionRef {
++    ModelDefinitionRef {
++        provider: model.provider.clone(),
++        model_key: model.model_key.clone(),
++        model_version: model.model_version.clone(),
++    }
++}
++
++fn binding(model: &ModelDefinition, name: &str) -> Result<ModelBinding, ContractError> {
++    let mut binding = ModelBinding {
++        binding: reference(name),
++        model: definition_ref(model),
++        requested_model: model.model_id.clone(),
++        adapter: reference("example-adapter"),
++        connection_ref: reference("example-connection"),
++        target: BTreeMap::from([("region".into(), json!("example-region"))]),
++        target_schema: json!({
++            "type":"object", "properties":{"region":{"const":"example-region"}},
++            "required":["region"], "additionalProperties":false
++        }),
++        api_contract: ApiContract {
++            operation: id("messages"),
++            version: id("api-contract-1"),
++        },
++        deployment_revision: Some(id(name)),
++        version_semantics: VersionSemantics::Pinned,
++        capabilities: model.capabilities.clone(),
++        support: ModelSupportStatus::ContractTested,
++        evidence: vec![],
++    };
++    binding.evidence.push(ModelValidationEvidence {
++        kind: ModelValidationKind::ContractTest,
++        binding_digest: binding.contract_digest(model)?,
++        checked_at_ms: 1001,
++        evidence_ref: id("example-contract-fixture-result"),
++        passed: true,
++    });
++    Ok(binding)
++}
++
++#[tokio::main(flavor = "current_thread")]
++async fn main() -> Result<(), Box<dyn std::error::Error>> {
++    let scope = Scope {
++        tenant_id: id("tenant"),
++        workspace_id: id("workspace"),
++        user_id: None,
++    };
++    let first = definition("release-a", &["text"]);
++    let second = definition("release-b", &["text", "tool_calling"]);
++    let snapshot = ModelCatalogSnapshot {
++        revision: id("catalog-1"),
++        scope: scope.clone(),
++        bindings: vec![
++            binding(&first, "deployment-a")?,
++            binding(&second, "deployment-b")?,
++        ],
++        aliases: vec![ModelAlias {
++            provider: first.provider.clone(),
++            alias: id("preferred-model"),
++            target: definition_ref(&first),
++        }],
++        models: vec![first, second],
++    };
++    let original = ImmutableModelCatalog::new(snapshot.clone())?;
++    let saved = serde_json::to_string(original.snapshot())?;
++    let digest = original.digest().clone();
++    let catalog: Arc<dyn ModelCatalog> = Arc::new(original);
++    let first_binding = catalog
++        .get_binding(&scope, &id("catalog-1"), &reference("deployment-a"))
++        .await?;
++    let second_binding = catalog
++        .get_binding(&scope, &id("catalog-1"), &reference("deployment-b"))
++        .await?;
++    assert_eq!(first_binding.model.model_id, second_binding.model.model_id);
++    assert_ne!(
++        first_binding.model.model_version,
++        second_binding.model.model_version
++    );
++    let requirements = CatalogRequirements {
++        features: BTreeSet::from([id("tool_calling")]),
++        options: JsonObject::new(),
++        input_tokens: 1024,
++        max_output_tokens: 256.try_into().unwrap(),
++        version_policy: VersionPolicy::RequirePinned,
++        min_support: ModelSupportStatus::ContractTested,
++    };
++    assert!(first_binding.validate(&requirements).is_err());
++    second_binding.validate(&requirements)?;
++
++    let mut next = snapshot;
++    next.revision = id("catalog-2");
++    next.aliases[0].target = definition_ref(&second_binding.model);
++    let newer = ImmutableModelCatalog::new(next)?;
++    assert_eq!(
++        newer
++            .resolve_alias(
++                &scope,
++                &id("catalog-2"),
++                &id("example-provider"),
++                &id("preferred-model")
++            )
++            .await?
++            .model_version,
++        id("release-b")
++    );
++    let restored = ImmutableModelCatalog::restore(&saved, &digest)?;
++    assert_eq!(
++        restored
++            .resolve_alias(
++                &scope,
++                &id("catalog-1"),
++                &id("example-provider"),
++                &id("preferred-model")
++            )
++            .await?
++            .model_version,
++        id("release-a")
++    );
++    assert!(
++        restored
++            .get_binding(&scope, &id("catalog-2"), &reference("deployment-a"))
++            .await
++            .is_err()
++    );
++    let mut another_scope = scope.clone();
++    another_scope.workspace_id = id("another-workspace");
++    assert!(
++        catalog
++            .get_binding(&another_scope, &id("catalog-1"), &reference("deployment-b"))
++            .await
++            .is_err()
++    );
++    println!(
++        "catalog consumer: two versions coexist; capabilities differ; saved alias survives a newer snapshot; wrong scope and revision rejected; no model calls made"
++    );
++    Ok(())
++}
+diff --git a/tests/support/context_consumer.rs b/tests/support/context_consumer.rs
+index 204780b4a21c29b132ad54a570f1be8f7e825653..0d6a3bad3ce70e1c97cbd83e65d3195294b91f24 100644
+--- a/tests/support/context_consumer.rs
++++ b/tests/support/context_consumer.rs
+@@ -78,6 +78,7 @@ fn request(run: &str, text: &str) -> RunRequest {
+         session_id: id("session"),
+         input: vec![InputContent::Text { text: text.into() }],
+         trigger: RunTrigger::User {},
++        model_options: JsonObject::from([("reasoning_effort".into(), json!("high"))]),
+         output_contract: None,
+     }
+ }
+@@ -177,6 +178,7 @@ fn project(
+             route: route(),
+             output: ModelOutput::Text {},
+             max_output_tokens: 128.try_into().unwrap(),
++            options: stored.snapshot.request.model_options.clone(),
+             response_limits: ModelResponseLimits {
+                 max_input_bytes: 32_768,
+                 max_response_bytes: 4096,
+@@ -258,6 +260,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+     });
+     let first = store.admit(&scope, first_input).await?.state;
+     let first_projection = project(&prompt, &first)?;
++    assert_eq!(first_projection.request.options, first.snapshot.request.model_options);
+     assert_eq!(first_projection.request.messages[0].role, ModelRole::System);
+     assert_eq!(
+         projected_user_occurrences(&first_projection, "Review the available evidence"),
+diff --git a/tests/support/input_binding_consumer.rs b/tests/support/input_binding_consumer.rs
+index 08f8f579cb80b3399634cfc3cf911cb3ee2c061a..49a960f882ae63af0a973bfff40b50f5f8f76b54 100644
+--- a/tests/support/input_binding_consumer.rs
++++ b/tests/support/input_binding_consumer.rs
+@@ -226,6 +226,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+             text: "Read recent results".into(),
+         }],
+         trigger: RunTrigger::User {},
++        model_options: JsonObject::new(),
+         output_contract: None,
+     };
+     let request_record =
+diff --git a/tests/support/model_consumer.rs b/tests/support/model_consumer.rs
+index a2d08f7121ad5f05c1ae1659be6457624b1f7e9b..64bf9bcf0e8d790c6534647203fd726f39558401 100644
+--- a/tests/support/model_consumer.rs
++++ b/tests/support/model_consumer.rs
+@@ -54,6 +54,7 @@ fn request(provider: &str) -> ModelRequest {
+         tools: vec![],
+         output: ModelOutput::Text {},
+         max_output_tokens: 32.try_into().unwrap(),
++        options: JsonObject::from([("reasoning_effort".into(), json!("high"))]),
+         limits: ModelResponseLimits {
+             max_input_bytes: 4096,
+             max_response_bytes: 1024,
+@@ -69,6 +70,7 @@ struct ObservedCall {
+     connection: VersionedRef,
+     credential: &'static str,
+     opaque_blocks: usize,
++    options: JsonObject,
+ }
+ 
+ // These are synthetic Host-owned credentials. No real accounts or keys are used.
+@@ -92,6 +94,7 @@ fn observe(observed: &Mutex<Vec<ObservedCall>>, request: &ModelRequest, credenti
+     observed.lock().unwrap().push(ObservedCall {
+         connection: request.route.connection_ref.clone(),
+         credential,
++        options: request.options.clone(),
+         opaque_blocks: request
+             .messages
+             .iter()
+@@ -228,6 +231,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+             connection: route("first").connection_ref,
+             credential: "synthetic-first-credential",
+             opaque_blocks: 0,
++            options: JsonObject::from([("reasoning_effort".into(), json!("high"))]),
+         }]
+     );
+     assert_eq!(
+@@ -236,6 +240,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+             connection: route("second").connection_ref,
+             credential: "synthetic-second-credential",
+             opaque_blocks: 0,
++            options: JsonObject::from([("reasoning_effort".into(), json!("high"))]),
+         }]
+     );
+     println!(
+diff --git a/tests/support/state_consumer.rs b/tests/support/state_consumer.rs
+index 3143281f2beef0fd5ef1b0d5cdcc1dfaabd268c4..a795b3fd5c8f298ea527c1342b727a0172086ac9 100644
+--- a/tests/support/state_consumer.rs
++++ b/tests/support/state_consumer.rs
+@@ -58,6 +58,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+             text: "Inspect stored state".into(),
+         }],
+         trigger: RunTrigger::User {},
++        model_options: JsonObject::new(),
+         output_contract: None,
+     };
+     let request_record =
+diff --git a/tests/support/tool_schema_consumer.rs b/tests/support/tool_schema_consumer.rs
+index 7fa36093bf11e304275cf70eb47cea8d4bd01449..e0161d4ff418ee4aebf111d9dc0ad00494f2cfc0 100644
+--- a/tests/support/tool_schema_consumer.rs
++++ b/tests/support/tool_schema_consumer.rs
+@@ -54,6 +54,7 @@ fn model_request(tool: ModelTool) -> ModelRequest {
+         tools: vec![tool],
+         output: ModelOutput::Text {},
+         max_output_tokens: 256.try_into().unwrap(),
++        options: JsonObject::new(),
+         limits: ModelResponseLimits {
+             max_input_bytes: 16_384,
+             max_response_bytes: 4096,

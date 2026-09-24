@@ -1,0 +1,869 @@
+diff --git a/crates/wickle/src/agent.rs b/crates/wickle/src/agent.rs
+index 3c80939565edcbe76f45debb600cf9ebc372b0c8..5b423ca40a5e4963db89973d61f531555fa63e12 100644
+--- a/crates/wickle/src/agent.rs
++++ b/crates/wickle/src/agent.rs
+@@ -217,7 +217,8 @@ impl fmt::Debug for Agent {
+     }
+ }
+ 
+-/// Validate the configured runtime without invoking any Host callback.
++/// Validate structural settings and binding scopes without invoking Host callbacks.
++/// Profile requirements are resolved only when admitting a new request.
+ /// Tools, adapters, skills, context strategies, and verifiers use existing Host bindings.
+ /// Instruction asset loading and generic extension execution remain unsupported.
+ pub fn create_agent(
+@@ -226,20 +227,13 @@ pub fn create_agent(
+ ) -> Result<Agent, ContractError> {
+     profile.validate_structure()?;
+     bindings.settings.validate()?;
+-    if !matches!(profile.instructions, Instructions::Text(_))
+-        || (!profile.skills.is_empty() && bindings.skills.is_none())
+-        || (bindings.components.is_none()
+-            && (!profile.connectors.is_empty()
+-                || profile.adapters.as_ref().is_some_and(|v| !v.is_empty())))
+-        || profile.extensions.as_ref().is_some_and(|v| !v.is_empty())
+-    {
+-        return Err(fail(ErrorCode::CapabilityUnsupported, "agent.profile"));
+-    }
+     let context = match &bindings.context_runtime {
+         Some(context) => context.clone(),
+         None => Arc::new(ContextRuntime::bounded(bindings.scope.clone())?),
+     };
+-    context.plan(&profile, &bindings.scope)?;
++    if context.scope() != &bindings.scope {
++        return Err(fail(ErrorCode::AccessDenied, "agent.context_scope"));
++    }
+     let verification = match &bindings.verification {
+         Some(runtime) => runtime.clone(),
+         None => Arc::new(VerificationRuntime::text(bindings.scope.clone())?),
+@@ -247,14 +241,24 @@ pub fn create_agent(
+     if verification.scope != bindings.scope {
+         return Err(fail(ErrorCode::AccessDenied, "agent.verification_scope"));
+     }
+-    verification.plan(&profile, None)?;
+-
+     if bindings
+         .skills
+         .as_ref()
+-        .is_some_and(|skills| skills.scope() != &bindings.scope)
++        .is_some_and(|value| value.scope() != &bindings.scope)
++        || bindings
++            .tools
++            .as_ref()
++            .is_some_and(|value| value.scope() != &bindings.scope)
++        || bindings
++            .hooks
++            .as_ref()
++            .is_some_and(|value| value.scope() != &bindings.scope)
++        || bindings
++            .context_sources
++            .as_ref()
++            .is_some_and(|value| value.scope() != &bindings.scope)
+     {
+-        return Err(fail(ErrorCode::AccessDenied, "agent.skills_scope"));
++        return Err(fail(ErrorCode::AccessDenied, "agent.binding_scope"));
+     }
+     if bindings.components.is_some()
+         && (bindings.tools.is_some()
+@@ -266,64 +270,6 @@ pub fn create_agent(
+             "agent.component_authority",
+         ));
+     }
+-    if bindings.components.is_none() {
+-        match &bindings.context_sources {
+-            Some(sources) => {
+-                if sources.scope() != &bindings.scope {
+-                    return Err(fail(ErrorCode::AccessDenied, "agent.sources_scope"));
+-                }
+-                sources.plan(&profile)?;
+-            }
+-            None if profile
+-                .context_sources
+-                .as_ref()
+-                .is_some_and(|sources| !sources.is_empty()) =>
+-            {
+-                return Err(fail(ErrorCode::CapabilityUnsupported, "agent.sources"));
+-            }
+-            None => {}
+-        }
+-        match &bindings.hooks {
+-            Some(hooks) => {
+-                if hooks.scope() != &bindings.scope {
+-                    return Err(fail(ErrorCode::AccessDenied, "agent.hooks_scope"));
+-                }
+-                hooks.plan(&profile)?;
+-            }
+-            None if profile
+-                .hooks
+-                .as_ref()
+-                .is_some_and(|hooks| !hooks.is_empty()) =>
+-            {
+-                return Err(fail(ErrorCode::CapabilityUnsupported, "agent.hooks"));
+-            }
+-            None => {}
+-        }
+-        match &bindings.tools {
+-            Some(registry) => {
+-                if registry.scope() != &bindings.scope {
+-                    return Err(fail(ErrorCode::AccessDenied, "agent.tools_scope"));
+-                }
+-                registry.prompt_bindings(&profile)?;
+-            }
+-            None if !profile.tools.is_empty() => {
+-                return Err(fail(ErrorCode::CapabilityUnsupported, "agent.tools"));
+-            }
+-            None => {}
+-        }
+-    }
+-    if bindings.components.is_some()
+-        && profile
+-            .context_sources
+-            .as_ref()
+-            .is_some_and(|sources| !sources.is_empty())
+-        && bindings.context_token_estimator.is_none()
+-    {
+-        return Err(fail(
+-            ErrorCode::InvalidConfiguration,
+-            "agent.source_estimator",
+-        ));
+-    }
+     let observed = Arc::new(persistence::ObservedState::default());
+     bindings.state = Arc::new(persistence::ObservedStore {
+         inner: bindings.state.clone(),
+@@ -935,3 +881,104 @@ async fn caller_read<T>(
+         result = future => result,
+     }
+ }
++
++impl Agent {
++    pub(super) fn validate_new_configuration(&self) -> Result<(), ContractError> {
++        let profile = &self.inner.profile;
++        let bindings = &self.inner.bindings;
++        let context = &self.inner.context;
++        let verification = &self.inner.verification;
++        if !matches!(profile.instructions, Instructions::Text(_))
++            || (!profile.skills.is_empty() && bindings.skills.is_none())
++            || (bindings.components.is_none()
++                && (!profile.connectors.is_empty()
++                    || profile.adapters.as_ref().is_some_and(|v| !v.is_empty())))
++            || profile.extensions.as_ref().is_some_and(|v| !v.is_empty())
++        {
++            return Err(fail(ErrorCode::CapabilityUnsupported, "agent.profile"));
++        }
++        context.plan(profile, &bindings.scope)?;
++        if verification.scope != bindings.scope {
++            return Err(fail(ErrorCode::AccessDenied, "agent.verification_scope"));
++        }
++        verification.plan(profile, None)?;
++
++        if bindings
++            .skills
++            .as_ref()
++            .is_some_and(|skills| skills.scope() != &bindings.scope)
++        {
++            return Err(fail(ErrorCode::AccessDenied, "agent.skills_scope"));
++        }
++        if bindings.components.is_some()
++            && (bindings.tools.is_some()
++                || bindings.hooks.is_some()
++                || bindings.context_sources.is_some())
++        {
++            return Err(fail(
++                ErrorCode::InvalidConfiguration,
++                "agent.component_authority",
++            ));
++        }
++        if bindings.components.is_none() {
++            match &bindings.context_sources {
++                Some(sources) => {
++                    if sources.scope() != &bindings.scope {
++                        return Err(fail(ErrorCode::AccessDenied, "agent.sources_scope"));
++                    }
++                    sources.plan(profile)?;
++                }
++                None if profile
++                    .context_sources
++                    .as_ref()
++                    .is_some_and(|sources| !sources.is_empty()) =>
++                {
++                    return Err(fail(ErrorCode::CapabilityUnsupported, "agent.sources"));
++                }
++                None => {}
++            }
++            match &bindings.hooks {
++                Some(hooks) => {
++                    if hooks.scope() != &bindings.scope {
++                        return Err(fail(ErrorCode::AccessDenied, "agent.hooks_scope"));
++                    }
++                    hooks.plan(profile)?;
++                }
++                None if profile
++                    .hooks
++                    .as_ref()
++                    .is_some_and(|hooks| !hooks.is_empty()) =>
++                {
++                    return Err(fail(ErrorCode::CapabilityUnsupported, "agent.hooks"));
++                }
++                None => {}
++            }
++            match &bindings.tools {
++                Some(registry) => {
++                    if registry.scope() != &bindings.scope {
++                        return Err(fail(ErrorCode::AccessDenied, "agent.tools_scope"));
++                    }
++                    registry.prompt_bindings(profile)?;
++                }
++                None if !profile.tools.is_empty() => {
++                    return Err(fail(ErrorCode::CapabilityUnsupported, "agent.tools"));
++                }
++                None => {}
++            }
++        }
++        if bindings.components.is_some()
++            && profile
++                .context_sources
++                .as_ref()
++                .is_some_and(|sources| !sources.is_empty())
++            && bindings.context_token_estimator.is_none()
++        {
++            return Err(fail(
++                ErrorCode::InvalidConfiguration,
++                "agent.source_estimator",
++            ));
++        }
++
++        Ok(())
++    }
++}
+diff --git a/crates/wickle/src/agent/admission.rs b/crates/wickle/src/agent/admission.rs
+index a7f782e54549519e474a71b4d1d237eff8308bd9..2cf6a461f9dfa1c8c4003fe27c9e98995558bc3e 100644
+--- a/crates/wickle/src/agent/admission.rs
++++ b/crates/wickle/src/agent/admission.rs
+@@ -8,32 +8,7 @@ impl Agent {
+         context: ExecutionContext,
+     ) -> Result<Guarded<RunHandle>, ContractError> {
+         self.check_scope(&context)?;
+-        // The request contract exists before its purpose-specific routing integration.
+-        // Never silently accept an output cap that this driver cannot yet enforce.
+-        if request.max_output_tokens.is_some() {
+-            return Err(fail(
+-                ErrorCode::CapabilityUnsupported,
+-                "agent.request_output_cap",
+-            ));
+-        }
+         let bindings = &self.inner.bindings;
+-        if serde_json::to_vec(&request)
+-            .map_err(|_| fail(ErrorCode::InvalidJson, "agent.request"))?
+-            .len()
+-            > bindings.settings.max_request_bytes
+-        {
+-            return Err(fail(ErrorCode::InvalidContract, "agent.request_size"));
+-        }
+-        if request
+-            .input
+-            .iter()
+-            .any(|content| !matches!(content, InputContent::Text { .. }))
+-        {
+-            return Err(fail(ErrorCode::CapabilityUnsupported, "agent.request"));
+-        }
+-        self.inner
+-            .verification
+-            .plan(&self.inner.profile, request.output_contract.as_ref())?;
+         let policy = PolicyRequest {
+             owner_scope: bindings.scope.clone(),
+             resource_id: request.request_id.clone(),
+@@ -67,6 +42,32 @@ impl Agent {
+                 self.handle(saved.snapshot.run_id, segment)?,
+             ));
+         }
++        if serde_json::to_vec(&request)
++            .map_err(|_| fail(ErrorCode::InvalidJson, "agent.request"))?
++            .len()
++            > bindings.settings.max_request_bytes
++        {
++            return Err(fail(ErrorCode::InvalidContract, "agent.request_size"));
++        }
++        // The request contract exists before its purpose-specific routing integration.
++        // Never silently accept an output cap that this driver cannot yet enforce.
++        if request.max_output_tokens.is_some() {
++            return Err(fail(
++                ErrorCode::CapabilityUnsupported,
++                "agent.request_output_cap",
++            ));
++        }
++        if request
++            .input
++            .iter()
++            .any(|content| !matches!(content, InputContent::Text { .. }))
++        {
++            return Err(fail(ErrorCode::CapabilityUnsupported, "agent.request"));
++        }
++        self.validate_new_configuration()?;
++        self.inner
++            .verification
++            .plan(&self.inner.profile, request.output_contract.as_ref())?;
+         // Preparation may be cancelled or time out. Once durable admission begins,
+         // this owned coordinator waits for its result even if the caller disconnects.
+         let prepared = AssertUnwindSafe(self.prepare(request.clone(), &context)).catch_unwind();
+@@ -176,6 +177,27 @@ impl Agent {
+         context: &ExecutionContext,
+         saved: &StoredRun,
+     ) -> Result<(), ContractError> {
++        match self
++            .inner
++            .bindings
++            .state
++            .read_execution(&self.inner.bindings.scope, &saved.snapshot.run_id)
++            .await
++        {
++            Ok(history) => {
++                if let Some(submitted) = history.submitted {
++                    let candidate = self.capture_submission(request, context)?;
++                    if !submitted
++                        .matches_submission(&candidate, crate::JsonTextLimits::default())?
++                    {
++                        return Err(fail(ErrorCode::RequestConflict, "agent.submitted_request"));
++                    }
++                    return Ok(());
++                }
++            }
++            Err(error) if error.code == ErrorCode::CapabilityUnsupported => {}
++            Err(error) => return Err(error),
++        }
+         if self.inner.profile.digest() != *saved.snapshot.profile.profile_digest()
+             || admission_digest(
+                 request,
+@@ -209,12 +231,38 @@ impl Agent {
+         Ok(())
+     }
+ 
++    fn capture_submission(
++        &self,
++        request: &RunRequest,
++        context: &ExecutionContext,
++    ) -> Result<crate::RequestSnapshot, ContractError> {
++        let request = serde_json::to_string(request)
++            .map_err(|_| fail(ErrorCode::InvalidJson, "agent.request"))?;
++        let system = context
++            .data
++            .system_inputs
++            .as_ref()
++            .map(serde_json::to_string)
++            .transpose()
++            .map_err(|_| fail(ErrorCode::InvalidJson, "agent.system_inputs"))?;
++        crate::RequestSnapshot::capture(
++            VersionedRef {
++                id: self.inner.profile.agent_id.clone(),
++                version: self.inner.profile.version.clone(),
++            },
++            &request,
++            system.as_deref(),
++            crate::JsonTextLimits::default(),
++        )
++    }
++
+     async fn prepare(
+         &self,
+         request: RunRequest,
+         context: &ExecutionContext,
+     ) -> Result<(AdmissionInput, PromptSnapshot), ContractError> {
+         let bindings = &self.inner.bindings;
++        let submitted = self.capture_submission(&request, context)?;
+         let routing = bindings.router.snapshot().clone();
+         if routing.scope() != &bindings.scope {
+             return Err(fail(ErrorCode::AccessDenied, "agent.router_scope"));
+@@ -543,7 +591,7 @@ impl Agent {
+         Ok((
+             AdmissionInput {
+                 execution_principal_ref: context.data.principal_ref.clone(),
+-                submitted: None,
++                submitted: Some(submitted),
+                 snapshot,
+                 prompt_snapshot: prompt_record.reference().clone(),
+                 require_durable: bindings.settings.require_durable,
+diff --git a/crates/wickle/src/context_strategy/runtime.rs b/crates/wickle/src/context_strategy/runtime.rs
+index 69549cd8b2dc6fda6479033bc99ed9d7a44910d7..c5f54c17dc1cf227cf34d68d1cf5d11f9ce12026 100644
+--- a/crates/wickle/src/context_strategy/runtime.rs
++++ b/crates/wickle/src/context_strategy/runtime.rs
+@@ -26,6 +26,10 @@ impl ContextRewriteLimits {
+     }
+ }
+ impl ContextRuntime {
++    pub(crate) fn scope(&self) -> &Scope {
++        &self.scope
++    }
++
+     pub(crate) fn validate_router(&self, routing: &RoutingSnapshot) -> Result<(), ContractError> {
+         if routing.scope() != &self.scope {
+             return Err(context_error(
+diff --git a/crates/wickle/src/execution_contracts.rs b/crates/wickle/src/execution_contracts.rs
+index 2d6bd9ad2d557557141cd5f7d6ea8f7c9c294c32..128c046a08c0d057150f6e7796ebe03bad61cd4b 100644
+--- a/crates/wickle/src/execution_contracts.rs
++++ b/crates/wickle/src/execution_contracts.rs
+@@ -139,6 +139,23 @@ impl RequestSnapshot {
+         }
+         Ok(())
+     }
++    /// Compare another submission using this stored record's normalization and
++    /// canonicalization rules, not the newer candidate's computed digest.
++    pub fn matches_submission(
++        &self,
++        candidate: &Self,
++        limits: JsonTextLimits,
++    ) -> Result<bool, ContractError> {
++        self.validate(limits)?;
++        candidate.validate(limits)?;
++        Ok(Self::compute(
++            &candidate.profile_ref,
++            &candidate.request_json,
++            &candidate.system_inputs_json,
++            self.canonicalization,
++            limits,
++        )? == self.digest)
++    }
+     /// Version that must be used when comparing a resubmission.
+     pub fn canonicalization(&self) -> CanonicalizationVersion {
+         self.canonicalization
+diff --git a/crates/wickle/src/state.rs b/crates/wickle/src/state.rs
+index fcd4e701dead117da52db9475ff540d1f81bc6d3..557b21fe3228b142c66eae185655fa18dba1bb6b 100644
+--- a/crates/wickle/src/state.rs
++++ b/crates/wickle/src/state.rs
+@@ -387,19 +387,9 @@ impl StateStore for MemoryStateStore {
+         input: AdmissionInput,
+     ) -> PortFuture<'a, AdmissionResult> {
+         Box::pin(async move {
+-            if input.require_durable {
+-                return Err(error(ErrorCode::CapabilityUnsupported, "store.durable"));
+-            }
+             check_scope(scope, &input.snapshot.scope)?;
+-            if scope != input.snapshot.profile.scope()
+-                || input.snapshot.request_digest
+-                    != admission_digest(
+-                        &input.snapshot.request,
+-                        &input.snapshot.profile,
+-                        input.snapshot.system_inputs.as_ref(),
+-                    )
+-            {
+-                return Err(error(ErrorCode::InvalidSnapshot, "request_digest"));
++            if scope != input.snapshot.profile.scope() {
++                return Err(error(ErrorCode::InvalidSnapshot, "request_scope"));
+             }
+             let mut scopes = self.lock()?;
+             let empty = ScopeState::default();
+@@ -410,7 +400,26 @@ impl StateStore for MemoryStateStore {
+             );
+             if let Some(run_id) = state.requests.get(&request_key) {
+                 let previous = stored_run(state, run_id)?;
+-                if previous.snapshot.request_digest != input.snapshot.request_digest {
++                let same = match state
++                    .executions
++                    .get(run_id)
++                    .and_then(|h| h.submitted.as_ref())
++                {
++                    Some(stored) => match &input.submitted {
++                        Some(candidate) => stored
++                            .matches_submission(candidate, crate::JsonTextLimits::default())?,
++                        None => false,
++                    },
++                    None => {
++                        previous.snapshot.request_digest
++                            == admission_digest(
++                                &input.snapshot.request,
++                                &input.snapshot.profile,
++                                input.snapshot.system_inputs.as_ref(),
++                            )
++                    }
++                };
++                if !same {
+                     return Err(error(ErrorCode::RequestConflict, "request"));
+                 }
+                 return Ok(AdmissionResult {
+@@ -418,6 +427,18 @@ impl StateStore for MemoryStateStore {
+                     state: previous,
+                 });
+             }
++            if input.require_durable {
++                return Err(error(ErrorCode::CapabilityUnsupported, "store.durable"));
++            }
++            if input.snapshot.request_digest
++                != admission_digest(
++                    &input.snapshot.request,
++                    &input.snapshot.profile,
++                    input.snapshot.system_inputs.as_ref(),
++                )
++            {
++                return Err(error(ErrorCode::InvalidSnapshot, "request_digest"));
++            }
+             if state.runs.iter().any(|(id, run)| {
+                 !run.snapshot.status.is_terminal() && !state.executions.contains_key(id)
+             }) {
+diff --git a/crates/wickle/tests/agent_runtime.rs b/crates/wickle/tests/agent_runtime.rs
+index bdd3d39ca4ee8276d685564fd26774ca559e0f58..95488a6082ae6292501ee009630626d0a546e60a 100644
+--- a/crates/wickle/tests/agent_runtime.rs
++++ b/crates/wickle/tests/agent_runtime.rs
+@@ -288,13 +288,19 @@ async fn classified_model_failure_is_saved_with_its_partial_output_instead_of_su
+ }
+ 
+ #[tokio::test]
+-async fn unsupported_profile_modes_are_rejected_before_any_callbacks_or_model_calls() {
++async fn unsupported_profile_modes_are_rejected_before_resolution_or_model_calls() {
+     let fixture = Fixture::new(Response::Text, false);
+     let mut verified = profile();
+     verified.completion_policy = CompletionPolicy::Verified {
+         verifier_ref: reference("verifier"),
+     };
+-    assert!(create_agent(verified, fixture.bindings()).is_err());
++    assert!(
++        create_agent(verified, fixture.bindings())
++            .unwrap()
++            .start(request("request"), context())
++            .await
++            .is_err()
++    );
+     let mut tools = profile();
+     tools.tools = vec![ToolBindingRef::Catalog(CatalogToolRef {
+         tool_id: id("search"),
+@@ -302,7 +308,13 @@ async fn unsupported_profile_modes_are_rejected_before_any_callbacks_or_model_ca
+         bindings: None,
+         config: None,
+     })];
+-    assert!(create_agent(tools, fixture.bindings()).is_err());
++    assert!(
++        create_agent(tools, fixture.bindings())
++            .unwrap()
++            .start(request("request"), context())
++            .await
++            .is_err()
++    );
+     let mut hooks = profile();
+     hooks.hooks = Some(vec![HookRef::Catalog(CatalogHookRef {
+         hook_id: id("hook"),
+@@ -310,7 +322,12 @@ async fn unsupported_profile_modes_are_rejected_before_any_callbacks_or_model_ca
+         position: HookPosition::BeforeModel,
+     })]);
+     assert_eq!(
+-        create_agent(hooks, fixture.bindings()).unwrap_err().code,
++        create_agent(hooks, fixture.bindings())
++            .unwrap()
++            .start(request("request"), context())
++            .await
++            .unwrap_err()
++            .code,
+         ErrorCode::CapabilityUnsupported
+     );
+     let mut sources = profile();
+@@ -327,7 +344,12 @@ async fn unsupported_profile_modes_are_rejected_before_any_callbacks_or_model_ca
+         max_tokens: 128.try_into().unwrap(),
+     }]);
+     assert_eq!(
+-        create_agent(sources, fixture.bindings()).unwrap_err().code,
++        create_agent(sources, fixture.bindings())
++            .unwrap()
++            .start(request("request"), context())
++            .await
++            .unwrap_err()
++            .code,
+         ErrorCode::CapabilityUnsupported
+     );
+     assert_eq!(fixture.catalog.calls.load(Ordering::SeqCst), 0);
+@@ -1085,3 +1107,60 @@ async fn another_session_finishes_while_the_first_run_waits_on_model_io() {
+     .await
+     .unwrap();
+ }
++
++#[tokio::test]
++async fn saved_submission_survives_catalog_outage_but_not_revoked_authorization() {
++    struct Offline(std::sync::atomic::AtomicUsize);
++    impl ProfileResolver for Offline {
++        fn resolve<'a>(
++            &'a self,
++            _: &'a ComponentRef,
++            _: &'a Scope,
++        ) -> PortFuture<'a, ComponentMetadata> {
++            Box::pin(async move {
++                self.0.fetch_add(1, Ordering::SeqCst);
++                Err(ContractError::new(
++                    ErrorCode::ComponentUnavailable,
++                    "offline.catalog",
++                ))
++            })
++        }
++    }
++    let fixture = Fixture::new(Response::Text, false);
++    let first_agent = fixture.agent();
++    let first = fixture.started(&first_agent, "original").await;
++    completed(first.outcome(&context()).await.unwrap());
++    let offline = std::sync::Arc::new(Offline(std::sync::atomic::AtomicUsize::new(0)));
++    let mut bindings = fixture.bindings();
++    bindings.profile_resolver = offline.clone();
++    let restarted = create_agent(profile(), bindings).unwrap();
++    let replay = completed(
++        restarted
++            .start(request("original"), context())
++            .await
++            .unwrap(),
++    );
++    assert_eq!(replay.run_id(), first.run_id());
++    assert_eq!(offline.0.load(Ordering::SeqCst), 0);
++    fixture.policy.deny.store(3, Ordering::SeqCst);
++    assert_eq!(
++        restarted
++            .start(request("original"), context())
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::AccessDenied
++    );
++    assert_eq!(offline.0.load(Ordering::SeqCst), 0);
++    fixture.policy.deny.store(0, Ordering::SeqCst);
++    assert_eq!(
++        restarted
++            .start(request("new-offline"), context())
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::ComponentUnavailable
++    );
++    assert!(offline.0.load(Ordering::SeqCst) > 0);
++    assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 1);
++}
+diff --git a/crates/wickle/tests/execution_contracts.rs b/crates/wickle/tests/execution_contracts.rs
+index 7e8dc1a60d2f1d334d1fc21ddc93623a44419130..f276a864efb9b6d39eae010367b183c59b054af2 100644
+--- a/crates/wickle/tests/execution_contracts.rs
++++ b/crates/wickle/tests/execution_contracts.rs
+@@ -136,3 +136,48 @@ fn output_cap_preserves_omission_and_rejects_null_zero_or_fraction() {
+         42
+     );
+ }
++
++#[test]
++fn replay_uses_stored_canonicalization_instead_of_candidate_digest() {
++    let original = RequestSnapshot::capture(
++        profile(),
++        r#"{"model_options":{"temperature":1e3}}"#,
++        None,
++        JsonTextLimits::default(),
++    )
++    .unwrap();
++    let envelope = format!(
++        "{{\"profile_ref\":{},\"request\":{},\"system_inputs\":{{}}}}",
++        serde_json::to_string(&profile()).unwrap(),
++        original.request_json()
++    );
++    let mut stored = serde_json::to_value(&original).unwrap();
++    stored["canonicalization"] = json!("sorted-json-v1");
++    stored["digest"] = json!(
++        versioned_digest_json(
++            &envelope,
++            CanonicalizationVersion::SortedJsonV1,
++            JsonTextLimits::default()
++        )
++        .unwrap()
++    );
++    let stored: RequestSnapshot = serde_json::from_value(stored).unwrap();
++    let candidate = RequestSnapshot::capture(
++        profile(),
++        r#"{"model_options":{"temperature":1000.0}}"#,
++        Some("{}"),
++        JsonTextLimits::default(),
++    )
++    .unwrap();
++    assert_ne!(stored.digest(), candidate.digest());
++    assert!(
++        stored
++            .matches_submission(&candidate, JsonTextLimits::default())
++            .unwrap()
++    );
++    assert!(
++        !original
++            .matches_submission(&candidate, JsonTextLimits::default())
++            .unwrap()
++    );
++}
+diff --git a/crates/wickle/tests/state.rs b/crates/wickle/tests/state.rs
+index 7c61a81123fa6c26040fcfb9e11527349b767ed1..1e585b8a47454b5b00156a320137c0acefafee76 100644
+--- a/crates/wickle/tests/state.rs
++++ b/crates/wickle/tests/state.rs
+@@ -1002,3 +1002,58 @@ async fn recovery_acceptance_requires_the_exact_running_checkpoint_and_its_event
+         }
+     }
+ }
++
++#[tokio::test]
++async fn admission_race_compares_stored_submission_before_candidate_configuration() {
++    let store = MemoryStateStore::new();
++    assert!(
++        store
++            .find_request(&scope(), &id("session"), &id("request"))
++            .await
++            .unwrap()
++            .is_none()
++    );
++    let mut first = admission("winner", "request", "session", "same", "1").await;
++    let profile = first.snapshot.profile.profile();
++    first.submitted = Some(
++        RequestSnapshot::capture(
++            VersionedRef {
++                id: profile.agent_id.clone(),
++                version: profile.version.clone(),
++            },
++            &serde_json::to_string(&first.snapshot.request).unwrap(),
++            None,
++            JsonTextLimits::default(),
++        )
++        .unwrap(),
++    );
++    let original = first.submitted.clone();
++    let winner = store.admit(&scope(), first).await.unwrap();
++    let mut loser = admission("loser", "request", "session", "same", "99").await;
++    loser.submitted = original;
++    loser.snapshot.request_digest = canonical_digest(&json!("changed-current-configuration"));
++    let replay = store.admit(&scope(), loser.clone()).await.unwrap();
++    assert!(!replay.created);
++    assert_eq!(replay.state, winner.state);
++    let changed = RequestSnapshot::capture(
++        VersionedRef {
++            id: id("assistant"),
++            version: id("1.0.0"),
++        },
++        &serde_json::to_string(
++            &admission("unused", "request", "session", "different", "1")
++                .await
++                .snapshot
++                .request,
++        )
++        .unwrap(),
++        None,
++        JsonTextLimits::default(),
++    )
++    .unwrap();
++    loser.submitted = Some(changed);
++    assert_eq!(
++        store.admit(&scope(), loser).await.unwrap_err().code,
++        ErrorCode::RequestConflict
++    );
++}
+diff --git a/crates/wickle/tests/verification.rs b/crates/wickle/tests/verification.rs
+index 42c1506f03ed5faef1df6277e0c9da9b804976a9..4ff3617978e1601781b6a58ced81d18dd6fbb5e2 100644
+--- a/crates/wickle/tests/verification.rs
++++ b/crates/wickle/tests/verification.rs
+@@ -929,3 +929,50 @@ async fn a_verifier_can_use_its_own_explicit_logical_model_binding() {
+     );
+     assert_eq!(model.calls.load(Ordering::SeqCst), 2);
+ }
++
++#[tokio::test]
++async fn replay_precedes_current_verifier_lookup_and_new_request_limits() {
++    let (fixture, profile, bindings, model, checks) =
++        setup(&["checked"], vec![Ok(VerificationDecision::Pass {})]);
++    let agent = create_agent(profile.clone(), bindings).unwrap();
++    let first = fixture.started(&agent, "stored").await;
++    let original = completed(first.outcome(&context()).await.unwrap());
++    let mut changed = fixture.bindings();
++    changed.settings.max_request_bytes = 1;
++    let restarted = create_agent(profile.clone(), changed).unwrap();
++    let replay = completed(restarted.start(request("stored"), context()).await.unwrap());
++    assert_eq!(replay.run_id(), first.run_id());
++    assert_eq!(
++        completed(replay.outcome(&context()).await.unwrap()),
++        original
++    );
++    assert_eq!(model.calls.load(Ordering::SeqCst), 1);
++    assert_eq!(checks.calls.load(Ordering::SeqCst), 1);
++    assert_eq!(fixture.catalog.calls.load(Ordering::SeqCst), 0);
++    assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 0);
++    assert_eq!(
++        restarted
++            .start(request("new-too-large"), context())
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::InvalidContract
++    );
++    let missing_verifier = create_agent(profile, fixture.bindings()).unwrap();
++    assert_eq!(
++        missing_verifier
++            .start(request("new-no-verifier"), context())
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::ComponentUnavailable
++    );
++    assert!(
++        fixture
++            .store
++            .find_request(&scope(), &id("session"), &id("new-no-verifier"))
++            .await
++            .unwrap()
++            .is_none()
++    );
++}
+diff --git a/docs/agents.md b/docs/agents.md
+index b5b095e0351f519b52926193266ce8bfb1a21f07..f7310ff5682f660a047388159d484174c7e661c7 100644
+--- a/docs/agents.md
++++ b/docs/agents.md
+@@ -367,3 +367,24 @@ foreign continuation. The original session prompt remains pinned.
+ Replaying `start` retrieves the original Run; it does not consume a saved wait or
+ restart an interrupted running worker. Use a matching `ResumeCommand` for the
+ supported waits described above.
++
++## Replaying a submitted request
++
++Construction checks profile structure, finite runtime settings and binding scopes.
++It does not require the current Tool, context-strategy or verifier registry to
++resolve every profile reference. New-request admission performs those checks.
++This allows a facade to retrieve an already accepted request after runtime
++registrations have changed or become unavailable.
++
++Start checks current authorization and scope before looking up the request key.
++An existing request is compared against its saved submitted-input snapshot and
++normalization version, without current registry resolution or another model call.
++New request limits and current verifier planning apply only when the key is new.
++A changed submitted payload is a conflict; an existing key never bypasses revoked
++permission. Atomic admission repeats the identity comparison against the winning
++stored snapshot when concurrent submissions race.
++
++The submitted snapshot records caller options and Host-provided system inputs,
++not newly resolved catalog defaults. Current effective configuration remains in
++the separate execution snapshot. Older records without submitted-input evidence
++use their historical comparison path rather than fabricated new metadata.
+diff --git a/tests/support/agent_consumer.rs b/tests/support/agent_consumer.rs
+index e49f547e712e7a426786e0f201129534b49af924..45aaeefdba5298b0ff9596d09b46ab6df1719663 100644
+--- a/tests/support/agent_consumer.rs
++++ b/tests/support/agent_consumer.rs
+@@ -371,9 +371,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+     );
+     assert_eq!(outcome.usage.model_calls, 2);
+     assert_eq!(outcome.usage.recovery_attempts, 1);
+-    let replay = completed(agent.start(request, context.clone()).await?)?;
++    let replay = completed(agent.start(request.clone(), context.clone()).await?)?;
+     assert_eq!(replay.run_id(), &run_id);
+     assert_eq!(completed(replay.outcome(&context).await?)?, outcome);
++    let submitted = store.read_execution(&scope, &run_id).await?.submitted.ok_or("submitted identity missing")?;
++    submitted.validate(JsonTextLimits::default())?;
++    let mut changed = request;
++    changed.model_options.insert("reasoning_effort".into(), json!("changed"));
++    assert_eq!(agent.start(changed, context.clone()).await.unwrap_err().code, ErrorCode::RequestConflict);
++    assert_eq!(store.read_execution(&scope, &run_id).await?.submitted.as_ref().map(|s|s.digest()), Some(submitted.digest()));
++
+     assert_eq!(first.calls.load(Ordering::SeqCst), 1);
+     assert_eq!(second.calls.load(Ordering::SeqCst), 1);
+     let view = completed(agent.get_run(&run_id, &context).await?)?;
+diff --git a/tests/support/gather_consumer.rs b/tests/support/gather_consumer.rs
+index 59487eef08842a69ce75ebc8a07581c9ddb86250..774c709257ef908ace4b71aebab009436b37deec 100644
+--- a/tests/support/gather_consumer.rs
++++ b/tests/support/gather_consumer.rs
+@@ -613,9 +613,11 @@ mod host {
+                     .is_err()
+             );
+             let error = scenario
+-                .build(invalid_profile)
++                .build(invalid_profile)?
++                .start(request("unregistered"), execution.clone())
++                .await
+                 .err()
+-                .ok_or("unregistered tool was accepted")?;
++                .ok_or("unregistered tool execution was accepted")?;
+             assert_eq!(error.code, ErrorCode::ComponentUnavailable);
+             let mut escalation = scenario.profile();
+             escalation["capability_grant_ref"] = json!("administrator");

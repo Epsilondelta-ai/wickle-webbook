@@ -1,0 +1,23 @@
+[package]
+name = "wickle-model-router"
+version.workspace = true
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+description = "Immutable model catalogs and routing components for Wickle"
+publish = false
+include = ["Cargo.toml", "LICENSE", "src/**"]
+
+[dependencies]
+wickle = { path = "../wickle", version = "=0.1.0" }
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+futures-util.workspace = true
+tokio-util.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "test-util"] }
+
+[lints]
+workspace = true

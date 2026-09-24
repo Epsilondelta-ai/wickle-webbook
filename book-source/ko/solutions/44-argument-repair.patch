@@ -1,0 +1,1830 @@
+diff --git a/crates/wickle-mcp/tests/support/binding.rs b/crates/wickle-mcp/tests/support/binding.rs
+index 2e63e19dc252b5acecf4c9f3176f6fbeba0db8c9..426d1255356a9dbbe6f25761ffd4f7c8a3d8405f 100644
+--- a/crates/wickle-mcp/tests/support/binding.rs
++++ b/crates/wickle-mcp/tests/support/binding.rs
+@@ -63,6 +63,7 @@ async fn plan(
+     snapshot.revision += 1;
+     snapshot.phase = RunPhase::Tool;
+     let call = ToolCall {
++        provider_arguments: None,
+         call_id: id(call_id),
+         model_request_id: id("model-request"),
+         provider_call_id: id(&format!("provider-{call_id}")),
+diff --git a/crates/wickle-model-router/tests/support/routed.rs b/crates/wickle-model-router/tests/support/routed.rs
+index 11254a5e1c82235f5dadef7e24d3ed214b31e0e1..77bbcd9293bba1979e18d676b6cead2888a707fa 100644
+--- a/crates/wickle-model-router/tests/support/routed.rs
++++ b/crates/wickle-model-router/tests/support/routed.rs
+@@ -622,6 +622,7 @@ pub fn completed(outcome: Guarded<ModelExchangeOutcome>) -> ModelResponse {
+ pub async fn seed_tool(fixture: &Fixture, state: ToolCallState) {
+     let saved = fixture.saved().await;
+     let call = ToolCall {
++        provider_arguments: None,
+         call_id: id("unsettled-call"),
+         model_request_id: id("earlier-attempt"),
+         provider_call_id: id("earlier-call"),
+diff --git a/crates/wickle-state-sqlite/tests/support/mod.rs b/crates/wickle-state-sqlite/tests/support/mod.rs
+index 1b1097317226cd8688d5f647ff973a7c1729a75b..a4e7cdaeb82f5d5d88405e1bba725163df4f4f5c 100644
+--- a/crates/wickle-state-sqlite/tests/support/mod.rs
++++ b/crates/wickle-state-sqlite/tests/support/mod.rs
+@@ -250,6 +250,7 @@ pub async fn populate_protected_run(store: Arc<dyn StateStore>) -> Value {
+     };
+     let proposal = &response.tool_calls[0];
+     let call = ToolCall {
++        provider_arguments: None,
+         call_id: id("call"),
+         model_request_id: response.request_id.clone(),
+         provider_call_id: proposal.provider_call_id.clone(),
+diff --git a/crates/wickle/src/agent.rs b/crates/wickle/src/agent.rs
+index 5b423ca40a5e4963db89973d61f531555fa63e12..293f056aa54470ad7f6b6f9380b29c9e3053d2a3 100644
+--- a/crates/wickle/src/agent.rs
++++ b/crates/wickle/src/agent.rs
+@@ -413,8 +413,12 @@ impl Agent {
+         let run_id = command.run_id.clone();
+         let disclosure_context = context.clone();
+         let agent = self.clone();
++        // Build the owned coordinator outside the caller's poll stack before
++        // handing it to Tokio; recovery can nest several large state futures.
+         let result = runtime
+-            .spawn(async move { agent.resume_command(command, context).await })
++            .spawn(crate::future::boxed(|| async move {
++                agent.resume_command(command, context).await
++            }))
+             .await
+             .map_err(|_| fail(ErrorCode::InvalidContract, "agent.resume"))?;
+         match result {
+diff --git a/crates/wickle/src/agent/admission.rs b/crates/wickle/src/agent/admission.rs
+index 3bf66b767afa74f04f9402b2dfac0312afd655c1..ab7be5cf1f8e818520c954a99d82b5bb31bbde77 100644
+--- a/crates/wickle/src/agent/admission.rs
++++ b/crates/wickle/src/agent/admission.rs
+@@ -129,10 +129,11 @@ impl Agent {
+         data.system_inputs = None;
+         let driver_context = ExecutionContext::new(data, local.cancel.clone());
+         tokio::spawn(async move {
+-            let result =
+-                AssertUnwindSafe(agent.drive(&driver_id, prompt, driver_context, &driver_local))
+-                    .catch_unwind()
+-                    .await;
++            let result = AssertUnwindSafe(crate::future::boxed(|| {
++                agent.drive(&driver_id, prompt, driver_context, &driver_local)
++            }))
++            .catch_unwind()
++            .await;
+             let error = match result {
+                 Ok(Ok(())) => None,
+                 Ok(Err(error)) => Some(fail(error.code, "agent.driver")),
+diff --git a/crates/wickle/src/agent/driver.rs b/crates/wickle/src/agent/driver.rs
+index cfcf793e2bf88cccca63e9648faf0e6af0886ab5..24dab8faa15417654521c9d9685aebf8ec57e4f5 100644
+--- a/crates/wickle/src/agent/driver.rs
++++ b/crates/wickle/src/agent/driver.rs
+@@ -21,7 +21,7 @@ impl Agent {
+                 bindings.settings.lease_ttl_ms,
+             )
+             .await?;
+-        self.drive_leased(run_id, prompt, context, local, lease, false)
++        crate::future::boxed(|| self.drive_leased(run_id, prompt, context, local, lease, false))
+             .await
+     }
+ 
+@@ -334,7 +334,7 @@ impl Agent {
+                 .load(budget.scope(), run_id)
+                 .await?;
+             if current.snapshot.candidate_ref.is_some() {
+-                match Box::pin(self.verify_candidate(segment, budget)).await {
++                match crate::future::boxed(|| self.verify_candidate(segment, budget)).await {
+                     Ok(super::verification::CandidateAction::Finish(candidate)) => {
+                         return self
+                             .finish(run_id, *candidate, budget, segment, local)
+@@ -358,15 +358,27 @@ impl Agent {
+                     Err(error) => break Some(Err(error)),
+                 }
+             }
++            if let Some(request_id) = current
++                .snapshot
++                .tool_ledger
++                .last()
++                .map(|entry| entry.call.model_request_id.clone())
++            {
++                if let Err(error) = self.reserve_tool_repair(&request_id, budget).await {
++                    break Some(Err(error));
++                }
++            }
+             // Keep the nested model/verification path off the parent Tool loop stack.
+-            match Box::pin(self.generate(
+-                run_id,
+-                prompt.clone(),
+-                segment,
+-                budget,
+-                lease,
+-                std::mem::take(&mut reuse_step),
+-            ))
++            match crate::future::boxed(|| {
++                self.generate(
++                    run_id,
++                    prompt.clone(),
++                    segment,
++                    budget,
++                    lease,
++                    std::mem::take(&mut reuse_step),
++                )
++            })
+             .await
+             {
+                 Ok(Guarded::Completed(ModelExchangeOutcome::Completed { response }))
+@@ -395,7 +407,9 @@ impl Agent {
+                         && response.tool_calls.is_empty()
+                         && saved.snapshot.verification_plan_ref.is_some() =>
+                 {
+-                    if let Err(error) = Box::pin(self.candidate(&response, budget)).await {
++                    if let Err(error) =
++                        crate::future::boxed(|| self.candidate(&response, budget)).await
++                    {
+                         break Some(Err(error));
+                     }
+                     continue;
+@@ -1155,15 +1169,19 @@ impl ModelRequestProjector for Projector<'_> {
+                 },
+                 context.cancellation.clone(),
+             );
+-            let prepared = Box::pin(self.context_runtime.prepare(
+-                &self.prompt,
+-                seed,
+-                crate::context_strategy::ContextServices {
+-                    bindings: self.bindings,
+-                    budget: self.budget,
+-                    context: &current,
+-                },
+-            ))
++            // Preparation can nest another routed model call for compaction.
++            // Construct its future outside this projector's poll stack frame.
++            let prepared = crate::future::boxed(|| {
++                self.context_runtime.prepare(
++                    &self.prompt,
++                    seed,
++                    crate::context_strategy::ContextServices {
++                        bindings: self.bindings,
++                        budget: self.budget,
++                        context: &current,
++                    },
++                )
++            })
+             .await?;
+             let mut references = artifacts::selected(
+                 &prepared.projection.request,
+diff --git a/crates/wickle/src/agent/resume.rs b/crates/wickle/src/agent/resume.rs
+index 73f824a51ffb6b210b67aee6997c3f841865e766..9d25292e32999cc21448d64e25b3d8e2c0eeb2fe 100644
+--- a/crates/wickle/src/agent/resume.rs
++++ b/crates/wickle/src/agent/resume.rs
+@@ -831,14 +831,10 @@ impl Agent {
+         data.system_inputs = None;
+         let context = ExecutionContext::new(data, local.cancel.clone());
+         tokio::spawn(async move {
+-            let result = AssertUnwindSafe(agent.drive_leased(
+-                &driver_id,
+-                prompt,
+-                context,
+-                &driver_local,
+-                lease,
+-                expired,
+-            ))
++            // Keep the large resumed driver out of this spawned closure's poll frame.
++            let result = AssertUnwindSafe(crate::future::boxed(|| {
++                agent.drive_leased(&driver_id, prompt, context, &driver_local, lease, expired)
++            }))
+             .catch_unwind()
+             .await;
+             let error = match result {
+diff --git a/crates/wickle/src/agent/tools.rs b/crates/wickle/src/agent/tools.rs
+index fbfb93590796db7bcb21c1ca4c346d46f7c001a4..79e79c0a9e5d66a60a82b6d9acc72c8fcf3a6b9c 100644
+--- a/crates/wickle/src/agent/tools.rs
++++ b/crates/wickle/src/agent/tools.rs
+@@ -1,6 +1,32 @@
+ use super::*;
+ 
+ impl Agent {
++    /// Charge at most once per rejected Tool round, including recovery after reservation.
++    pub(super) async fn reserve_tool_repair(
++        &self,
++        request_id: &Id,
++        budget: &RunBudget,
++    ) -> Result<(), ContractError> {
++        let saved = self
++            .inner
++            .bindings
++            .state
++            .load(budget.scope(), budget.run_id())
++            .await?;
++        let invalid = saved.snapshot.tool_ledger.iter().any(|entry| {
++            &entry.call.model_request_id == request_id && crate::budget::needs_tool_repair(entry)
++        });
++        let reserved = saved.snapshot.reservations.iter().any(|reservation| matches!(&reservation.kind, ReservationKind::ToolRepair { model_request_id } if model_request_id == request_id));
++        if invalid && !reserved {
++            budget
++                .reserve(ReservationKind::ToolRepair {
++                    model_request_id: request_id.clone(),
++                })
++                .await?;
++        }
++        Ok(())
++    }
++
+     pub(super) async fn tool_round(
+         &self,
+         budget: &RunBudget,
+@@ -103,6 +129,13 @@ impl Agent {
+                 .find(|tool| tool.model_tool.name == proposed.name)
+                 .map(|tool| tool.descriptor_digest.clone());
+             let call = ToolCall {
++                provider_arguments: proposed.raw_arguments.as_ref().map(|raw| {
++                    ProviderToolArguments {
++                        name: proposed.name.clone(),
++                        raw: raw.clone(),
++                        compiled_contract_ref: None,
++                    }
++                }),
+                 call_id: bindings.ids.next_id()?,
+                 model_request_id: response.request_id.clone(),
+                 provider_call_id: proposed.provider_call_id.clone(),
+diff --git a/crates/wickle/src/budget.rs b/crates/wickle/src/budget.rs
+index 57f5d3a5a87564143e80acbfa3d435ee768ee936..116fd51e27783ff8a5f973091c3c6962eb9fd424 100644
+--- a/crates/wickle/src/budget.rs
++++ b/crates/wickle/src/budget.rs
+@@ -59,6 +59,11 @@ pub enum ReservationKind {
+     },
+     /// One candidate-repair decision; any resulting model call is charged separately.
+     Repair {},
++    /// One decision to correct invalid/unknown Tool arguments for a saved model response.
++    ToolRepair {
++        /// Physical response whose settled invalid calls require another model decision.
++        model_request_id: Id,
++    },
+     /// One recovery decision; any resulting external call is charged separately.
+     Recovery {},
+ }
+@@ -69,7 +74,7 @@ impl ReservationKind {
+         match self {
+             Self::Model { .. } => BudgetKind::ModelCalls,
+             Self::Tool { .. } => BudgetKind::ToolAttempts,
+-            Self::Repair {} => BudgetKind::RepairAttempts,
++            Self::Repair {} | Self::ToolRepair { .. } => BudgetKind::RepairAttempts,
+             Self::Recovery {} => BudgetKind::RecoveryAttempts,
+         }
+     }
+@@ -417,7 +422,7 @@ pub(crate) fn charge(
+             limits.max_tool_attempts,
+             "budget.tool_attempts",
+         ),
+-        ReservationKind::Repair {} => (
++        ReservationKind::Repair {} | ReservationKind::ToolRepair { .. } => (
+             &mut usage.repair_attempts,
+             limits.max_repair_attempts,
+             "budget.repair_attempts",
+@@ -457,6 +462,18 @@ pub(crate) fn validate_budget(snapshot: &RunSnapshot) -> Result<(), ContractErro
+     {
+         return Err(invalid());
+     }
++    let mut repaired_rounds = BTreeSet::new();
++    for reservation in &snapshot.reservations {
++        if let ReservationKind::ToolRepair { model_request_id } = &reservation.kind {
++            if !repaired_rounds.insert(model_request_id)
++                || !snapshot.tool_ledger.iter().any(|entry| {
++                    &entry.call.model_request_id == model_request_id && needs_tool_repair(entry)
++                })
++            {
++                return Err(invalid());
++            }
++        }
++    }
+     let mut attempts = BTreeSet::new();
+     let mut counts = BudgetUsage::default();
+     for reservation in &snapshot.reservations {
+@@ -503,3 +520,10 @@ pub(crate) fn validate_budget_transition(
+     }
+     Ok(())
+ }
++
++pub(crate) fn needs_tool_repair(entry: &crate::ToolLedgerEntry) -> bool {
++    entry.call.bound_input_ref.is_none()
++        && matches!(&entry.state, crate::ToolCallState::Settled { result }
++        if result.status == crate::ToolResultStatus::Failed && result.effect == crate::ToolEffect::NotApplied
++        && result.error.as_ref().is_some_and(|failure| matches!(failure.code.as_str(), "unknown_tool" | "invalid_arguments")))
++}
+diff --git a/crates/wickle/src/hooks.rs b/crates/wickle/src/hooks.rs
+index bf231c891ce413213f6d90a39c54eb9e32509e2e..8f3901416694572af8f7c77b792244d57f8f106d 100644
+--- a/crates/wickle/src/hooks.rs
++++ b/crates/wickle/src/hooks.rs
+@@ -200,14 +200,16 @@ impl HookInput {
+                 },
+                 HookTarget::BeforeTool { .. },
+             ) => {
+-                let validator = crate::tool_schema::compile_validator(&tool.model_input_schema)?;
+-                validator.is_valid(
+-                    &serde_json::to_value(original_model_inputs)
+-                        .map_err(|_| hook_error(ErrorCode::InvalidJson, "hooks.input"))?,
+-                ) && validator.is_valid(
+-                    &serde_json::to_value(model_inputs)
+-                        .map_err(|_| hook_error(ErrorCode::InvalidJson, "hooks.input"))?,
++                crate::tool_schema::normalize_model_input_schema(
++                    &tool.model_input_schema,
++                    original_model_inputs,
+                 )
++                .is_ok()
++                    && crate::tool_schema::normalize_model_input_schema(
++                        &tool.model_input_schema,
++                        model_inputs,
++                    )
++                    .is_ok()
+             }
+             (
+                 Self::AfterTool {
+diff --git a/crates/wickle/src/hooks/records.rs b/crates/wickle/src/hooks/records.rs
+index 61643585bbff5b10148cdab57ec83afda71b282e..752ee56a23adae91aae0b44f0a80cc91c8691e6b 100644
+--- a/crates/wickle/src/hooks/records.rs
++++ b/crates/wickle/src/hooks/records.rs
+@@ -95,8 +95,10 @@ pub(super) fn validate_output(
+             HookPosition::BeforeTool,
+             HookInput::BeforeTool { tool, .. },
+             HookOutput::Tool { model_inputs, .. },
+-        ) => crate::tool_schema::compile_validator(&tool.model_input_schema)?
+-            .is_valid(&serde_json::to_value(model_inputs).map_err(|_| invalid())?),
++        ) => {
++            crate::tool_schema::normalize_model_input_schema(&tool.model_input_schema, model_inputs)
++                .is_ok()
++        }
+         (HookPosition::AfterTool, HookInput::AfterTool { .. }, HookOutput::Observed {})
+         | (HookPosition::AfterRun, HookInput::AfterRun { .. }, HookOutput::Observed {}) => true,
+         _ => false,
+@@ -317,7 +319,12 @@ pub(crate) fn validate_application_chain(
+                         if call.call.tool_name != tool.name
+                             || call.call.descriptor_digest.as_ref() != Some(descriptor_digest)
+                             || &call.call.model_inputs != original_model_inputs
+-                            || model_inputs != original_model_inputs
++                            || (model_inputs != original_model_inputs
++                                && model_inputs
++                                    != &crate::tool_schema::normalize_model_input_schema(
++                                        &tool.model_input_schema,
++                                        original_model_inputs,
++                                    )?)
+                         {
+                             return Err(hook_error(
+                                 ErrorCode::InvalidSnapshot,
+@@ -416,3 +423,19 @@ fn source_context_for_step(
+     }
+     Ok(items)
+ }
++
++pub(super) fn normalize_output(
++    input: &HookInput,
++    mut output: HookOutput,
++) -> Result<HookOutput, ContractError> {
++    if let (HookInput::BeforeTool { tool, .. }, HookOutput::Tool { model_inputs, .. }) =
++        (input, &mut output)
++    {
++        *model_inputs = crate::tool_schema::normalize_model_input_schema(
++            &tool.model_input_schema,
++            model_inputs,
++        )
++        .map_err(|_| hook_error(ErrorCode::InvalidContract, "hooks.output"))?;
++    }
++    Ok(output)
++}
+diff --git a/crates/wickle/src/hooks/runtime.rs b/crates/wickle/src/hooks/runtime.rs
+index 9b89a4f4c8256e558bf2cb662c7b37cc6fbaea64..dc7c7b9e0ec90482e5c83846dfa125c77aba5c03 100644
+--- a/crates/wickle/src/hooks/runtime.rs
++++ b/crates/wickle/src/hooks/runtime.rs
+@@ -145,6 +145,47 @@ impl HookRuntime {
+             self.validate_live_input(&saved, &target, &input, budget.store().as_ref()),
+         )
+         .await?;
++        if let HookInput::BeforeTool {
++            tool, model_inputs, ..
++        } = &mut input
++        {
++            *model_inputs = crate::tool_schema::normalize_model_input_schema(
++                &tool.model_input_schema,
++                model_inputs,
++            )?;
++            // Replay the exact historical first input. Old records can predate
++            // default-before-hook ordering and must not be silently rewritten.
++            if let Some(first) = saved
++                .snapshot
++                .hook_applications
++                .iter()
++                .find(|application| application.target == target)
++            {
++                let record = bounded(
++                    context,
++                    Some(budget),
++                    budget.call_deadline()?,
++                    budget
++                        .store()
++                        .read_record(budget.scope(), &first.result_ref),
++                )
++                .await?;
++                let first = HookApplicationRecord::restore(
++                    &record,
++                    &plan,
++                    first,
++                    budget.scope(),
++                    budget.run_id(),
++                )?;
++                if let HookInput::BeforeTool {
++                    model_inputs: original,
++                    ..
++                } = first.input
++                {
++                    *model_inputs = original;
++                }
++            }
++        }
+         let definitions: Vec<_> = plan
+             .definitions()
+             .iter()
+@@ -214,6 +255,7 @@ impl HookRuntime {
+                 .await?;
+             let (output, failure) = match callback {
+                 Ok(output) => {
++                    let output = records::normalize_output(&input, output)?;
+                     records::validate_output(&definition, &input, &output)?;
+                     (Some(output), None)
+                 }
+@@ -618,7 +660,12 @@ impl HookRuntime {
+                     .call;
+                 if call.bound_input_ref.is_some()
+                     || original_model_inputs != &call.model_inputs
+-                    || model_inputs != original_model_inputs
++                    || (model_inputs != original_model_inputs
++                        && model_inputs
++                            != &crate::tool_schema::normalize_model_input_schema(
++                                &tool.model_input_schema,
++                                original_model_inputs,
++                            )?)
+                     || call.descriptor_digest.as_ref() != Some(descriptor_digest)
+                 {
+                     return Err(invalid());
+diff --git a/crates/wickle/src/input_binding.rs b/crates/wickle/src/input_binding.rs
+index d90fd393764f58cca3bebff024c9720e46bc7ca4..2f5ce51c5fda911675700d1ce74855947d426179 100644
+--- a/crates/wickle/src/input_binding.rs
++++ b/crates/wickle/src/input_binding.rs
+@@ -1,11 +1,4 @@
+-use std::{
+-    collections::{BTreeMap, BTreeSet},
+-    fmt,
+-    future::Future,
+-    io,
+-    panic::AssertUnwindSafe,
+-    sync::Arc,
+-};
++use std::{collections::BTreeMap, fmt, future::Future, io, panic::AssertUnwindSafe, sync::Arc};
+ 
+ use futures_util::FutureExt;
+ use serde::{Deserialize, Serialize, Serializer};
+@@ -433,7 +426,7 @@ impl BoundToolInput {
+     pub fn transformation_ref(&self) -> Option<&RecordRef> {
+         self.data.transformation_ref.as_ref()
+     }
+-    /// Effective model arguments plus declared optional top-level defaults.
++    /// Effective model arguments plus declared top-level defaults.
+     pub fn normalized_model_inputs(&self) -> &JsonObject {
+         &self.data.normalized_model_inputs
+     }
+@@ -607,8 +600,8 @@ impl BoundToolInput {
+                 "bound_input.compiled",
+             ));
+         }
+-        compiled.validate_model_inputs(self.original_model_inputs())?;
+-        compiled.validate_model_inputs(self.effective_model_inputs())?;
++        compiled.normalize_model_inputs(self.original_model_inputs())?;
++        compiled.normalize_model_inputs(self.effective_model_inputs())?;
+         if normalize_model_inputs(compiled, self.effective_model_inputs())?
+             != *self.normalized_model_inputs()
+         {
+@@ -665,6 +658,90 @@ pub struct InputBinder {
+ }
+ 
+ impl InputBinder {
++    /// Restore and verify provider arguments before defaults, Hooks or system resolution.
++    /// This performs only protected store reads; it does not invoke a Tool/resolver.
++    pub async fn prepare_model_inputs(
++        &self,
++        compiled: &CompiledTool,
++        call: &ToolCall,
++        context: &ExecutionContext,
++        budget: &RunBudget,
++    ) -> Result<JsonObject, ContractError> {
++        if &context.data.scope != budget.scope() {
++            return Err(error(ErrorCode::AccessDenied, "tool.scope"));
++        }
++        if call.descriptor_digest.as_ref() != Some(compiled.descriptor_digest()) {
++            return Err(error(
++                ErrorCode::InvalidToolInputContract,
++                "tool.descriptor",
++            ));
++        }
++        boundary(context, budget).await?;
++        if let Some(provider) = &call.provider_arguments {
++            let decoded = if let Some(reference) = &provider.compiled_contract_ref {
++                let saved = bounded(
++                    context,
++                    budget,
++                    budget.store().load(budget.scope(), budget.run_id()),
++                )
++                .await?;
++                let invocation = saved
++                    .snapshot
++                    .model_ledger
++                    .iter()
++                    .find(|invocation| invocation.attempt_id == call.model_request_id)
++                    .ok_or_else(|| error(ErrorCode::InvalidSnapshot, "tool.provider_invocation"))?;
++                let target = crate::ProviderToolTarget {
++                    provider: invocation.route.provider.clone(),
++                    api_contract: invocation.route.api_contract.clone(),
++                    capability_revision: invocation.route.capability_revision.clone(),
++                };
++                let record = bounded(
++                    context,
++                    budget,
++                    budget.store().read_record(budget.scope(), reference),
++                )
++                .await?;
++                let digest =
++                    serde_json::from_value(record.value().get("digest").cloned().ok_or_else(
++                        || error(ErrorCode::InvalidSnapshot, "tool.provider_contract"),
++                    )?)
++                    .map_err(|_| error(ErrorCode::InvalidSnapshot, "tool.provider_contract"))?;
++                let limits = crate::ProviderToolSchemaLimits {
++                    max_argument_bytes: self.limits.max_bound_bytes,
++                    ..Default::default()
++                };
++                let contract = crate::CompiledToolContract::restore(
++                    &serde_json::to_string(record.value())
++                        .map_err(|_| error(ErrorCode::InvalidJson, "tool.provider_contract"))?,
++                    compiled,
++                    &target,
++                    &digest,
++                    limits,
++                )?;
++                if contract.wire_tool().name != provider.name {
++                    return Err(error(ErrorCode::InvalidArguments, "tool.provider_name"));
++                }
++                contract.decode_arguments(&provider.raw, limits)?
++            } else {
++                if provider.name != call.tool_name {
++                    return Err(error(ErrorCode::InvalidArguments, "tool.provider_name"));
++                }
++                crate::provider_tool_schema::parse_provider_arguments(
++                    &provider.raw,
++                    self.limits.max_bound_bytes,
++                )?
++            };
++            if decoded != call.model_inputs {
++                return Err(error(
++                    ErrorCode::InvalidArguments,
++                    "tool.canonical_arguments",
++                ));
++            }
++        }
++        compiled.normalize_model_inputs(&call.model_inputs)
++    }
++
+     /// Wire trusted metadata, optional read-only resolver, policy, and internal record IDs.
+     pub fn new(
+         registry: Arc<SystemInputRegistry>,
+@@ -712,6 +789,8 @@ impl InputBinder {
+             .call
+             .clone();
+         check_selection(&saved.snapshot, compiled, &call)?;
++        crate::future::boxed(|| self.prepare_model_inputs(compiled, &call, context, budget))
++            .await?;
+         let selection = resolved_tool_selection(&saved.snapshot, compiled, context, budget).await?;
+         let run_inputs = match &saved.snapshot.system_inputs {
+             Some(reference) => {
+@@ -1124,41 +1203,7 @@ fn normalize_model_inputs(
+     compiled: &CompiledTool,
+     original: &JsonObject,
+ ) -> Result<JsonObject, ContractError> {
+-    compiled.validate_model_inputs(original)?;
+-    let mut normalized = original.clone();
+-    let properties = compiled
+-        .model_input_schema()
+-        .get("properties")
+-        .and_then(Value::as_object)
+-        .expect("compiled properties");
+-    for parameter in &compiled.descriptor().agent_parameters {
+-        if normalized.contains_key(parameter) || required_parameter(compiled, parameter) {
+-            continue;
+-        }
+-        let mut schema = &properties[parameter];
+-        let mut seen = BTreeSet::new();
+-        loop {
+-            if let Some(default) = schema.get("default") {
+-                normalized.insert(parameter.clone(), default.clone());
+-                break;
+-            }
+-            let Some(reference) = schema.get("$ref").and_then(Value::as_str) else {
+-                break;
+-            };
+-            if !seen.insert(reference) {
+-                break;
+-            }
+-            let pointer = reference
+-                .strip_prefix('#')
+-                .ok_or_else(|| error(ErrorCode::InvalidToolInputContract, "model_defaults"))?;
+-            schema = compiled
+-                .model_input_schema()
+-                .pointer(pointer)
+-                .ok_or_else(|| error(ErrorCode::InvalidToolInputContract, "model_defaults"))?;
+-        }
+-    }
+-    compiled.validate_model_inputs(&normalized)?;
+-    Ok(normalized)
++    compiled.normalize_model_inputs(original)
+ }
+ fn required_parameter(compiled: &CompiledTool, parameter: &str) -> bool {
+     compiled
+@@ -1331,7 +1376,7 @@ async fn saved_tool_transform(
+         ));
+     }
+     let mut inputs = call.model_inputs.clone();
+-    for (definition, application) in definitions.iter().zip(&applications) {
++    for (index, (definition, application)) in definitions.iter().zip(&applications).enumerate() {
+         if definition.hook != application.hook {
+             return Err(error(ErrorCode::InvalidSnapshot, "hooks.order"));
+         }
+@@ -1360,6 +1405,9 @@ async fn saved_tool_transform(
+         else {
+             return Err(error(ErrorCode::InvalidSnapshot, "hooks.tool_input"));
+         };
++        if index == 0 && model_inputs == &compiled.normalize_model_inputs(&call.model_inputs)? {
++            inputs = model_inputs.clone();
++        }
+         if tool != &compiled.to_model_tool()
+             || descriptor_digest != compiled.descriptor_digest()
+             || compiled_digest != compiled.digest()
+@@ -1377,7 +1425,7 @@ async fn saved_tool_transform(
+         if deny.is_some() {
+             return Err(error(ErrorCode::AccessDenied, "hooks.tool_denied"));
+         }
+-        compiled.validate_model_inputs(&model_inputs)?;
++        compiled.normalize_model_inputs(&model_inputs)?;
+         inputs = model_inputs;
+     }
+     Ok(Some((
+diff --git a/crates/wickle/src/lib.rs b/crates/wickle/src/lib.rs
+index 57782c82b7369c780f21a05b7a398aa193119a20..96d24d81e27affeb1dbe000d6e257c429190d9e8 100644
+--- a/crates/wickle/src/lib.rs
++++ b/crates/wickle/src/lib.rs
+@@ -149,7 +149,8 @@ pub use context::{
+ pub use error::{ContractError, ErrorCode};
+ pub use message::{
+     ArtifactRef, ContentBlock, EvidenceRef, Failure, InputContent, Message, MessageOrigin,
+-    MessageRole, RecordRef, ToolCall, ToolResult, ToolResultStatus, Visibility,
++    MessageRole, ProviderToolArguments, RecordRef, ToolCall, ToolResult, ToolResultStatus,
++    Visibility,
+ };
+ pub use model::{
+     ApiContract, ModelAttemptState, ModelFailureKind, ModelInvocationRecord, ModelPurpose,
+diff --git a/crates/wickle/src/message.rs b/crates/wickle/src/message.rs
+index 99c462872c0fe04e5f143fae604688644dd0a6ff..7a910e71d6b0dabfd21bc25086282035172c853c 100644
+--- a/crates/wickle/src/message.rs
++++ b/crates/wickle/src/message.rs
+@@ -77,10 +77,43 @@ pub enum InputContent {
+     },
+ }
+ 
++/// Original provider representation, kept in protected records separately from
++/// canonical model arguments and never populated with system input values.
++#[derive(Clone, PartialEq, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct ProviderToolArguments {
++    /// Original model-facing provider name, before canonical alias restoration.
++    pub name: Id,
++    /// Exact argument JSON text, including malformed proposals for bounded feedback.
++    pub raw: String,
++    /// Pinned provider compilation record; absent for identity/legacy projection.
++    #[serde(
++        default,
++        deserialize_with = "optional",
++        skip_serializing_if = "Option::is_none"
++    )]
++    pub compiled_contract_ref: Option<RecordRef>,
++}
++impl std::fmt::Debug for ProviderToolArguments {
++    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        f.debug_struct("ProviderToolArguments")
++            .field("name", &self.name)
++            .field("bytes", &self.raw.len())
++            .finish_non_exhaustive()
++    }
++}
++
+ /// Model-owned tool arguments and provenance, separate from system execution inputs.
+ #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+ #[serde(deny_unknown_fields)]
+ pub struct ToolCall {
++    /// Protected original wire representation, absent only in historical/Host-created calls.
++    #[serde(
++        default,
++        deserialize_with = "optional",
++        skip_serializing_if = "Option::is_none"
++    )]
++    pub provider_arguments: Option<ProviderToolArguments>,
+     /// Core call identifier.
+     pub call_id: Id,
+     /// Original model request identifier.
+diff --git a/crates/wickle/src/model_protocol.rs b/crates/wickle/src/model_protocol.rs
+index 40cc1ce994eed97b29dff2db25289a989fc0b039..ff3382d47385c7c376fc0ac474a8f08ceb09c774 100644
+--- a/crates/wickle/src/model_protocol.rs
++++ b/crates/wickle/src/model_protocol.rs
+@@ -11,8 +11,7 @@ use tokio_util::sync::CancellationToken;
+ 
+ use crate::{
+     ContractError, ErrorCode, Id, JsonDigest, JsonObject, ModelFailureKind, ModelPurpose,
+-    ModelUsage, PortStream, ResolvedModelRoute, Scope, VersionedRef, parse_json,
+-    serialization::data_digest,
++    ModelUsage, PortStream, ResolvedModelRoute, Scope, VersionedRef, serialization::data_digest,
+ };
+ 
+ /// Adapter-owned provider, implementation, and credential-binding identities.
+@@ -480,6 +479,13 @@ pub enum ToolCallValidation {
+ #[derive(Clone, PartialEq, Serialize, Deserialize)]
+ #[serde(deny_unknown_fields)]
+ pub struct ProposedToolCall {
++    /// Exact provider argument text. Historical records may not contain this evidence.
++    #[serde(
++        default,
++        deserialize_with = "crate::serialization::optional",
++        skip_serializing_if = "Option::is_none"
++    )]
++    pub raw_arguments: Option<String>,
+     /// Provider-local identity, scoped by the ModelResponse request_id.
+     pub provider_call_id: Id,
+     /// Normalized model-facing name.
+@@ -805,17 +811,21 @@ pub async fn collect_model_response(
+             .name
+             .as_ref()
+             .ok_or_else(|| assembly.error(ModelProtocolErrorCode::InvalidToolName))?;
+-        let value = parse_json(&call.arguments)
+-            .map_err(|_| assembly.error(ModelProtocolErrorCode::InvalidArguments))?;
+-        let object = value
+-            .as_object()
+-            .ok_or_else(|| assembly.error(ModelProtocolErrorCode::InvalidArguments))?;
++        let parsed = crate::provider_tool_schema::parse_provider_arguments(
++            &call.arguments,
++            request.limits.max_response_bytes,
++        )
++        .ok();
+         let validation = match request.tools.iter().find(|tool| tool.name.as_str() == name) {
+             None => ToolCallValidation::UnknownTool,
+             Some(tool) => {
+-                let validator = compile_schema(&tool.model_input_schema)
+-                    .map_err(|_| assembly.error(ModelProtocolErrorCode::InvalidRequest))?;
+-                if validator.is_valid(&value) {
++                if parsed.as_ref().is_some_and(|input| {
++                    crate::tool_schema::normalize_model_input_schema(
++                        &tool.model_input_schema,
++                        input,
++                    )
++                    .is_ok()
++                }) {
+                     ToolCallValidation::Valid
+                 } else {
+                     ToolCallValidation::InvalidArguments
+@@ -823,14 +833,12 @@ pub async fn collect_model_response(
+             }
+         };
+         tool_calls.push(ProposedToolCall {
++            raw_arguments: Some(call.arguments.clone()),
+             provider_call_id: Id::new(provider_call_id.clone())
+                 .map_err(|_| assembly.error(ModelProtocolErrorCode::InvalidCallId))?,
+             name: Id::new(name.clone())
+                 .map_err(|_| assembly.error(ModelProtocolErrorCode::InvalidToolName))?,
+-            model_inputs: object
+-                .iter()
+-                .map(|(key, value)| (key.clone(), value.clone()))
+-                .collect(),
++            model_inputs: parsed.unwrap_or_default(),
+             validation,
+         });
+     }
+diff --git a/crates/wickle/src/profile.rs b/crates/wickle/src/profile.rs
+index 20c91633ed40e7216fbaddee196fc5920ce93949..0d07f27d97a775ce447685018eaf75ac27d98de5 100644
+--- a/crates/wickle/src/profile.rs
++++ b/crates/wickle/src/profile.rs
+@@ -318,7 +318,7 @@ pub struct RunLimits {
+     pub max_model_calls: NonZeroU64,
+     /// Physical tool dispatch attempts; zero disables tools.
+     pub max_tool_attempts: u64,
+-    /// Candidate repair attempts; zero disables repair.
++    /// Candidate and Tool-argument repair decisions; zero disables repair.
+     pub max_repair_attempts: u64,
+     /// Recovery attempts; zero disables recovery.
+     pub max_recovery_attempts: u64,
+diff --git a/crates/wickle/src/provider_tool_schema.rs b/crates/wickle/src/provider_tool_schema.rs
+index ead5f21295a354bd6b211945474b0f42f479d86a..3cc158b80798a5db2ddaa18d2b9f77b2d256610b 100644
+--- a/crates/wickle/src/provider_tool_schema.rs
++++ b/crates/wickle/src/provider_tool_schema.rs
+@@ -358,24 +358,12 @@ impl CompiledToolContract {
+         limits: ProviderToolSchemaLimits,
+     ) -> Result<JsonObject, ContractError> {
+         check_limits(limits)?;
+-        if raw.len() > limits.max_argument_bytes {
+-            return Err(arguments());
+-        }
+-        let value = parse_json(raw).map_err(|_| arguments())?;
+-        let original: &serde_json::value::RawValue =
+-            serde_json::from_str(raw).map_err(|_| arguments())?;
+-        if !numbers_preserved(original, &value) {
+-            return Err(ContractError::new(
+-                ErrorCode::InvalidArguments,
+-                "provider_tool.numeric_precision",
+-            ));
+-        }
+-        let object = value.as_object().ok_or_else(arguments)?;
++        let object = parse_provider_arguments(raw, limits.max_argument_bytes)?;
+         match &self.data.decode_plan {
+-            ArgumentDecodePlan::Identity {} => Ok(object.clone().into_iter().collect()),
++            ArgumentDecodePlan::Identity {} => Ok(object.clone()),
+             ArgumentDecodePlan::Fields { fields } => {
+                 let mut result = JsonObject::new();
+-                for (name, value) in object {
++                for (name, value) in &object {
+                     let mapping = fields
+                         .iter()
+                         .find(|field| &field.wire_name == name)
+@@ -647,3 +635,27 @@ fn normalized_decimal(text: &str) -> Option<(bool, String, i128)> {
+         .checked_add((digits.len() - trimmed.len()) as i128)?;
+     Some((negative, trimmed.into(), exponent))
+ }
++
++pub(crate) fn parse_provider_arguments(
++    raw: &str,
++    max_bytes: usize,
++) -> Result<JsonObject, ContractError> {
++    if raw.len() > max_bytes {
++        return Err(arguments());
++    }
++    let value = parse_json(raw).map_err(|_| arguments())?;
++    let original: &serde_json::value::RawValue =
++        serde_json::from_str(raw).map_err(|_| arguments())?;
++    if !numbers_preserved(original, &value) {
++        return Err(ContractError::new(
++            ErrorCode::InvalidArguments,
++            "provider_tool.numeric_precision",
++        ));
++    }
++    Ok(value
++        .as_object()
++        .ok_or_else(arguments)?
++        .clone()
++        .into_iter()
++        .collect())
++}
+diff --git a/crates/wickle/src/state.rs b/crates/wickle/src/state.rs
+index 8199955550fa276eaa393568ff8e0db8310dce0d..b460e66aa2ec775ba4c9c7d17aacbeac5f2bc6af 100644
+--- a/crates/wickle/src/state.rs
++++ b/crates/wickle/src/state.rs
+@@ -1090,6 +1090,14 @@ fn validate_snapshot_refs(
+     references.extend(&snapshot.context_batches);
+     references.extend(snapshot.source_states.iter().map(|s| &s.batch_ref));
+     for entry in &snapshot.tool_ledger {
++        if let Some(reference) = entry
++            .call
++            .provider_arguments
++            .as_ref()
++            .and_then(|arguments| arguments.compiled_contract_ref.as_ref())
++        {
++            references.push(reference);
++        }
+         if let Some(reference) = &entry.call.bound_input_ref {
+             crate::input_binding::validate_bound_record(
+                 record_value(state, additions, reference)?,
+diff --git a/crates/wickle/src/tool_execution/round.rs b/crates/wickle/src/tool_execution/round.rs
+index 481883140cc0d107d35ae1b764b47c77f05d800d..a364acfaf5a1b9acde24e2f3ae2a6ba1720152f7 100644
+--- a/crates/wickle/src/tool_execution/round.rs
++++ b/crates/wickle/src/tool_execution/round.rs
+@@ -84,22 +84,27 @@ impl SerialToolRound {
+                 .await?;
+                 continue;
+             };
+-            if registered
+-                .compiled
+-                .validate_model_inputs(&call.model_inputs)
+-                .is_err()
++            let normalized = match crate::future::boxed(|| {
++                self.binder
++                    .prepare_model_inputs(&registered.compiled, &call, context, budget)
++            })
++            .await
+             {
+-                self.reject(
+-                    &call,
+-                    call_message_id,
+-                    ToolResultStatus::Failed,
+-                    "invalid_arguments",
+-                    budget,
+-                    context,
+-                )
+-                .await?;
+-                continue;
+-            }
++                Ok(inputs) => inputs,
++                Err(error) if error.code == ErrorCode::InvalidArguments => {
++                    self.reject(
++                        &call,
++                        call_message_id,
++                        ToolResultStatus::Failed,
++                        "invalid_arguments",
++                        budget,
++                        context,
++                    )
++                    .await?;
++                    continue;
++                }
++                Err(error) => return Err(error),
++            };
+             if call.bound_input_ref.is_none() {
+                 if let Some(hooks) = &self.hooks {
+                     let transformed = hooks
+@@ -112,7 +117,7 @@ impl SerialToolRound {
+                                 descriptor_digest: registered.compiled.descriptor_digest().clone(),
+                                 compiled_digest: registered.compiled.digest().clone(),
+                                 original_model_inputs: call.model_inputs.clone(),
+-                                model_inputs: call.model_inputs.clone(),
++                                model_inputs: normalized,
+                             },
+                             context,
+                             budget,
+@@ -131,7 +136,7 @@ impl SerialToolRound {
+                         continue;
+                     }
+                     if let Some(inputs) = transformed.model_inputs {
+-                        registered.compiled.validate_model_inputs(&inputs)?;
++                        registered.compiled.normalize_model_inputs(&inputs)?;
+                     }
+                 }
+             }
+@@ -994,7 +999,7 @@ impl SerialToolRound {
+ }
+ 
+ pub(crate) fn call_message(saved: &StoredRun, call: &ToolCall) -> Result<Id, ContractError> {
+-    let messages: Vec<_> = saved.messages.iter().filter(|message| message.run_id == saved.snapshot.run_id && message.role == MessageRole::Assistant && message.content.iter().any(|content| matches!(content, ContentBlock::ToolCall { call: candidate } if candidate.call_id == call.call_id && candidate.model_request_id == call.model_request_id && candidate.provider_call_id == call.provider_call_id && candidate.tool_name == call.tool_name && candidate.model_inputs == call.model_inputs && candidate.descriptor_digest == call.descriptor_digest))).collect();
++    let messages: Vec<_> = saved.messages.iter().filter(|message| message.run_id == saved.snapshot.run_id && message.role == MessageRole::Assistant && message.content.iter().any(|content| matches!(content, ContentBlock::ToolCall { call: candidate } if candidate.call_id == call.call_id && candidate.model_request_id == call.model_request_id && candidate.provider_call_id == call.provider_call_id && candidate.tool_name == call.tool_name && candidate.model_inputs == call.model_inputs && candidate.provider_arguments == call.provider_arguments && candidate.descriptor_digest == call.descriptor_digest))).collect();
+     if messages.len() != 1 {
+         return Err(error(ErrorCode::InvalidSnapshot, "tool.call_message"));
+     }
+diff --git a/crates/wickle/src/tool_schema.rs b/crates/wickle/src/tool_schema.rs
+index 0e62d25a1d9daa73f231e396abc9fbfcc11a0a74..2fcaa4552cdb9ba0b67915ef442447925963b452 100644
+--- a/crates/wickle/src/tool_schema.rs
++++ b/crates/wickle/src/tool_schema.rs
+@@ -294,6 +294,13 @@ impl CompiledTool {
+         }
+         Ok(())
+     }
++    /// Apply declared top-level model defaults before canonical validation.
++    /// Explicit null and present values are never replaced; system fields are absent.
++    pub fn normalize_model_inputs(&self, input: &JsonObject) -> Result<JsonObject, ContractError> {
++        let normalized = apply_model_defaults(self.model_input_schema(), input)?;
++        self.validate_model_inputs(&normalized)?;
++        Ok(normalized)
++    }
+     /// Validate already-bound execution arguments. This does not establish target
+     /// existence/ownership or apply defaults; those remain later binding/policy work.
+     pub fn validate_execution_inputs(&self, input: &JsonObject) -> Result<(), ContractError> {
+@@ -983,3 +990,55 @@ fn project_model_conjunction(
+     }
+     Ok(Value::Object(result))
+ }
++
++pub(crate) fn normalize_model_input_schema(
++    schema: &Value,
++    input: &JsonObject,
++) -> Result<JsonObject, ContractError> {
++    let normalized = apply_model_defaults(schema, input)?;
++    if !compile_validator(schema)?
++        .is_valid(&Value::Object(normalized.clone().into_iter().collect()))
++    {
++        return Err(ContractError::new(
++            ErrorCode::InvalidArguments,
++            "tool.model_inputs",
++        ));
++    }
++    Ok(normalized)
++}
++fn apply_model_defaults(schema: &Value, input: &JsonObject) -> Result<JsonObject, ContractError> {
++    let Some(properties) = schema.get("properties") else {
++        return Ok(input.clone());
++    };
++    let properties = properties
++        .as_object()
++        .ok_or_else(|| invalid("model_defaults.properties"))?;
++    let mut normalized = input.clone();
++    for (name, property) in properties {
++        if normalized.contains_key(name) {
++            continue;
++        }
++        let mut current = property;
++        let mut visited = BTreeSet::new();
++        loop {
++            if let Some(default) = current.get("default") {
++                normalized.insert(name.clone(), default.clone());
++                break;
++            }
++            let Some(reference) = current.get("$ref").and_then(Value::as_str) else {
++                break;
++            };
++            if !visited.insert(reference) {
++                break;
++            }
++            current = schema
++                .pointer(
++                    reference
++                        .strip_prefix('#')
++                        .ok_or_else(|| invalid("model_defaults.reference"))?,
++                )
++                .ok_or_else(|| invalid("model_defaults.reference"))?;
++        }
++    }
++    Ok(normalized)
++}
+diff --git a/crates/wickle/tests/agent_hooks.rs b/crates/wickle/tests/agent_hooks.rs
+index eee9b28d3035e5eddf9d6d13ee61dfbfbe947d13..568955576387ba1e95e56dedcdc62ba143a3cd8a 100644
+--- a/crates/wickle/tests/agent_hooks.rs
++++ b/crates/wickle/tests/agent_hooks.rs
+@@ -828,3 +828,169 @@ async fn after_run_uses_a_fresh_bounded_cleanup_context_after_explicit_cancellat
+             .all(|tool| tool.calls.load(Ordering::SeqCst) == 0)
+     );
+ }
++
++fn defaulted_tools(fixture: &mut Fixture) {
++    let entries = ["before", "target", "after"]
++        .iter()
++        .enumerate()
++        .map(|(index, name)| {
++            let mut descriptor = fixture
++                .base
++                .registry
++                .get(&id(name))
++                .unwrap()
++                .compiled
++                .descriptor()
++                .clone();
++            descriptor.input_schema["properties"]["query"]["default"] = json!("fallback");
++            ToolRegistration {
++                compiled: SchemaCompiler::new()
++                    .compile(descriptor, &fixture.base.inputs)
++                    .unwrap(),
++                executor: fixture.base.tools[index].clone(),
++            }
++        })
++        .collect();
++    fixture.base.registry = std::sync::Arc::new(ToolRegistry::new(scope(), entries).unwrap());
++}
++
++#[tokio::test]
++async fn required_defaults_precede_hooks_and_are_reapplied_after_a_hook_removes_the_value() {
++    let mut fixture = Fixture::new();
++    defaulted_tools(&mut fixture);
++    *fixture.base.model.raw_arguments.lock().unwrap() = Some("{}".into());
++    let first = fixture.add(
++        "remove",
++        HookPosition::BeforeTool,
++        Behavior::RemoveQuery,
++        0,
++        true,
++    );
++    let second = fixture.add(
++        "append",
++        HookPosition::BeforeTool,
++        Behavior::Append,
++        1,
++        true,
++    );
++    let agent = fixture.agent();
++    let handle = fixture.started(&agent).await;
++    assert_eq!(
++        fixture.outcome(&handle).await.result.status(),
++        RunStatus::Succeeded
++    );
++    for hook in [&first, &second] {
++        for (input, _) in hook.seen.lock().unwrap().iter() {
++            let HookInput::BeforeTool {
++                original_model_inputs,
++                model_inputs,
++                ..
++            } = input
++            else {
++                panic!("expected Tool input")
++            };
++            assert!(original_model_inputs.is_empty());
++            assert_eq!(model_inputs["query"], json!("fallback"));
++            assert!(!model_inputs.contains_key("workspace_id"));
++        }
++    }
++    for tool in &fixture.base.tools {
++        assert_eq!(
++            tool.seen.lock().unwrap()[0].arguments["query"],
++            json!("fallback|append")
++        );
++    }
++    let saved = fixture.saved(&handle).await;
++    assert!(saved.snapshot.tool_ledger.iter().all(|entry| {
++        entry.call.provider_arguments.as_ref().unwrap().raw == "{}"
++            && entry.call.model_inputs.is_empty()
++    }));
++    assert_eq!(saved.snapshot.usage.repair_attempts, 0);
++}
++
++#[tokio::test]
++async fn malformed_raw_arguments_cannot_become_executable_by_applying_defaults() {
++    for raw in ["{", "[]", r#"{"query":"x","query":"y"}"#] {
++        let mut fixture = Fixture::new();
++        defaulted_tools(&mut fixture);
++        *fixture.base.model.raw_arguments.lock().unwrap() = Some(raw.into());
++        let hook = fixture.add(
++            "before",
++            HookPosition::BeforeTool,
++            Behavior::Append,
++            0,
++            true,
++        );
++        let agent = fixture.agent();
++        let handle = fixture.started(&agent).await;
++        let outcome = fixture.outcome(&handle).await;
++        assert_eq!(
++            outcome.result,
++            OutcomeResult::Exhausted {
++                budget: BudgetKind::RepairAttempts
++            }
++        );
++        assert_eq!(outcome.usage.model_calls, 1);
++        assert_eq!(outcome.usage.tool_attempts, 0);
++        assert_eq!(hook.calls.load(Ordering::SeqCst), 0);
++        assert_eq!(fixture.base.resolver.calls.load(Ordering::SeqCst), 0);
++        assert!(
++            fixture
++                .base
++                .tools
++                .iter()
++                .all(|tool| tool.calls.load(Ordering::SeqCst) == 0)
++        );
++        let saved = fixture.saved(&handle).await;
++        assert_eq!(saved.snapshot.tool_ledger.len(), 3);
++        for entry in &saved.snapshot.tool_ledger {
++            assert_eq!(entry.call.provider_arguments.as_ref().unwrap().raw, raw);
++        }
++    }
++}
++
++#[tokio::test]
++async fn one_repair_reservation_covers_all_invalid_calls_in_a_round_and_restores() {
++    let mut fixture = Fixture::new();
++    defaulted_tools(&mut fixture);
++    fixture.base.profile.limits.max_repair_attempts = 1;
++    *fixture.base.model.raw_arguments.lock().unwrap() = Some("{".into());
++    let agent = fixture.agent();
++    let handle = fixture.started(&agent).await;
++    let outcome = fixture.outcome(&handle).await;
++    assert_eq!(outcome.result.status(), RunStatus::Succeeded);
++    assert_eq!(outcome.usage.model_calls, 2);
++    assert_eq!(outcome.usage.repair_attempts, 1);
++    assert_eq!(outcome.usage.tool_attempts, 0);
++    let checkpoint = fixture.base.base.store.export_checkpoint(&scope()).unwrap();
++    let loaded = StateStoreCheckpoint::from_json(
++        &serde_json::to_string(&checkpoint).unwrap(),
++        &scope(),
++        &checkpoint.digest(),
++    )
++    .unwrap();
++    let reopened = MemoryStateStore::from_checkpoint(loaded);
++    let saved = reopened.load(&scope(), handle.run_id()).await.unwrap();
++    assert_eq!(saved.snapshot.tool_ledger.len(), 3);
++    let repairs: Vec<_> = saved
++        .snapshot
++        .reservations
++        .iter()
++        .filter_map(|entry| {
++            if let ReservationKind::ToolRepair { model_request_id } = &entry.kind {
++                Some(model_request_id)
++            } else {
++                None
++            }
++        })
++        .collect();
++    assert_eq!(repairs.len(), 1);
++    assert!(
++        saved
++            .snapshot
++            .tool_ledger
++            .iter()
++            .all(|entry| &entry.call.model_request_id == repairs[0]
++                && entry.call.provider_arguments.as_ref().unwrap().raw == "{")
++    );
++}
+diff --git a/crates/wickle/tests/agent_runtime.rs b/crates/wickle/tests/agent_runtime.rs
+index 222bf3f44499a6afdee1a62590a2c06abb8016a7..fb72aee6bc4949649a7bfc9080f03fac571385d0 100644
+--- a/crates/wickle/tests/agent_runtime.rs
++++ b/crates/wickle/tests/agent_runtime.rs
+@@ -652,7 +652,7 @@ async fn concurrent_duplicate_starts_share_one_run_and_one_model_attempt() {
+ async fn adapter_panic_fails_and_repeated_unknown_tools_exhaust_without_tool_dispatch() {
+     for (response, expected_status, expected_calls) in [
+         (Response::Panic, RunStatus::Failed, 1),
+-        (Response::Tool, RunStatus::Exhausted, 4),
++        (Response::Tool, RunStatus::Exhausted, 1),
+     ] {
+         let fixture = Fixture::new(response, false);
+         let agent = fixture.agent();
+@@ -1211,3 +1211,39 @@ async fn profile_and_run_options_reach_the_model_with_pinned_origins_and_output_
+         assert_eq!(config.max_output_tokens.get(), expected_cap);
+     }
+ }
++
++#[tokio::test]
++async fn invalid_tool_rounds_have_a_separate_finite_repair_budget() {
++    for capacity in [0, 1, 2] {
++        let fixture = Fixture::new(Response::Tool, false);
++        let mut profile = profile();
++        profile.limits.max_repair_attempts = capacity;
++        let agent = create_agent(profile, fixture.bindings()).unwrap();
++        let handle = fixture.started(&agent, "repair").await;
++        let outcome = completed(handle.outcome(&context()).await.unwrap());
++        assert_eq!(
++            outcome.result,
++            OutcomeResult::Exhausted {
++                budget: BudgetKind::RepairAttempts
++            }
++        );
++        assert_eq!(outcome.usage.model_calls, capacity + 1);
++        assert_eq!(outcome.usage.repair_attempts, capacity);
++        assert_eq!(outcome.usage.tool_attempts, 0);
++        assert_eq!(outcome.usage.recovery_attempts, 0);
++        let saved = fixture.store.load(&scope(), handle.run_id()).await.unwrap();
++        let rounds: std::collections::BTreeSet<_> = saved
++            .snapshot
++            .reservations
++            .iter()
++            .filter_map(|reservation| {
++                if let ReservationKind::ToolRepair { model_request_id } = &reservation.kind {
++                    Some(model_request_id)
++                } else {
++                    None
++                }
++            })
++            .collect();
++        assert_eq!(rounds.len(), capacity as usize);
++    }
++}
+diff --git a/crates/wickle/tests/agent_tool_loop.rs b/crates/wickle/tests/agent_tool_loop.rs
+index 02c48ae75e4da7fc44607b71d49025b1483af170..a41cd7c8e0e300d2bbc40ca1450e3687315889ec 100644
+--- a/crates/wickle/tests/agent_tool_loop.rs
++++ b/crates/wickle/tests/agent_tool_loop.rs
+@@ -1687,7 +1687,8 @@ async fn unknown_invalid_and_denied_calls_return_errors_to_the_model_without_exe
+             ),
+             _ => ("read", object(json!({"query":"x"}))),
+         };
+-        let fixture = Fixture::new(vec![plan], Behavior::Success);
++        let mut fixture = Fixture::new(vec![plan], Behavior::Success);
++        fixture.profile.limits.max_repair_attempts = 1;
+         if case == 2 {
+             fixture.policy.mode.store(1, Ordering::SeqCst);
+         }
+@@ -1696,6 +1697,7 @@ async fn unknown_invalid_and_denied_calls_return_errors_to_the_model_without_exe
+         let outcome = fixture.outcome(&handle).await;
+         assert_eq!(outcome.result.status(), RunStatus::Succeeded);
+         assert_eq!(outcome.usage.tool_attempts, 0);
++        assert_eq!(outcome.usage.repair_attempts, if case == 2 { 0 } else { 1 });
+         assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 2);
+         assert!(fixture.order.lock().unwrap().is_empty());
+         let requests = fixture.model.requests.lock().unwrap();
+diff --git a/crates/wickle/tests/budget.rs b/crates/wickle/tests/budget.rs
+index b8e6ad0c755a27936430cc5bdcc18129ebc0de5e..dab42ef0be24c0d423d6007de692899816d0adfa 100644
+--- a/crates/wickle/tests/budget.rs
++++ b/crates/wickle/tests/budget.rs
+@@ -516,6 +516,7 @@ async fn waiting_observation_consumes_time_but_no_model_attempts() {
+     // A wait target needs a matching planned tool in the saved checkpoint.
+     commit.snapshot.tool_ledger.push(ToolLedgerEntry {
+         call: ToolCall {
++            provider_arguments: None,
+             call_id: id("call"),
+             model_request_id: id("model"),
+             provider_call_id: id("provider-call"),
+diff --git a/crates/wickle/tests/context_projection.rs b/crates/wickle/tests/context_projection.rs
+index ba9fdc9f68be51142598e10493ab430a4e4f91d9..2f76f7549b9ee4f9ddbe394b3f5562f52fa364b3 100644
+--- a/crates/wickle/tests/context_projection.rs
++++ b/crates/wickle/tests/context_projection.rs
+@@ -340,6 +340,7 @@ fn text(value: &str) -> ContentBlock {
+ fn round(run: &str, sequence: u64, label: &str, body: &str, tool: &CompiledTool) -> Vec<Message> {
+     let call_message = id(&format!("message-{sequence}"));
+     let call = ToolCall {
++        provider_arguments: None,
+         call_id: id(label),
+         model_request_id: id(&format!("request-{label}")),
+         provider_call_id: id(&format!("provider-{label}")),
+diff --git a/crates/wickle/tests/contracts.rs b/crates/wickle/tests/contracts.rs
+index b9c3bead28cb4eb2106658083983cfacc19aeb70..562aae60af21a8e7e6a51cf38f32fdf7b1ba9bec 100644
+--- a/crates/wickle/tests/contracts.rs
++++ b/crates/wickle/tests/contracts.rs
+@@ -767,6 +767,7 @@ async fn checkpoint() -> RunSnapshot {
+         model_ledger: vec![],
+         tool_ledger: vec![ToolLedgerEntry {
+             call: ToolCall {
++                provider_arguments: None,
+                 call_id: id("call"),
+                 model_request_id: id("model-request"),
+                 provider_call_id: id("provider-call"),
+diff --git a/crates/wickle/tests/input_binding.rs b/crates/wickle/tests/input_binding.rs
+index e31a7f456bf760e4a103030d966df7a26b3c807b..01b7bd74127bff2f4d6600f0470afca8a97fe375 100644
+--- a/crates/wickle/tests/input_binding.rs
++++ b/crates/wickle/tests/input_binding.rs
+@@ -359,6 +359,7 @@ impl Fixture {
+     async fn plan(&self, call_id: &str, model_inputs: JsonObject) -> ToolCall {
+         let saved = self.store.load(&scope(), &id("run")).await.unwrap();
+         let call = ToolCall {
++            provider_arguments: None,
+             call_id: id(call_id),
+             model_request_id: id(&format!("request-{call_id}")),
+             provider_call_id: id(&format!("provider-{call_id}")),
+@@ -1240,7 +1241,7 @@ async fn restored_bound_inputs_require_the_original_record_call_scope_and_run()
+ }
+ 
+ #[tokio::test]
+-async fn only_direct_optional_defaults_are_applied_not_conditional_or_required_model_defaults() {
++async fn direct_required_and_optional_defaults_are_applied_but_conditional_defaults_are_not() {
+     let mut required_default = descriptor();
+     required_default.input_schema["required"] = json!(["query", "limit", "workspace_id"]);
+     let fixture = Fixture::new(
+@@ -1250,7 +1251,9 @@ async fn only_direct_optional_defaults_are_applied_not_conditional_or_required_m
+     )
+     .await;
+     fixture.plan("call", object(json!({"query":"x"}))).await;
+-    assert!(fixture.bind("call", None).await.is_err());
++    let bound = fixture.bind("call", None).await.unwrap();
++    assert_eq!(bound.input.normalized_model_inputs()["limit"], json!(10));
++    assert!(!bound.input.original_model_inputs().contains_key("limit"));
+ 
+     let mut conditional = descriptor();
+     conditional.agent_parameters.push("workspace_id".into());
+diff --git a/crates/wickle/tests/model_execution.rs b/crates/wickle/tests/model_execution.rs
+index 300dc2dac9cd23d9cc1975d2b3c0bfdc2a35ee88..0bfbcd756784cf3158186bf01247f614b6349cf7 100644
+--- a/crates/wickle/tests/model_execution.rs
++++ b/crates/wickle/tests/model_execution.rs
+@@ -105,6 +105,7 @@ impl PolicyPort for Policy {
+ 
+ enum Reply {
+     Complete,
++    Tool(String),
+     Fail(ModelFailureKind),
+     IncompleteTool,
+     Pending,
+@@ -187,6 +188,19 @@ impl ModelPort for ScriptedModel {
+                 name: Some("search".into()),
+                 delta: "{\"query\":".into(),
+             })])),
++            Reply::Tool(arguments) => Box::pin(stream::iter([
++                Ok(ModelEvent::ToolArgumentsDelta {
++                    index: 0,
++                    provider_call_id: Some("provider-tool".into()),
++                    name: Some("wire_search".into()),
++                    delta: arguments,
++                }),
++                Ok(ModelEvent::ResponseCompleted {
++                    finish: ModelFinish::ToolCalls,
++                    metadata: ModelResponseMetadata::default(),
++                    continuation: vec![],
++                }),
++            ])),
+             Reply::Pending => Box::pin(stream::pending()),
+         };
+         Box::pin(start.chain(tail))
+@@ -804,3 +818,126 @@ async fn a_completed_ledger_entry_requires_the_exact_typed_response_and_reservat
+         Some(record.reference())
+     );
+ }
++
++struct RenamedArguments;
++impl ProviderToolSchemaCompiler for RenamedArguments {
++    fn reference(&self) -> VersionedRef {
++        reference("renamed")
++    }
++    fn compile(
++        &self,
++        tool: &ModelTool,
++        _: &ProviderToolTarget,
++    ) -> Result<ProviderToolProjection, ContractError> {
++        Ok(ProviderToolProjection {
++            wire_tool: ModelTool {
++                name: id("wire_search"),
++                description: tool.description.clone(),
++                model_input_schema: json!({"type":"object","properties":{"q":{"type":"string"},"n":{"type":"object","properties":{"present":{"type":"boolean"},"value":{"type":["integer","null"]}},"required":["present","value"],"additionalProperties":false}},"required":["q","n"],"additionalProperties":false}),
++            },
++            decode_plan: ArgumentDecodePlan::Fields {
++                fields: vec![
++                    ArgumentFieldMapping {
++                        wire_name: "q".into(),
++                        canonical_name: "query".into(),
++                        encoding: ArgumentValueEncoding::Identity {},
++                    },
++                    ArgumentFieldMapping {
++                        wire_name: "n".into(),
++                        canonical_name: "limit".into(),
++                        encoding: ArgumentValueEncoding::Presence {
++                            present_key: "present".into(),
++                            value_key: "value".into(),
++                        },
++                    },
++                ],
++            },
++        })
++    }
++}
++#[tokio::test]
++async fn saved_provider_codec_restores_canonical_arguments_before_required_defaults() {
++    let registry = SystemInputRegistry::new(vec![]).unwrap();
++    let canonical = SchemaCompiler::new().compile(ToolDescriptor::from_json(r#"{
++        "tool":{"id":"search","version":"1"},"name":"search","description":"Search",
++        "input_schema":{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer","default":10}},"required":["query","limit"],"additionalProperties":false},
++        "agent_parameters":["query","limit"],"output_schema":{"type":"string"},"max_output_bytes":100
++    }"#).unwrap(),&registry).unwrap();
++    let mut request = request("first");
++    let target = ProviderToolTarget {
++        provider: request.route.provider.clone(),
++        api_contract: request.route.api_contract.clone(),
++        capability_revision: request.route.capability_revision.clone(),
++    };
++    let contract = CompiledToolContract::compile(
++        &canonical,
++        target,
++        &RenamedArguments,
++        ProviderToolSchemaLimits::default(),
++    )
++    .unwrap();
++    let record = ProtectedRecord::new(
++        id("compiled-provider-tool"),
++        1,
++        serde_json::to_value(&contract).unwrap(),
++    );
++    let contract_ref = record.reference().clone();
++    let fixture = Fixture::with_records(1, 0, Arc::new(RandomIdSource), vec![record]).await;
++    request.tools = vec![contract.wire_tool().clone()];
++    request.limits.max_tool_calls = 1;
++    let raw = r#"{ "q": "evidence", "n": {"present":false,"value":null} }"#;
++    let model = fixture.model("first", vec![Reply::Tool(raw.into())]);
++    let response = fixture
++        .exchange(model, 0)
++        .generate(&request, &fixture.context, &fixture.budget)
++        .await
++        .unwrap();
++    let Guarded::Completed(ModelExchangeOutcome::Completed { response }) = response else {
++        panic!("expected complete Tool proposal")
++    };
++    let proposal = &response.tool_calls[0];
++    assert_eq!(proposal.raw_arguments.as_deref(), Some(raw));
++    let mut call = ToolCall {
++        provider_arguments: Some(ProviderToolArguments {
++            name: proposal.name.clone(),
++            raw: raw.into(),
++            compiled_contract_ref: Some(contract_ref),
++        }),
++        call_id: id("call"),
++        model_request_id: response.request_id,
++        provider_call_id: proposal.provider_call_id.clone(),
++        tool_name: id("search"),
++        model_inputs: contract
++            .decode_arguments(raw, ProviderToolSchemaLimits::default())
++            .unwrap(),
++        descriptor_digest: Some(canonical.descriptor_digest().clone()),
++        bound_input_ref: None,
++    };
++    let binder = InputBinder::new(
++        Arc::new(registry),
++        None,
++        Arc::new(PolicyGate::new(fixture.policy.clone(), Duration::from_secs(1)).unwrap()),
++        Arc::new(RandomIdSource),
++    );
++    let restored = binder
++        .prepare_model_inputs(&canonical, &call, &fixture.context, &fixture.budget)
++        .await
++        .unwrap();
++    assert_eq!(
++        restored,
++        JsonObject::from([
++            ("query".into(), json!("evidence")),
++            ("limit".into(), json!(10))
++        ])
++    );
++    assert!(!call.model_inputs.contains_key("limit"));
++    call.model_inputs.insert("query".into(), json!("changed"));
++    assert_eq!(
++        binder
++            .prepare_model_inputs(&canonical, &call, &fixture.context, &fixture.budget)
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::InvalidArguments
++    );
++}
+diff --git a/crates/wickle/tests/model_protocol.rs b/crates/wickle/tests/model_protocol.rs
+index 8c5de178efad466c0ee4054248a4e32863806888..742fdcc1e7ce22d596f8c778b45dcd33568d3897 100644
+--- a/crates/wickle/tests/model_protocol.rs
++++ b/crates/wickle/tests/model_protocol.rs
+@@ -224,7 +224,7 @@ async fn contradictory_or_repeated_terminals_and_events_after_completion_are_rej
+ }
+ 
+ #[tokio::test]
+-async fn malformed_or_ambiguous_argument_json_is_rejected_before_returning_calls() {
++async fn malformed_argument_text_is_preserved_as_an_unexecutable_proposal() {
+     for arguments in [
+         r#"{"query":"first","query":"second"}"#,
+         r#"{"query":"x","nested":{"key":1,"key":2}}"#,
+@@ -236,18 +236,24 @@ async fn malformed_or_ambiguous_argument_json_is_rejected_before_returning_calls
+         "",
+         r#"{"query":"unfinished"#,
+     ] {
+-        assert!(
+-            collect(
+-                &request(),
+-                vec![
+-                    tool(0, Some("call"), Some("search"), arguments),
+-                    completed(ModelFinish::ToolCalls),
+-                ]
+-            )
+-            .await
+-            .is_err(),
+-            "accepted arguments: {arguments}"
++        let response = collect(
++            &request(),
++            vec![
++                tool(0, Some("call"), Some("search"), arguments),
++                completed(ModelFinish::ToolCalls),
++            ],
++        )
++        .await
++        .unwrap();
++        assert_eq!(
++            response.tool_calls[0].validation,
++            ToolCallValidation::InvalidArguments
+         );
++        assert_eq!(
++            response.tool_calls[0].raw_arguments.as_deref(),
++            Some(arguments)
++        );
++        assert!(response.tool_calls[0].model_inputs.is_empty());
+     }
+ }
+ 
+@@ -569,3 +575,33 @@ fn host_options_affect_request_identity_and_bounds_without_changing_empty_reques
+         "model_request.input_size"
+     );
+ }
++
++#[tokio::test]
++async fn empty_object_schema_without_properties_accepts_an_empty_proposal() {
++    let mut input = request();
++    input.tools[0].model_input_schema = json!({"type":"object","additionalProperties":false});
++    input.validate().unwrap();
++    let response = collect(
++        &input,
++        vec![
++            tool(0, Some("call"), Some("search"), "{}"),
++            completed(ModelFinish::ToolCalls),
++        ],
++    )
++    .await
++    .unwrap();
++    assert_eq!(response.tool_calls[0].validation, ToolCallValidation::Valid);
++    let rejected = collect(
++        &input,
++        vec![
++            tool(0, Some("call"), Some("search"), r#"{"unexpected":true}"#),
++            completed(ModelFinish::ToolCalls),
++        ],
++    )
++    .await
++    .unwrap();
++    assert_eq!(
++        rejected.tool_calls[0].validation,
++        ToolCallValidation::InvalidArguments
++    );
++}
+diff --git a/crates/wickle/tests/state.rs b/crates/wickle/tests/state.rs
+index 1e585b8a47454b5b00156a320137c0acefafee76..9400adedb12fa3682b9a3bd71ddd688f302bd410 100644
+--- a/crates/wickle/tests/state.rs
++++ b/crates/wickle/tests/state.rs
+@@ -578,6 +578,7 @@ async fn uncertain_tool_effects_keep_the_original_attempt_and_idempotency_key()
+         .unwrap();
+     let mut plan = prepared(&before.snapshot, lease.clone(), 101);
+     let call = ToolCall {
++        provider_arguments: None,
+         call_id: id("call"),
+         model_request_id: id("model-request"),
+         provider_call_id: id("provider-call"),
+diff --git a/crates/wickle/tests/support/agent_hooks.rs b/crates/wickle/tests/support/agent_hooks.rs
+index 9b95aebf6da5a9c28ecf16f448243bf75280be8c..0a266a1303d1f515c47c0c4d6372411dc6067f4a 100644
+--- a/crates/wickle/tests/support/agent_hooks.rs
++++ b/crates/wickle/tests/support/agent_hooks.rs
+@@ -279,6 +279,7 @@ impl Fixture {
+ pub enum Behavior {
+     Context,
+     Append,
++    RemoveQuery,
+     Hidden,
+     InvalidValue,
+     Deny,
+@@ -417,8 +418,13 @@ impl HookHandler for Hook {
+                     ..
+                 } => {
+                     assert_eq!(
+-                        tool.model_input_schema["properties"],
+-                        json!({"query":{"type":"string"}})
++                        tool.model_input_schema["properties"]
++                            .as_object()
++                            .unwrap()
++                            .keys()
++                            .cloned()
++                            .collect::<Vec<_>>(),
++                        vec!["query".to_string()]
+                     );
+                     assert!(original_model_inputs.get("workspace_id").is_none());
+                     let mut model_inputs = model_inputs.clone();
+@@ -430,6 +436,9 @@ impl HookHandler for Hook {
+                                 json!(format!("{query}|{}", self.suffix.lock().unwrap())),
+                             );
+                         }
++                        Behavior::RemoveQuery => {
++                            model_inputs.remove("query");
++                        }
+                         Behavior::Hidden => {
+                             model_inputs.insert("workspace_id".into(), json!(WORKSPACE));
+                         }
+diff --git a/crates/wickle/tests/support/agent_resume.rs b/crates/wickle/tests/support/agent_resume.rs
+index 18f8f1d9e80c0a5a39369452301911a8137e1c2d..1d54b95705e10a36d7fbe487ec48153235508ad6 100644
+--- a/crates/wickle/tests/support/agent_resume.rs
++++ b/crates/wickle/tests/support/agent_resume.rs
+@@ -177,6 +177,7 @@ impl SystemInputResolver for Resolver {
+ }
+ 
+ pub struct Model {
++    pub raw_arguments: Mutex<Option<String>>,
+     pub calls: AtomicUsize,
+     pub requests: Mutex<Vec<ModelRequest>>,
+     pub hold_final: AtomicBool,
+@@ -206,18 +207,21 @@ impl ModelPort for Model {
+             })
+         };
+         if attempt == 0 {
+-            let mut events: Vec<_> = ["before", "target", "after"]
+-                .iter()
+-                .enumerate()
+-                .map(|(index, name)| {
+-                    Ok(ModelEvent::ToolArgumentsDelta {
+-                        index: index as u32,
+-                        provider_call_id: Some(format!("provider-{index}")),
+-                        name: Some((*name).into()),
+-                        delta: serde_json::to_string(&json!({"query":name})).unwrap(),
++            let mut events: Vec<_> =
++                ["before", "target", "after"]
++                    .iter()
++                    .enumerate()
++                    .map(|(index, name)| {
++                        Ok(ModelEvent::ToolArgumentsDelta {
++                            index: index as u32,
++                            provider_call_id: Some(format!("provider-{index}")),
++                            name: Some((*name).into()),
++                            delta: self.raw_arguments.lock().unwrap().clone().unwrap_or_else(
++                                || serde_json::to_string(&json!({"query":name})).unwrap(),
++                            ),
++                        })
+                     })
+-                })
+-                .collect();
++                    .collect();
+             events.push(completion(ModelFinish::ToolCalls));
+             Box::pin(stream::iter(events))
+         } else {
+@@ -409,6 +413,7 @@ impl Fixture {
+             profile,
+             order,
+             model: Arc::new(Model {
++                raw_arguments: Mutex::new(None),
+                 calls: AtomicUsize::new(0),
+                 requests: Mutex::new(vec![]),
+                 hold_final: AtomicBool::new(false),
+diff --git a/crates/wickle/tests/support/tool_execution.rs b/crates/wickle/tests/support/tool_execution.rs
+index 1e2c1a055b3979df3f5faf9627adc604c17344cf..1754435d955f84d405e93dc96237fdc43d3a94c3 100644
+--- a/crates/wickle/tests/support/tool_execution.rs
++++ b/crates/wickle/tests/support/tool_execution.rs
+@@ -482,6 +482,7 @@ impl Fixture {
+                 .find(|tool| tool.descriptor().name.as_str() == *name)
+                 .map(|tool| tool.descriptor_digest().clone());
+             let call = ToolCall {
++                provider_arguments: None,
+                 call_id: id(call_id),
+                 model_request_id: id("model-request"),
+                 provider_call_id: id(&format!("provider-{call_id}")),
+diff --git a/docs/input-binding.md b/docs/input-binding.md
+index 04b311055cfd8b2112899e034415f967b05f415d..d523e6ee3040579b20f1f42a0d8ca51456747f42 100644
+--- a/docs/input-binding.md
++++ b/docs/input-binding.md
+@@ -5,7 +5,7 @@ Host-supplied system values. It saves immutable execution arguments before a
+ Tool executor can use them. It does not invoke the Tool or make missing IDs up.
+ 
+ For a tool exposing `query` and `limit`, a model can submit `{"query":"recent"}`.
+-The binder can apply the optional model default `limit=10` and read the required
++The binder can apply the declared model default `limit=10` and read the required
+ `workspace_id` from the run's system snapshot. Its execution arguments contain
+ exactly those three fields. Other registered run values are not merged in.
+ 
+@@ -38,8 +38,8 @@ let result = binder.bind(
+ ```
+ 
+ The call must already exist in the Run's Tool ledger. The binder validates its
+-original model arguments, adds supported model defaults, and reads only the
+-hidden keys selected by the compiled contract. Aliases of the same system key
++provider argument provenance, applies declared model defaults before canonical
++validation, and reads only the hidden keys selected by the compiled contract. Aliases of the same system key
+ share one lookup, including a missing result.
+ 
+ `SystemInputResolver` receives one registered key, its definition/resolver version,
+@@ -48,10 +48,10 @@ neither the complete system map nor credentials. It is a read-only lookup
+ contract. `None` means missing; a returned JSON null is a value and must be allowed
+ by the relevant schema.
+ 
+-Default application is deliberately narrow: only missing optional top-level
+-model parameters use a direct default or one reached through a supported local
+-reference. Required, supplied, null, nested, and conditional values are not
+-replaced or inferred. System defaults are never used. Both value schemas and the
++Default application is deliberately narrow: missing top-level model parameters,
++including required parameters, use a direct default or one reached through a
++supported local reference before validation. Supplied values and explicit null
++are never replaced. Nested and conditional defaults are not inferred. System defaults are never used. Both value schemas and the
+ full execution schema must pass after assembly.
+ 
+ ## Enforce current policy
+@@ -100,3 +100,29 @@ Provider-specific schema representation and reversible argument codecs are descr
+ in [Provider Tool schema contracts](provider-tool-schemas.md). These operate on the
+ model-visible projection; full execution validation and system input binding remain
+ separate boundaries.
++
++## Preserve provider arguments and bound corrections
++
++`ProposedToolCall.raw_arguments` preserves the original complete argument text,
++including malformed proposals. `ToolCall.provider_arguments` keeps the provider
++name, raw text, and optional protected `CompiledToolContract` reference separately
++from canonical `model_inputs`. Historical records can omit this evidence.
++
++`InputBinder::prepare_model_inputs` restores a saved provider codec against the
++original model invocation's target and verifies that decoding matches the saved
++canonical arguments. Identity projections also reparse the raw text. Malformed,
++ambiguous or numerically rounded input cannot become executable by applying defaults.
++The Agent stores identity provenance automatically; custom projections require
++materializing the pinned compiler reference with the canonical call.
++
++The Tool round applies defaults and validates before `before_tool`. Hook outputs
++are normalized and validated again, then system values are resolved/bound and the
++full execution schema is checked. Existing immutable Hook records are replayed
++as stored; the runtime does not rewrite old callback inputs or repeat callbacks.
++
++Before another model decision following an invalid/unknown Tool round, the Agent
++reserves one `ReservationKind::ToolRepair` for that physical response. Multiple bad
++calls in the same round share that reservation; resuming reuses it. It consumes
++`max_repair_attempts`, while the subsequent model call consumes `max_model_calls`.
++Transport recovery remains a separate budget. With zero repair capacity, the
++Agent records safe Tool failures and stops without another model call.
+diff --git a/tests/support/hooks_consumer.rs b/tests/support/hooks_consumer.rs
+index 2738081a1b9946dacce999e3847dbb988dbb2100..fe84e71165272b5bdc57cb547855f0380ce94a02 100644
+--- a/tests/support/hooks_consumer.rs
++++ b/tests/support/hooks_consumer.rs
+@@ -420,7 +420,11 @@ impl HookHandler for Hooks {
+                     model_inputs,
+                     ..
+                 } => {
+-                    assert_eq!(model_inputs, original_model_inputs);
++                    assert_eq!(model_inputs, &match original_model_inputs["query"].as_str().unwrap() {
++                        "alpha" => object(json!({"query":"alpha","limit":2})),
++                        "beta" => object(json!({"query":"beta","limit":3})),
++                        other => panic!("unexpected query: {other}"),
++                    });
+                     let mut inputs = model_inputs.clone();
+                     inputs.insert(
+                         "query".into(),
+diff --git a/tests/support/input_binding_consumer.rs b/tests/support/input_binding_consumer.rs
+index 84302be94358c8ec1f2d6efe475fd5ca4f1b2572..2340c1c5ce5ad84a7ffdaae5aa0a5b8282ea9e12 100644
+--- a/tests/support/input_binding_consumer.rs
++++ b/tests/support/input_binding_consumer.rs
+@@ -130,7 +130,8 @@ async fn plan(
+     let expected_revision = snapshot.revision;
+     snapshot.revision += 1;
+     snapshot.phase = RunPhase::Tool;
+-    let call = ToolCall {
++    let mut call = ToolCall {
++        provider_arguments: None,
+         call_id: id(call_id),
+         model_request_id: id("model-request"),
+         provider_call_id: id(&format!("provider-{call_id}")),
+@@ -139,6 +140,7 @@ async fn plan(
+         descriptor_digest: Some(compiled.descriptor_digest().clone()),
+         bound_input_ref: None,
+     };
++    call.provider_arguments = Some(ProviderToolArguments { name:call.tool_name.clone(),raw:serde_json::to_string(&call.model_inputs).map_err(|_| ContractError::new(ErrorCode::InvalidJson, "example.arguments"))?,compiled_contract_ref:None });
+     snapshot.tool_ledger.push(ToolLedgerEntry {
+         call,
+         state: ToolCallState::Planned {},

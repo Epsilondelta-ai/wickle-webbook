@@ -1,0 +1,3328 @@
+diff --git a/crates/wickle-adapter-runtime/tests/agent_components.rs b/crates/wickle-adapter-runtime/tests/agent_components.rs
+index 9c0746830c4804bfc4f3597b2baa3534971898dd..9f198cc8e87ad83061b8792fdcfa251aadd478b8 100644
+--- a/crates/wickle-adapter-runtime/tests/agent_components.rs
++++ b/crates/wickle-adapter-runtime/tests/agent_components.rs
+@@ -546,3 +546,49 @@ async fn a_custom_runtime_cannot_replace_the_pinned_contract_and_its_resources_a
+             == 1
+     }));
+ }
++
++#[tokio::test(start_paused = true)]
++async fn cleanup_releases_the_lease_before_bounded_adapter_close_and_preserves_the_outcome() {
++    let fixture = AgentFixture::new();
++    fixture.adapters.factories[2]
++        .close_behavior
++        .store(2, Ordering::SeqCst);
++    let mut bindings = fixture.bindings();
++    bindings.components = Some(Arc::new(
++        fixture
++            .adapters
++            .runtime(fixture.registry.clone())
++            .with_settings(AdapterRuntimeSettings {
++                close_timeout_ms: 30_000,
++                ..Default::default()
++            })
++            .unwrap(),
++    ));
++    let agent = create_agent(fixture.profile.clone(), bindings).unwrap();
++    let handle = fixture.start(&agent).await;
++    let result = fixture.outcome(&handle).await;
++    assert_eq!(result.result.status(), RunStatus::Succeeded);
++    let instance = fixture.adapters.factories[2].instances.lock().unwrap()[0].clone();
++    tokio::time::timeout(Duration::from_secs(1), instance.close_entered.notified())
++        .await
++        .unwrap();
++    let image =
++        serde_json::to_value(fixture.adapters.store.export_checkpoint(&scope()).unwrap()).unwrap();
++    assert!(image["runs"][0]["lease"].is_null());
++    tokio::time::advance(Duration::from_millis(5001)).await;
++    let release = released(&handle).await;
++    assert!(
++        release
++            .local_error
++            .as_ref()
++            .is_some_and(|error| error.code == ErrorCode::DeadlineExceeded)
++            || release
++                .report
++                .as_ref()
++                .is_some_and(|report| !report.failures.is_empty()),
++        "cleanup report: {release:?}"
++    );
++    assert_eq!(fixture.outcome(&handle).await, result);
++    assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 2);
++    assert_eq!(instance.close_calls.load(Ordering::SeqCst), 1);
++}
+diff --git a/crates/wickle-adapter-runtime/tests/support/mod.rs b/crates/wickle-adapter-runtime/tests/support/mod.rs
+index 50301929f037aec062d0a8ffc33620a5b90558d5..f17defd11f4c0777362a17e5d68a8655e66fd4c8 100644
+--- a/crates/wickle-adapter-runtime/tests/support/mod.rs
++++ b/crates/wickle-adapter-runtime/tests/support/mod.rs
+@@ -633,6 +633,7 @@ impl AdapterFactory for Factory {
+                 exports,
+                 executor,
+                 close_calls: AtomicUsize::new(0),
++                close_entered: Notify::new(),
+                 close_behavior: self.close_behavior.load(Ordering::SeqCst),
+                 events: self.events.clone(),
+             });
+@@ -714,6 +715,7 @@ pub struct Instance {
+     pub exports: Vec<AdapterExportInstance>,
+     pub executor: Arc<Executor>,
+     pub close_calls: AtomicUsize,
++    pub close_entered: Notify,
+     pub close_behavior: usize,
+     pub events: Arc<Mutex<Vec<String>>>,
+ }
+@@ -728,6 +730,7 @@ impl AdapterInstance for Instance {
+             assert_eq!(context.binding_set_id, self.binding_set_id);
+             assert_eq!(context.adapter_binding, self.binding);
+             self.close_calls.fetch_add(1, Ordering::SeqCst);
++            self.close_entered.notify_one();
+             self.events
+                 .lock()
+                 .unwrap()
+diff --git a/crates/wickle-mcp/tests/support/binding.rs b/crates/wickle-mcp/tests/support/binding.rs
+index dabc1b3324b919c15b6d9b8b3de1fd4c98daf6c0..073c1687ff5ed35cd07607cecf117f9c99b63b6c 100644
+--- a/crates/wickle-mcp/tests/support/binding.rs
++++ b/crates/wickle-mcp/tests/support/binding.rs
+@@ -134,6 +134,9 @@ pub async fn bound_arguments(
+     let now = clock.now()?.utc_ms;
+     let run = id("run");
+     let snapshot = RunSnapshot {
++        interruption_plan_ref: None,
++        interruption_records: vec![],
++        app_state: None,
+         model_step_inputs: vec![],
+         prepared_steps: vec![],
+         active_prepared_step: None,
+diff --git a/crates/wickle-state-sqlite/tests/state_store.rs b/crates/wickle-state-sqlite/tests/state_store.rs
+index 24b75cdda7a4e44d5ddc9665de48d8dd49decfe0..fa35631707b78c57cca20feec45d0ddfc05a6389 100644
+--- a/crates/wickle-state-sqlite/tests/state_store.rs
++++ b/crates/wickle-state-sqlite/tests/state_store.rs
+@@ -356,6 +356,7 @@ async fn historical_wait_and_resume_events_remain_valid_after_terminal_reopen()
+     update.snapshot.phase = RunPhase::Waiting;
+     update.snapshot.wait = Some(wait);
+     update.snapshot.outcome = Some(RunOutcome {
++        app_state: None,
+         result: OutcomeResult::Waiting {
+             wait: update.snapshot.wait.clone().unwrap(),
+         },
+diff --git a/crates/wickle/src/agent.rs b/crates/wickle/src/agent.rs
+index 293f056aa54470ad7f6b6f9380b29c9e3053d2a3..142f3eaf76dc8c424706c5214811f4d51f36aec4 100644
+--- a/crates/wickle/src/agent.rs
++++ b/crates/wickle/src/agent.rs
+@@ -18,6 +18,7 @@ mod artifacts;
+ mod components;
+ mod driver;
+ mod hooks;
++mod interruption;
+ mod persistence;
+ pub use persistence::{PersistenceFailure, UnconfirmedToolEffect};
+ mod recovery;
+@@ -37,6 +38,10 @@ pub trait ModelTokenEstimator: Send + Sync {
+ /// Finite runtime bounds, independent of the profile's total execution budgets.
+ #[derive(Debug, Clone)]
+ pub struct AgentSettings {
++    /// Upper bound for cooperative interruption callbacks; default one second.
++    pub interruption_timeout_ms: u64,
++    /// Separate bounded cleanup window; default five seconds, not new work time.
++    pub cleanup_timeout_ms: u64,
+     /// Lease duration renewed by the detached driver.
+     pub lease_ttl_ms: u64,
+     /// Renewal interval; at most one third of the lease duration.
+@@ -63,6 +68,8 @@ pub struct AgentSettings {
+ impl Default for AgentSettings {
+     fn default() -> Self {
+         Self {
++            interruption_timeout_ms: 1000,
++            cleanup_timeout_ms: 5000,
+             lease_ttl_ms: 30_000,
+             heartbeat_interval_ms: 5_000,
+             observer_poll_ms: 100,
+@@ -89,7 +96,11 @@ impl Default for AgentSettings {
+ impl AgentSettings {
+     /// Validate finite bounds without calling a runtime component.
+     pub fn validate(&self) -> Result<(), ContractError> {
+-        if self.lease_ttl_ms == 0
++        if self.interruption_timeout_ms == 0
++            || self.cleanup_timeout_ms == 0
++            || self.interruption_timeout_ms > 86_400_000
++            || self.cleanup_timeout_ms > 86_400_000
++            || self.lease_ttl_ms == 0
+             || self.lease_ttl_ms > 86_400_000
+             || self.heartbeat_interval_ms == 0
+             || self.heartbeat_interval_ms > self.lease_ttl_ms / 3
+@@ -119,6 +130,8 @@ impl AgentSettings {
+ /// Already-created Host components for one exact scope. Creating an Agent does
+ /// not invoke these ports, open connections, start tasks or read environment data.
+ pub struct AgentBindings {
++    /// Optional versioned stop policy and business-state schema; omission uses the core default.
++    pub interruption_policy: Option<InterruptionPolicyBinding>,
+     /// Fixed tenant/workspace/user namespace; validated against routing at start.
+     pub scope: Scope,
+     /// Durable or explicitly process-local state implementation.
+@@ -185,6 +198,8 @@ struct LocalRun {
+     segment_start_revision: u64,
+     cancel: CancellationToken,
+     reason: Mutex<Option<Id>>,
++    stop_cause: Mutex<Option<InterruptionCause>>,
++    cleanup_deadline: Mutex<Option<tokio::time::Instant>>,
+     error: Mutex<Option<ContractError>>,
+     observer_error: Mutex<Option<ContractError>>,
+     release_report: Mutex<Option<ComponentReleaseReport>>,
+@@ -199,6 +214,8 @@ impl LocalRun {
+             segment_start_revision,
+             cancel: CancellationToken::new(),
+             reason: Mutex::new(None),
++            stop_cause: Mutex::new(None),
++            cleanup_deadline: Mutex::new(None),
+             error: Mutex::new(None),
+             observer_error: Mutex::new(None),
+             release_report: Mutex::new(None),
+@@ -624,9 +641,38 @@ impl RunHandle {
+                     .guard(&request, context, None, None, || async { Ok(outcome) })
+                     .await;
+             }
+-            if snapshot.recovery_receipts.iter().any(|receipt| {
++            if let Some(receipt) = snapshot.recovery_receipts.iter().find(|receipt| {
+                 receipt.previous_segment_start_revision == self.segment_start_revision
+             }) {
++                let record = caller_read(
++                    context,
++                    None,
++                    self.agent
++                        .inner
++                        .bindings
++                        .state
++                        .read_record(&snapshot.scope, &receipt.source_snapshot_ref),
++                )
++                .await?;
++                let source: RunSnapshot = serde_json::from_value(record.value().clone())
++                    .map_err(|_| fail(ErrorCode::InvalidSnapshot, "agent.recovered_source"))?;
++                if let Some(outcome) = source
++                    .outcome
++                    .filter(|outcome| matches!(outcome.result, OutcomeResult::Interrupted { .. }))
++                {
++                    let request = PolicyRequest {
++                        owner_scope: snapshot.scope.clone(),
++                        resource_id: self.run_id.clone(),
++                        action: PolicyAction::ReadRunDetails {},
++                    };
++                    return self
++                        .agent
++                        .inner
++                        .bindings
++                        .policy
++                        .guard(&request, context, None, None, || async { Ok(outcome) })
++                        .await;
++                }
+                 return Err(fail(ErrorCode::RevisionConflict, "agent.segment_recovered"));
+             }
+             if segment_revision(&snapshot) != self.segment_start_revision {
+@@ -738,6 +784,64 @@ impl RunHandle {
+             },
+         ))
+     }
++    /// Cooperatively stop this execution interval without cancelling the Run.
++    /// NotLocal does not submit a remote command; the Host must deliver it to its Worker.
++    pub async fn stop_execution(
++        &self,
++        cause: InterruptionCause,
++        context: &ExecutionContext,
++    ) -> Result<Guarded<ExecutionStopReceipt>, ContractError> {
++        if !matches!(
++            cause,
++            InterruptionCause::HostShutdown | InterruptionCause::SegmentStopped
++        ) {
++            return Err(fail(ErrorCode::InvalidContract, "interruption.stop_cause"));
++        }
++        self.agent.check_scope(context)?;
++        let bindings = &self.agent.inner.bindings;
++        let request = PolicyRequest {
++            owner_scope: bindings.scope.clone(),
++            resource_id: self.run_id.clone(),
++            action: PolicyAction::StopExecution { cause },
++        };
++        bindings
++            .policy
++            .guard(&request, context, None, None, || async {
++                let saved = caller_read(
++                    context,
++                    None,
++                    bindings.state.load(&bindings.scope, &self.run_id),
++                )
++                .await?;
++                if saved.snapshot.status != RunStatus::Running
++                    || segment_revision(&saved.snapshot) != self.segment_start_revision
++                {
++                    return Ok(ExecutionStopReceipt::AlreadySettled);
++                }
++                if saved.snapshot.interruption_plan_ref.is_none() {
++                    return Err(fail(
++                        ErrorCode::ComponentUnavailable,
++                        "interruption.legacy_plan",
++                    ));
++                }
++                let Some(local) = self.current_local()? else {
++                    return Ok(ExecutionStopReceipt::NotLocal);
++                };
++                if local.done.load(Ordering::Acquire) {
++                    return Ok(ExecutionStopReceipt::NotLocal);
++                }
++                let mut stop = local
++                    .stop_cause
++                    .lock()
++                    .map_err(|_| fail(ErrorCode::InvalidContract, "interruption.stop_state"))?;
++                if stop.is_none() {
++                    *stop = Some(cause);
++                }
++                local.cancel.cancel();
++                Ok(ExecutionStopReceipt::Requested)
++            })
++            .await
++    }
+     /// Signal only a locally owned driver after current CancelRun authorization.
+     pub async fn cancel(
+         &self,
+diff --git a/crates/wickle/src/agent/admission.rs b/crates/wickle/src/agent/admission.rs
+index 87475a2aff81fee99af74cf0f5b2bf377c3ac6a9..e3654445f76fe4d63bab0e02c33e17ada90062b1 100644
+--- a/crates/wickle/src/agent/admission.rs
++++ b/crates/wickle/src/agent/admission.rs
+@@ -506,8 +506,21 @@ impl Agent {
+                 ))
+             })
+             .transpose()?;
++        let interruption_plan = InterruptionPlan::capture(
++            bindings.interruption_policy.as_ref(),
++            bindings.settings.interruption_timeout_ms,
++        )?;
++        let interruption_record = ProtectedRecord::new(
++            bindings.ids.next_id()?,
++            1,
++            serde_json::to_value(interruption_plan)
++                .map_err(|_| fail(ErrorCode::InvalidJson, "agent.interruption_plan"))?,
++        );
+         let now = bindings.clock.now()?.utc_ms;
+         let snapshot = RunSnapshot {
++            interruption_plan_ref: Some(interruption_record.reference().clone()),
++            interruption_records: vec![],
++            app_state: None,
+             model_step_inputs: vec![],
+             prepared_steps: vec![],
+             active_prepared_step: None,
+@@ -595,7 +608,13 @@ impl Agent {
+                 messages: vec![message],
+                 events: vec![event],
+                 records: [
+-                    vec![request_record, prompt_record, inputs_record, routing_record],
++                    vec![
++                        request_record,
++                        prompt_record,
++                        inputs_record,
++                        routing_record,
++                        interruption_record,
++                    ],
+                     hook_record.into_iter().collect(),
+                     assembly_record.into_iter().collect(),
+                     source_record.into_iter().collect(),
+diff --git a/crates/wickle/src/agent/components.rs b/crates/wickle/src/agent/components.rs
+index 68c1badb8951e2aff3df9e1cd1d80ecfd53df322..6d72653563308e6c1837df45f67cbe1530169b55 100644
+--- a/crates/wickle/src/agent/components.rs
++++ b/crates/wickle/src/agent/components.rs
+@@ -257,6 +257,20 @@ impl Agent {
+             owned: Some(owned),
+         })
+     }
++    pub(super) fn cleanup_deadline(
++        &self,
++        local: &LocalRun,
++    ) -> Result<tokio::time::Instant, ContractError> {
++        let mut deadline = local
++            .cleanup_deadline
++            .lock()
++            .map_err(|_| fail(ErrorCode::InvalidContract, "components.cleanup_deadline"))?;
++        Ok(*deadline.get_or_insert_with(|| {
++            tokio::time::Instant::now()
++                + Duration::from_millis(self.inner.bindings.settings.cleanup_timeout_ms)
++        }))
++    }
++
+     async fn release_capabilities(
+         &self,
+         owned: &BoundCapabilities,
+@@ -266,7 +280,8 @@ impl Agent {
+             run_id: owned.run_id().clone(),
+             binding_set_id: owned.binding_set_id().clone(),
+             cancellation: CancellationToken::new(),
+-            deadline: tokio::time::Instant::now() + Duration::from_secs(30),
++            deadline: tokio::time::Instant::now()
++                + Duration::from_millis(self.inner.bindings.settings.cleanup_timeout_ms),
+         };
+         let _cancel = context.cancellation.clone().drop_guard();
+         tokio::time::timeout_at(
+diff --git a/crates/wickle/src/agent/driver.rs b/crates/wickle/src/agent/driver.rs
+index 1c20d301bff36d7c57649643bc265c2b5ef54c74..c3cff724cbd289528121c57e805633c0b239f455 100644
+--- a/crates/wickle/src/agent/driver.rs
++++ b/crates/wickle/src/agent/driver.rs
+@@ -78,142 +78,207 @@ impl Agent {
+             result
+         });
+         let mut segment = None;
+-        let result = AssertUnwindSafe(async {
+-            let saved = bindings.state.load(&bindings.scope, run_id).await?;
+-            let metadata = self.metadata_segment(&saved, context.clone()).await?;
+-            if expired {
+-                segment = Some(metadata);
+-                self.finish(
+-                    run_id,
+-                    PreparedOutcome {
+-                        result: OutcomeResult::Exhausted {
+-                            budget: BudgetKind::Elapsed,
++        let result = {
++            let work = AssertUnwindSafe(async {
++                let saved = bindings.state.load(&bindings.scope, run_id).await?;
++                let metadata = self.metadata_segment(&saved, context.clone()).await?;
++                if expired {
++                    segment = Some(metadata);
++                    self.finish(
++                        run_id,
++                        PreparedOutcome {
++                            result: OutcomeResult::Exhausted {
++                                budget: BudgetKind::Elapsed,
++                            },
++                            output: vec![],
++                            continuation: vec![],
++                            unresolved_effects: vec![],
++                            verification: None,
+                         },
+-                        output: vec![],
+-                        continuation: vec![],
+-                        unresolved_effects: vec![],
+-                        verification: None,
+-                    },
+-                    &budget,
+-                    segment.as_ref().expect("metadata segment"),
+-                    local,
+-                )
+-                .await
+-            } else {
+-                match self
+-                    .bind_segment(
+-                        &saved,
+-                        context.clone(),
+-                        Some(&lease),
+-                        ComponentBindPurpose::Execution,
+-                        Some(&budget),
++                        &budget,
++                        segment.as_ref().expect("metadata segment"),
+                         local,
+                     )
+                     .await
+-                {
+-                    Ok(bound) => {
+-                        segment = Some(bound);
+-                        self.observe_pending(
+-                            run_id,
+-                            segment.as_ref().expect("bound segment"),
++                } else {
++                    match self
++                        .bind_segment(
++                            &saved,
++                            context.clone(),
++                            Some(&lease),
++                            ComponentBindPurpose::Execution,
++                            Some(&budget),
+                             local,
+                         )
+-                        .await;
+-                        crate::future::boxed(|| {
+-                            self.run_segment(
++                        .await
++                    {
++                        Ok(bound) => {
++                            segment = Some(bound);
++                            self.observe_pending(
+                                 run_id,
+-                                prompt,
+                                 segment.as_ref().expect("bound segment"),
+-                                &budget,
+-                                &lease,
+                                 local,
+                             )
+-                        })
+-                        .await
+-                    }
+-                    Err(error) => {
+-                        segment = Some(metadata);
+-                        if matches!(
+-                            error.code,
+-                            ErrorCode::LeaseLost
+-                                | ErrorCode::PersistenceUnavailable
+-                                | ErrorCode::RevisionConflict
+-                        ) {
+-                            return Err(error);
++                            .await;
++                            crate::future::boxed(|| {
++                                self.run_segment(
++                                    run_id,
++                                    prompt,
++                                    segment.as_ref().expect("bound segment"),
++                                    &budget,
++                                    &lease,
++                                    local,
++                                )
++                            })
++                            .await
+                         }
+-                        self.finish(
+-                            run_id,
+-                            PreparedOutcome {
+-                                result: match error.code {
+-                                    ErrorCode::Cancelled => OutcomeResult::Cancelled {
+-                                        reason: local
+-                                            .reason
+-                                            .lock()
+-                                            .map_err(|_| {
+-                                                fail(ErrorCode::InvalidContract, "agent.cancel")
+-                                            })?
+-                                            .as_ref()
+-                                            .map(ToString::to_string)
+-                                            .unwrap_or_else(|| "cancelled".into()),
+-                                    },
+-                                    ErrorCode::DeadlineExceeded | ErrorCode::BudgetExceeded => {
+-                                        OutcomeResult::Exhausted {
+-                                            budget: BudgetKind::Elapsed,
++                        Err(error) => {
++                            segment = Some(metadata);
++                            if matches!(
++                                error.code,
++                                ErrorCode::LeaseLost
++                                    | ErrorCode::PersistenceUnavailable
++                                    | ErrorCode::RevisionConflict
++                            ) {
++                                return Err(error);
++                            }
++                            self.finish(
++                                run_id,
++                                PreparedOutcome {
++                                    result: match error.code {
++                                        ErrorCode::Cancelled => OutcomeResult::Cancelled {
++                                            reason: local
++                                                .reason
++                                                .lock()
++                                                .map_err(|_| {
++                                                    fail(ErrorCode::InvalidContract, "agent.cancel")
++                                                })?
++                                                .as_ref()
++                                                .map(ToString::to_string)
++                                                .unwrap_or_else(|| "cancelled".into()),
++                                        },
++                                        ErrorCode::DeadlineExceeded | ErrorCode::BudgetExceeded => {
++                                            OutcomeResult::Exhausted {
++                                                budget: BudgetKind::Elapsed,
++                                            }
+                                         }
+-                                    }
+-                                    _ => failed(&enum_name(&error.code)),
++                                        _ => failed(&enum_name(&error.code)),
++                                    },
++                                    output: vec![],
++                                    continuation: vec![],
++                                    unresolved_effects: vec![],
++                                    verification: None,
+                                 },
+-                                output: vec![],
+-                                continuation: vec![],
+-                                unresolved_effects: vec![],
+-                                verification: None,
+-                            },
+-                            &budget,
+-                            segment.as_ref().expect("metadata segment"),
+-                            local,
+-                        )
+-                        .await
++                                &budget,
++                                segment.as_ref().expect("metadata segment"),
++                                local,
++                            )
++                            .await
++                        }
++                    }
++                }
++            })
++            .catch_unwind();
++            tokio::pin!(work);
++            tokio::select! { biased;
++                result = &mut work => result.unwrap_or_else(|_| Err(fail(ErrorCode::InvalidContract, "agent.driver"))),
++                _ = budget.wait_for_cancellation_or_deadline() => {
++                    let deadline = self.cleanup_deadline(local)?;
++                    match tokio::time::timeout_at(deadline, &mut work).await {
++                        Ok(result) => result.unwrap_or_else(|_| Err(fail(ErrorCode::InvalidContract, "agent.driver"))),
++                        Err(_) => Err(fail(ErrorCode::PersistenceUnavailable, "agent.stop_cleanup_timeout")),
+                     }
+                 }
+             }
+-        })
+-        .catch_unwind()
+-        .await
+-        .unwrap_or_else(|_| Err(fail(ErrorCode::InvalidContract, "agent.driver")));
++        };
+         stop.cancel();
+         let heartbeat_result = heartbeat
+             .await
+             .map_err(|_| fail(ErrorCode::LeaseLost, "agent.heartbeat"))?;
+-        let latest = bindings.state.load(&bindings.scope, run_id).await;
++        let cleanup_deadline = self.cleanup_deadline(local)?;
++        let ownership_lost = matches!(&result, Err(error) if error.code == ErrorCode::LeaseLost)
++            || matches!(&heartbeat_result, Err(error) if error.code == ErrorCode::LeaseLost);
++        let latest = match tokio::time::timeout_at(
++            cleanup_deadline,
++            bindings.state.load(&bindings.scope, run_id),
++        )
++        .await
++        {
++            Ok(value) => value,
++            Err(_) => Err(fail(
++                ErrorCode::PersistenceUnavailable,
++                "agent.cleanup_read",
++            )),
++        };
++        // Release the fenced lease before adapter cleanup. Known ownership loss
++        // never authorizes a release or an after-run callback from the old owner.
++        // Terminal commits already release the lease atomically in the store.
++        let terminal_committed = latest
++            .as_ref()
++            .is_ok_and(|saved| saved.snapshot.status.is_terminal());
++        if !ownership_lost && !terminal_committed {
++            if let Ok((_, now)) = budget.settlement_time(0) {
++                let released = tokio::time::timeout_at(
++                    cleanup_deadline,
++                    bindings
++                        .state
++                        .release_lease(&bindings.scope, run_id, &lease, now),
++                )
++                .await;
++                let failure = match released {
++                    Ok(Ok(())) => None,
++                    Ok(Err(error)) => Some(error),
++                    Err(_) => Some(fail(ErrorCode::DeadlineExceeded, "agent.lease_release")),
++                };
++                if let Some(error) = failure {
++                    if let Ok(mut slot) = local.release_error.lock() {
++                        *slot = Some(error);
++                    }
++                }
++            }
++        }
+         if let Some(segment) = segment.as_ref() {
+-            if let Ok(saved) = &latest {
+-                if saved.snapshot.status.is_terminal() {
+-                    if bindings.components.is_some() && segment.owned.is_none() {
+-                        if expired {
+-                            self.cleanup_observers(saved, &context, local, vec![]).await;
+-                        } else if let Ok(mut slot) = local.release_error.lock() {
+-                            if slot.is_none() {
+-                                *slot = Some(fail(
+-                                    ErrorCode::ComponentUnavailable,
+-                                    "components.observers_not_bound",
+-                                ));
++            let cleanup = async {
++                if !ownership_lost {
++                    if let Ok(saved) = &latest {
++                        if saved.snapshot.status.is_terminal() {
++                            if bindings.components.is_some() && segment.owned.is_none() {
++                                if expired {
++                                    self.cleanup_observers(saved, &context, local, vec![]).await;
++                                } else if let Ok(mut slot) = local.release_error.lock() {
++                                    if slot.is_none() {
++                                        *slot = Some(fail(
++                                            ErrorCode::ComponentUnavailable,
++                                            "components.observers_not_bound",
++                                        ));
++                                    }
++                                }
++                            } else {
++                                self.after_run(saved, segment, local).await;
+                             }
+                         }
+-                    } else {
+-                        self.after_run(saved, segment, local).await;
+                     }
+                 }
++                self.release_segment(segment, local).await;
++            };
++            if tokio::time::timeout_at(cleanup_deadline, cleanup)
++                .await
++                .is_err()
++            {
++                if let Ok(mut slot) = local.release_error.lock() {
++                    *slot = Some(fail(ErrorCode::DeadlineExceeded, "components.cleanup"));
++                }
+             }
+-            self.release_segment(segment, local).await;
+         }
+-        if let Ok((_, now)) = budget.settlement_time(0) {
+-            let _ = bindings
+-                .state
+-                .release_lease(&bindings.scope, run_id, &lease, now)
+-                .await;
++        if ownership_lost {
++            return Err(fail(ErrorCode::LeaseLost, "agent.ownership_lost"));
+         }
+         if latest.as_ref().is_ok_and(|saved| {
+-            saved.snapshot.status.is_terminal() || saved.snapshot.status == RunStatus::Waiting
++            saved.snapshot.status.is_terminal()
++                || matches!(
++                    saved.snapshot.status,
++                    RunStatus::Waiting | RunStatus::Interrupted
++                )
+         }) {
+             return Ok(());
+         }
+@@ -707,6 +772,27 @@ impl Agent {
+         budget: &RunBudget,
+         segment: &SegmentBindings,
+         local: &Arc<LocalRun>,
++    ) -> Result<(), ContractError> {
++        let deadline = self.cleanup_deadline(local)?;
++        tokio::time::timeout_at(
++            deadline,
++            crate::future::boxed(|| self.finish_inner(run_id, candidate, budget, segment, local)),
++        )
++        .await
++        .map_err(|_| {
++            fail(
++                ErrorCode::PersistenceUnavailable,
++                "agent.finalization_timeout",
++            )
++        })?
++    }
++    async fn finish_inner(
++        &self,
++        run_id: &Id,
++        candidate: PreparedOutcome,
++        budget: &RunBudget,
++        segment: &SegmentBindings,
++        local: &Arc<LocalRun>,
+     ) -> Result<(), ContractError> {
+         let PreparedOutcome {
+             mut result,
+@@ -767,7 +853,9 @@ impl Agent {
+         // under the stored lease. A stop during these reads also closes untouched
+         // plans; it never invents a result for an uncertain dispatched operation.
+         let mut cleaned = false;
++        let mut interruption_decision: Option<InterruptionDecisionRecord> = None;
+         let (elapsed, now) = loop {
++            tokio::task::yield_now().await;
+             let (_, check_at) = budget.settlement_time(saved.snapshot.usage.elapsed_ms)?;
+             let current_lease = bindings
+                 .state
+@@ -777,29 +865,79 @@ impl Agent {
+             if now >= current_lease.expires_at_ms {
+                 return Err(fail(ErrorCode::LeaseLost, "agent.finish"));
+             }
+-            if matches!(
+-                result,
+-                OutcomeResult::Succeeded { .. } | OutcomeResult::Waiting { .. }
+-            ) {
+-                if local.cancel.is_cancelled() {
+-                    result = OutcomeResult::Cancelled {
+-                        reason: local
+-                            .reason
+-                            .lock()
+-                            .map_err(|_| fail(ErrorCode::InvalidContract, "agent.cancel"))?
+-                            .as_ref()
+-                            .map(ToString::to_string)
+-                            .unwrap_or_else(|| "cancelled".into()),
+-                    };
+-                } else if elapsed >= saved.snapshot.limits.max_elapsed_ms.get() {
+-                    result = OutcomeResult::Exhausted {
+-                        budget: BudgetKind::Elapsed,
+-                    };
++            let cancel_reason = local
++                .reason
++                .lock()
++                .map_err(|_| fail(ErrorCode::InvalidContract, "agent.cancel"))?
++                .clone();
++            if let Some(reason) = &cancel_reason {
++                result = OutcomeResult::Cancelled {
++                    reason: reason.to_string(),
++                };
++            } else if elapsed >= saved.snapshot.limits.max_elapsed_ms.get() {
++                result = OutcomeResult::Exhausted {
++                    budget: BudgetKind::Elapsed,
++                };
++            } else if interruption_decision.is_none()
++                && local.cancel.is_cancelled()
++                && !matches!(
++                    result,
++                    OutcomeResult::Exhausted { .. } | OutcomeResult::Interrupted { .. }
++                )
++            {
++                result = OutcomeResult::Cancelled {
++                    reason: "execution_stopped".into(),
++                };
++            }
++            let cause = match &result {
++                // An individual wait expiry is not exhaustion of the Run's
++                // original deadline and does not invoke interruption policy.
++                OutcomeResult::Exhausted {
++                    budget: BudgetKind::Elapsed,
++                } if elapsed < saved.snapshot.limits.max_elapsed_ms.get() => None,
++                OutcomeResult::Exhausted { .. } => Some(InterruptionCause::BudgetExhausted),
++                OutcomeResult::Cancelled { .. } if cancel_reason.is_some() => {
++                    Some(InterruptionCause::UserCancel)
++                }
++                OutcomeResult::Cancelled { .. } => Some(
++                    local
++                        .stop_cause
++                        .lock()
++                        .map_err(|_| fail(ErrorCode::InvalidContract, "interruption.stop_state"))?
++                        .unwrap_or(InterruptionCause::SegmentStopped),
++                ),
++                _ => None,
++            };
++            if let Some(decision) = &mut interruption_decision {
++                if let Some(cause) = cause.filter(|cause| {
++                    matches!(
++                        cause,
++                        InterruptionCause::UserCancel | InterruptionCause::BudgetExhausted
++                    )
++                }) {
++                    if decision.interruption.cause != cause {
++                        decision.interruption.cause = cause;
++                        decision.interruption.recoverable = false;
++                        decision.action = InterruptionAction::UseDefault;
++                        decision.callback_error = Some(Id::new("protected_cause_changed")?);
++                    }
+                 }
++            } else if let Some(cause) =
++                cause.filter(|_| saved.snapshot.interruption_plan_ref.is_some())
++            {
++                let decision = crate::future::boxed(|| {
++                    self.interruption_decision(&saved, cause, &unresolved_effects)
++                })
++                .await?;
++                result = super::interruption::interruption_result(&decision, &result);
++                interruption_decision = Some(decision);
++                continue; // Recheck time, ownership and protected causes after the callback.
+             }
+             if !matches!(
+                 result,
+-                OutcomeResult::Succeeded { .. } | OutcomeResult::Waiting { .. }
++                OutcomeResult::Succeeded { .. }
++                    | OutcomeResult::Waiting { .. }
++                    | OutcomeResult::Interrupted { .. }
+             ) && saved.snapshot.tool_ledger.iter().any(|entry| {
+                 matches!(
+                     entry.state,
+@@ -838,10 +976,10 @@ impl Agent {
+         snapshot.usage.elapsed_ms = elapsed;
+         snapshot.timing.last_observed_at_ms = now;
+         snapshot.status = result.status();
+-        snapshot.phase = if snapshot.status == RunStatus::Waiting {
+-            RunPhase::Waiting
+-        } else {
+-            RunPhase::Finish
++        snapshot.phase = match snapshot.status {
++            RunStatus::Waiting => RunPhase::Waiting,
++            RunStatus::Interrupted => snapshot.phase,
++            _ => RunPhase::Finish,
+         };
+         snapshot.wait = if let OutcomeResult::Waiting { wait } = &result {
+             Some(wait.clone())
+@@ -865,7 +1003,28 @@ impl Agent {
+                     .and_then(|entry| entry.response_ref.clone())
+             });
+         }
++        let interruption_record = if let Some(mut decision) = interruption_decision {
++            decision.interruption.checkpoint_revision = expected_revision;
++            decision.interruption.recoverable = matches!(result, OutcomeResult::Interrupted { .. });
++            if let OutcomeResult::Interrupted { interruption } = &mut result {
++                *interruption = decision.interruption.clone();
++            }
++            snapshot.app_state = decision.app_state.clone();
++            let record = ProtectedRecord::new(
++                bindings.ids.next_id()?,
++                1,
++                serde_json::to_value(decision)
++                    .map_err(|_| fail(ErrorCode::InvalidJson, "interruption.decision"))?,
++            );
++            snapshot
++                .interruption_records
++                .push(record.reference().clone());
++            Some(record)
++        } else {
++            None
++        };
+         let outcome = RunOutcome {
++            app_state: snapshot.app_state.clone(),
+             result,
+             output: output.clone(),
+             artifacts: artifacts::produced(&snapshot),
+@@ -903,7 +1062,18 @@ impl Agent {
+                 .try_into()
+                 .map_err(|_| fail(ErrorCode::InvalidSnapshot, "agent.event"))?,
+             timestamp_ms: now,
+-            payload: if let Some(wait_record) = &wait_record {
++            payload: if snapshot.status == RunStatus::Interrupted {
++                RunEventPayload::RunInterrupted {
++                    outcome_ref: record.reference().clone(),
++                    decision_ref: interruption_record
++                        .as_ref()
++                        .ok_or_else(|| {
++                            fail(ErrorCode::InvalidSnapshot, "interruption.decision_missing")
++                        })?
++                        .reference()
++                        .clone(),
++                }
++            } else if let Some(wait_record) = &wait_record {
+                 RunEventPayload::RunWaiting {
+                     wait_ref: wait_record.reference().clone(),
+                 }
+@@ -914,6 +1084,7 @@ impl Agent {
+             },
+         };
+         let mut records = vec![record];
++        records.extend(interruption_record);
+         records.extend(wait_record);
+         let mut content: Vec<_> = output
+             .into_iter()
+@@ -1353,7 +1524,7 @@ pub(super) fn enum_name(value: &impl serde::Serialize) -> String {
+         .and_then(|value| value.as_str().map(str::to_owned))
+         .unwrap_or_else(|| "invalid_contract".into())
+ }
+-fn failed(code: &str) -> OutcomeResult {
++pub(super) fn failed(code: &str) -> OutcomeResult {
+     OutcomeResult::Failed {
+         failure: Failure {
+             code: Id::new(code).expect("nonempty static classification"),
+diff --git a/crates/wickle/src/agent/interruption.rs b/crates/wickle/src/agent/interruption.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..cf26580706079ec6b48d3f0ce890d31a72034f31
+--- /dev/null
++++ b/crates/wickle/src/agent/interruption.rs
+@@ -0,0 +1,171 @@
++use super::*;
++use futures_util::FutureExt;
++use std::panic::AssertUnwindSafe;
++
++impl Agent {
++    pub(super) async fn interruption_plan(
++        &self,
++        snapshot: &RunSnapshot,
++    ) -> Result<(RecordRef, InterruptionPlan), ContractError> {
++        let reference = snapshot
++            .interruption_plan_ref
++            .as_ref()
++            .ok_or_else(|| fail(ErrorCode::ComponentUnavailable, "interruption.plan"))?;
++        let record = self
++            .inner
++            .bindings
++            .state
++            .read_record(&snapshot.scope, reference)
++            .await?;
++        let plan: InterruptionPlan = serde_json::from_value(record.value().clone())
++            .map_err(|_| fail(ErrorCode::InvalidSnapshot, "interruption.plan"))?;
++        plan.validate()?;
++        Ok((reference.clone(), plan))
++    }
++    pub(super) async fn validate_interruption_binding(
++        &self,
++        snapshot: &RunSnapshot,
++    ) -> Result<(), ContractError> {
++        let (_, saved) = self.interruption_plan(snapshot).await?;
++        let current = InterruptionPlan::capture(
++            self.inner.bindings.interruption_policy.as_ref(),
++            saved.timeout_ms,
++        )?;
++        if current.policy != saved.policy
++            || current.configuration != saved.configuration
++            || current.app_state_schema != saved.app_state_schema
++            || current.timeout_ms != saved.timeout_ms
++        {
++            return Err(fail(
++                ErrorCode::ComponentUnavailable,
++                "interruption.pinned_policy",
++            ));
++        }
++        Ok(())
++    }
++    pub(super) async fn interruption_decision(
++        &self,
++        saved: &StoredRun,
++        cause: InterruptionCause,
++        unresolved: &[RecordRef],
++    ) -> Result<InterruptionDecisionRecord, ContractError> {
++        let bindings = &self.inner.bindings;
++        let (plan_ref, plan) = self.interruption_plan(&saved.snapshot).await?;
++        let history = bindings
++            .state
++            .read_execution(&saved.snapshot.scope, &saved.snapshot.run_id)
++            .await?;
++        let segment = history
++            .segments
++            .last()
++            .ok_or_else(|| fail(ErrorCode::InvalidSnapshot, "interruption.segment"))?;
++        let interruption = InterruptionRecord {
++            segment_id: segment.segment_id.clone(),
++            cause,
++            checkpoint_revision: saved.snapshot.revision,
++            recoverable: matches!(
++                cause,
++                InterruptionCause::HostShutdown | InterruptionCause::SegmentStopped
++            ) && saved.snapshot.validate().is_ok(),
++            unresolved_effects: unresolved.to_vec(),
++        };
++        let info = InterruptionInfo {
++            scope: saved.snapshot.scope.clone(),
++            run_id: saved.snapshot.run_id.clone(),
++            phase: saved.snapshot.phase,
++            store_capabilities: bindings.state.capabilities(),
++            configuration: plan.configuration.clone(),
++            interruption: interruption.clone(),
++            app_state: saved.snapshot.app_state.clone(),
++        };
++        let mut record = InterruptionDecisionRecord {
++            schema_version: "wickle.interruption-decision.v1".into(),
++            scope: saved.snapshot.scope.clone(),
++            run_id: saved.snapshot.run_id.clone(),
++            plan_ref,
++            interruption,
++            action: InterruptionAction::UseDefault,
++            app_state: saved.snapshot.app_state.clone(),
++            callback_error: None,
++        };
++        let implementation = if plan.policy == InterruptionPlan::default_identity() {
++            None
++        } else {
++            bindings.interruption_policy.as_ref().filter(|binding| {
++                std::panic::catch_unwind(AssertUnwindSafe(|| binding.policy.identity()))
++                    .is_ok_and(|identity| identity == plan.policy)
++                    && binding.configuration == plan.configuration
++                    && binding.app_state_schema == plan.app_state_schema
++            })
++        };
++        if plan.policy != InterruptionPlan::default_identity() && implementation.is_none() {
++            record.callback_error = Some(Id::new("component_unavailable")?);
++        }
++        if let Some(binding) = implementation {
++            let timeout = Duration::from_millis(
++                plan.timeout_ms
++                    .min(bindings.settings.interruption_timeout_ms),
++            );
++            let result = tokio::time::timeout(
++                timeout,
++                AssertUnwindSafe(async { binding.policy.decide(&info).await }).catch_unwind(),
++            )
++            .await;
++            match result {
++                Ok(Ok(Ok(decision))) => {
++                    let protected = matches!(
++                        cause,
++                        InterruptionCause::UserCancel
++                            | InterruptionCause::BudgetExhausted
++                            | InterruptionCause::OwnershipLost
++                    );
++                    if (protected && decision.action != InterruptionAction::UseDefault)
++                        || (decision.action == InterruptionAction::Pause
++                            && !record.interruption.recoverable)
++                        || decision
++                            .app_state
++                            .as_ref()
++                            .is_some_and(|state| plan.validate_app_state(state).is_err())
++                    {
++                        record.callback_error = Some(Id::new("invalid_decision")?);
++                    } else {
++                        record.action = decision.action;
++                        if decision.app_state.is_some() {
++                            record.app_state = decision.app_state;
++                        }
++                    }
++                }
++                Err(_) => record.callback_error = Some(Id::new("callback_timeout")?),
++                Ok(Err(_)) => record.callback_error = Some(Id::new("callback_panic")?),
++                Ok(Ok(Err(_))) => record.callback_error = Some(Id::new("callback_error")?),
++            }
++        }
++        Ok(record)
++    }
++}
++pub(super) fn interruption_result(
++    decision: &InterruptionDecisionRecord,
++    original: &OutcomeResult,
++) -> OutcomeResult {
++    match decision.interruption.cause {
++        InterruptionCause::UserCancel | InterruptionCause::BudgetExhausted => original.clone(),
++        InterruptionCause::OwnershipLost => original.clone(), // No driver may commit after this cause.
++        InterruptionCause::RecoveryUnavailable => super::driver::failed("recovery_unavailable"),
++        InterruptionCause::HostShutdown | InterruptionCause::SegmentStopped => {
++            match decision.action {
++                InterruptionAction::Cancel => OutcomeResult::Cancelled {
++                    reason: "execution_stop_policy".into(),
++                },
++                InterruptionAction::Fail => super::driver::failed("execution_stop_policy"),
++                InterruptionAction::Pause | InterruptionAction::UseDefault
++                    if decision.interruption.recoverable =>
++                {
++                    OutcomeResult::Interrupted {
++                        interruption: decision.interruption.clone(),
++                    }
++                }
++                _ => super::driver::failed("recovery_unavailable"),
++            }
++        }
++    }
++}
+diff --git a/crates/wickle/src/agent/recovery.rs b/crates/wickle/src/agent/recovery.rs
+index 3b78d56697b85e04b189b55d9956d1d159280611..14af338c2fbc522701f4e505766eb79c7c39a4e8 100644
+--- a/crates/wickle/src/agent/recovery.rs
++++ b/crates/wickle/src/agent/recovery.rs
+@@ -177,6 +177,8 @@ impl Agent {
+             .collect::<Result<Vec<_>, ContractError>>()?;
+         let mut snapshot = saved.snapshot;
+         snapshot.revision = receipt.accepted_revision;
++        snapshot.status = RunStatus::Running;
++        snapshot.outcome = None;
+         snapshot.last_event_seq += 1;
+         snapshot.usage = usage;
+         snapshot.usage.elapsed_ms = elapsed;
+@@ -324,7 +326,7 @@ fn validate_source(
+     snapshot: &RunSnapshot,
+     command: &ResumeCommand,
+ ) -> Result<ProtectedRecord, ContractError> {
+-    if snapshot.status != RunStatus::Running {
++    if !matches!(snapshot.status, RunStatus::Running | RunStatus::Interrupted) {
+         return Err(fail(ErrorCode::InvalidTransition, "recovery.status"));
+     }
+     if snapshot.revision != command.expected_revision {
+diff --git a/crates/wickle/src/agent/resume.rs b/crates/wickle/src/agent/resume.rs
+index 9d25292e32999cc21448d64e25b3d8e2c0eeb2fe..604bc565b0dc3f066e5bc8661200f56590086db3 100644
+--- a/crates/wickle/src/agent/resume.rs
++++ b/crates/wickle/src/agent/resume.rs
+@@ -526,6 +526,9 @@ impl Agent {
+         context: &ExecutionContext,
+     ) -> Result<PromptSnapshot, ContractError> {
+         let bindings = &self.inner.bindings;
++        if saved.snapshot.interruption_plan_ref.is_some() {
++            self.validate_interruption_binding(&saved.snapshot).await?;
++        }
+         let record = self
+             .resume_read(
+                 context,
+@@ -1001,6 +1004,7 @@ impl Agent {
+                 .take()
+                 .ok_or_else(|| fail(ErrorCode::InvalidSnapshot, "agent.wait_outcome"))?;
+             let outcome = RunOutcome {
++                app_state: snapshot.app_state.clone(),
+                 result: OutcomeResult::Cancelled {
+                     reason: reason.to_string(),
+                 },
+diff --git a/crates/wickle/src/execution_contracts.rs b/crates/wickle/src/execution_contracts.rs
+index a1aaa2753c5126940f10c45edad038b6e66a13c9..f57e51960de5147b1251b1dbd995b34d694f29a2 100644
+--- a/crates/wickle/src/execution_contracts.rs
++++ b/crates/wickle/src/execution_contracts.rs
+@@ -233,7 +233,7 @@ pub struct InterruptionRecord {
+ #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+ #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+ pub enum SegmentOutcome {
+-    /// Existing waiting or terminal outcome.
++    /// Confirmed interval outcome: waiting, interrupted, or terminal.
+     Settled {
+         /// Saved authoritative outcome.
+         outcome: Box<RunOutcome>,
+@@ -420,6 +420,12 @@ pub enum InterruptionAction {
+ /// Limited immutable data exposed to the application interruption policy.
+ #[derive(Debug, Clone)]
+ pub struct InterruptionInfo {
++    /// Last confirmed core cursor, not an app-defined phase.
++    pub phase: crate::RunPhase,
++    /// Actual persistence/recovery capabilities of the bound store.
++    pub store_capabilities: crate::StateStoreCapabilities,
++    /// Fixed nonsecret callback configuration.
++    pub configuration: JsonObject,
+     /// Resource scope; this does not grant authorization.
+     pub scope: Scope,
+     /// Stopped Run identity.
+@@ -453,7 +459,9 @@ impl ExecutionSegment {
+         match &self.outcome {
+             Some(SegmentOutcome::Settled { outcome }) => {
+                 outcome.validate()?;
+-                if outcome.checkpoint_revision < self.accepted_revision {
++                if outcome.checkpoint_revision < self.accepted_revision
++                    || outcome.app_state != self.app_state
++                {
+                     return Err(invalid());
+                 }
+             }
+diff --git a/crates/wickle/src/interruption.rs b/crates/wickle/src/interruption.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..939d5599423ee93fa0285f73ced78075879a4e15
+--- /dev/null
++++ b/crates/wickle/src/interruption.rs
+@@ -0,0 +1,172 @@
++//! Versioned application stop proposals, separate from core execution authority.
++use crate::*;
++use serde::{Deserialize, Serialize};
++use serde_json::Value;
++use std::{fmt, sync::Arc};
++
++/// Host-owned business-state schema, never a model instruction or permission grant.
++#[derive(Clone, PartialEq, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct AppStateSchema {
++    /// Exact namespace accepted from the policy.
++    pub namespace: Id,
++    /// JSON Schema for the entire {namespace, status, metadata} object.
++    pub schema: Value,
++}
++impl fmt::Debug for AppStateSchema {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_struct("AppStateSchema")
++            .field("namespace", &self.namespace)
++            .finish_non_exhaustive()
++    }
++}
++/// Trusted runtime callback plus its nonsecret, admission-pinned configuration.
++pub struct InterruptionPolicyBinding {
++    /// Implementation whose identity must remain available on resume.
++    pub policy: Arc<dyn InterruptionPolicy>,
++    /// Nonsecret data delivered to the callback through InterruptionInfo.
++    pub configuration: JsonObject,
++    /// Required when the callback supplies application state.
++    pub app_state_schema: Option<AppStateSchema>,
++    /// Callback bound; the Host's smaller runtime cap takes precedence.
++    pub timeout_ms: std::num::NonZeroU64,
++}
++/// Protected immutable configuration of a Run's interruption behavior.
++#[derive(Clone, PartialEq, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct InterruptionPlan {
++    schema_version: String,
++    /// Exact callback or built-in default identity.
++    pub policy: VersionedRef,
++    /// Fixed nonsecret callback configuration.
++    pub configuration: JsonObject,
++    /// Fixed business-state validation contract.
++    pub app_state_schema: Option<AppStateSchema>,
++    /// Admission-selected callback timeout in milliseconds.
++    pub timeout_ms: u64,
++}
++impl fmt::Debug for InterruptionPlan {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_struct("InterruptionPlan")
++            .field("policy", &self.policy)
++            .field("timeout_ms", &self.timeout_ms)
++            .finish_non_exhaustive()
++    }
++}
++impl InterruptionPlan {
++    pub(crate) fn capture(
++        binding: Option<&InterruptionPolicyBinding>,
++        cap_ms: u64,
++    ) -> Result<Self, ContractError> {
++        let (policy, configuration, app_state_schema, timeout_ms) = match binding {
++            Some(binding) => {
++                let identity = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
++                    binding.policy.identity()
++                }))
++                .map_err(|_| invalid("interruption.policy_identity"))?;
++                if identity == Self::default_identity() {
++                    return Err(invalid("interruption.reserved_identity"));
++                }
++                (
++                    identity,
++                    binding.configuration.clone(),
++                    binding.app_state_schema.clone(),
++                    binding.timeout_ms.get().min(cap_ms),
++                )
++            }
++            None => (
++                Self::default_identity(),
++                JsonObject::new(),
++                None,
++                1000.min(cap_ms),
++            ),
++        };
++        let plan = Self {
++            schema_version: "wickle.interruption-plan.v1".into(),
++            policy,
++            configuration,
++            app_state_schema,
++            timeout_ms,
++        };
++        plan.validate()?;
++        Ok(plan)
++    }
++    /// Validate a decoded plan before using it; identities are not execution permission.
++    pub fn validate(&self) -> Result<(), ContractError> {
++        if self.schema_version != "wickle.interruption-plan.v1"
++            || self.timeout_ms == 0
++            || serde_json::to_vec(self)
++                .map_err(|_| invalid("interruption.plan"))?
++                .len()
++                > 65_536
++        {
++            return Err(invalid("interruption.plan"));
++        }
++        if self.policy == Self::default_identity()
++            && (!self.configuration.is_empty() || self.app_state_schema.is_some())
++        {
++            return Err(invalid("interruption.default_configuration"));
++        }
++        if let Some(schema) = &self.app_state_schema {
++            crate::tool_schema::compile_validator(&schema.schema)?;
++        }
++        Ok(())
++    }
++    /// Check the complete application state against the Host's pinned schema.
++    pub fn validate_app_state(&self, state: &AppState) -> Result<(), ContractError> {
++        let schema = self
++            .app_state_schema
++            .as_ref()
++            .ok_or_else(|| invalid("interruption.app_state_schema"))?;
++        if state.namespace != schema.namespace {
++            return Err(invalid("interruption.app_state_namespace"));
++        }
++        let value = serde_json::to_value(state).map_err(|_| invalid("interruption.app_state"))?;
++        if value.to_string().len() > 16_384
++            || !crate::tool_schema::compile_validator(&schema.schema)?.is_valid(&value)
++        {
++            return Err(invalid("interruption.app_state"));
++        }
++        Ok(())
++    }
++    pub(crate) fn default_identity() -> VersionedRef {
++        VersionedRef {
++            id: Id::new("wickle-default-interruption").expect("constant"),
++            version: Id::new("1").expect("constant"),
++        }
++    }
++}
++/// Durable facts about a stop decision, including safe callback fallback diagnostics.
++#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct InterruptionDecisionRecord {
++    /// Protected record format.
++    pub schema_version: String,
++    /// Exact namespace and owning Run.
++    pub scope: Scope,
++    /// Owning Run.
++    pub run_id: Id,
++    /// Admission-pinned policy definition.
++    pub plan_ref: RecordRef,
++    /// Cause, checkpoint, segment and unresolved effects observed by the core.
++    pub interruption: InterruptionRecord,
++    /// Accepted action after protected-cause checks.
++    pub action: InterruptionAction,
++    /// Business state selected for persistence, independent of core status.
++    pub app_state: Option<AppState>,
++    /// Safe callback failure code; raw panic/error data is not persisted here.
++    pub callback_error: Option<Id>,
++}
++/// Delivery of a local execution stop, not an assertion of stored completion.
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub enum ExecutionStopReceipt {
++    /// The owned driver was signaled; await its saved outcome.
++    Requested,
++    /// This execution interval has already stopped or settled.
++    AlreadySettled,
++    /// This process does not own the active driver.
++    NotLocal,
++}
++fn invalid(path: &str) -> ContractError {
++    ContractError::new(ErrorCode::InvalidConfiguration, path)
++}
+diff --git a/crates/wickle/src/lib.rs b/crates/wickle/src/lib.rs
+index 0b2a294d1ea1415a7048abc97c78dbea579f8745..93a5a51adb5280aba72e14adb00f36c76be07a4e 100644
+--- a/crates/wickle/src/lib.rs
++++ b/crates/wickle/src/lib.rs
+@@ -226,3 +226,9 @@ mod prepared_step;
+ pub use prepared_step::{
+     PreparedModelProjection, ProjectionProvenance, ResolvedToolSet, ResolvedToolSetEntry,
+ };
++
++mod interruption;
++pub use interruption::{
++    AppStateSchema, ExecutionStopReceipt, InterruptionDecisionRecord, InterruptionPlan,
++    InterruptionPolicyBinding,
++};
+diff --git a/crates/wickle/src/policy.rs b/crates/wickle/src/policy.rs
+index a9d96b99c5befff8e12c856dae1b866aa98664e4..fb1401bf809ef4241e9bc4a159cfb73586ac41f2 100644
+--- a/crates/wickle/src/policy.rs
++++ b/crates/wickle/src/policy.rs
+@@ -142,6 +142,11 @@ pub enum PolicyAction {
+     },
+     /// Request cancellation.
+     CancelRun {},
++    /// Stop one execution interval without granting authority to cancel the Run.
++    StopExecution {
++        /// Host shutdown or explicit segment stop; protected causes are core-owned.
++        cause: crate::InterruptionCause,
++    },
+     /// Read artifact data/metadata.
+     ReadArtifact {},
+     /// Write an artifact in the owning scope.
+diff --git a/crates/wickle/src/recovery.rs b/crates/wickle/src/recovery.rs
+index da06da5ec3b38413fb6d688f2e2f64325a78d694..9e2c4cebe64466b03a8221ad81b20e3cc4ce5132 100644
+--- a/crates/wickle/src/recovery.rs
++++ b/crates/wickle/src/recovery.rs
+@@ -34,7 +34,7 @@ impl RunSnapshot {
+     /// authoritative state under a new lease and stores it with acceptance.
+     pub fn recovery_record(&self, record_id: Id) -> Result<ProtectedRecord, ContractError> {
+         self.validate()?;
+-        if self.status != RunStatus::Running {
++        if !matches!(self.status, RunStatus::Running | RunStatus::Interrupted) {
+             return Err(ContractError::new(
+                 ErrorCode::InvalidTransition,
+                 "recovery.source_status",
+diff --git a/crates/wickle/src/run.rs b/crates/wickle/src/run.rs
+index 2104f1a18f9bc6e503818c982c52f7e9b3be91db..42cecd90e35300255bd4eab37f9777415beec816 100644
+--- a/crates/wickle/src/run.rs
++++ b/crates/wickle/src/run.rs
+@@ -391,6 +391,11 @@ pub struct VerificationSummary {
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+ #[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
+ pub enum OutcomeResult {
++    /// Execution interval stopped with a saved checkpoint; the Run is not terminal.
++    Interrupted {
++        /// Core-issued cause, checkpoint and unresolved-effect evidence.
++        interruption: crate::InterruptionRecord,
++    },
+     /// Saved waiting outcome for the current execution segment.
+     Waiting {
+         /// Wait data.
+@@ -422,6 +427,7 @@ impl OutcomeResult {
+     /// Public status of this outcome.
+     pub fn status(&self) -> RunStatus {
+         match self {
++            Self::Interrupted { .. } => RunStatus::Interrupted,
+             Self::Waiting { .. } => RunStatus::Waiting,
+             Self::Succeeded { .. } => RunStatus::Succeeded,
+             Self::Failed { .. } => RunStatus::Failed,
+@@ -435,6 +441,9 @@ impl OutcomeResult {
+ #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+ #[serde(deny_unknown_fields)]
+ pub struct RunOutcome {
++    /// Host-schema-validated business state, separate from the core result.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub app_state: Option<crate::AppState>,
+     /// Outcome classification and required status-specific data.
+     pub result: OutcomeResult,
+     /// Final or partial output.
+@@ -459,6 +468,22 @@ pub struct RunOutcome {
+ impl RunOutcome {
+     /// Check required evidence for a verified success.
+     pub fn validate(&self) -> Result<(), ContractError> {
++        if let OutcomeResult::Interrupted { interruption } = &self.result {
++            if !interruption.recoverable
++                || interruption.checkpoint_revision >= self.checkpoint_revision
++                || !matches!(
++                    interruption.cause,
++                    crate::InterruptionCause::HostShutdown
++                        | crate::InterruptionCause::SegmentStopped
++                )
++                || interruption.unresolved_effects != self.unresolved_effects
++            {
++                return Err(ContractError::new(
++                    ErrorCode::InvalidContract,
++                    "outcome.interruption",
++                ));
++            }
++        }
+         if matches!(self.result, OutcomeResult::Succeeded { .. })
+             && !self.unresolved_effects.is_empty()
+         {
+@@ -626,6 +651,19 @@ pub struct SourceExecutionState {
+ #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+ #[serde(deny_unknown_fields)]
+ pub struct RunSnapshot {
++    /// Admission-pinned interruption policy/configuration and app-state schema.
++    #[serde(
++        default,
++        deserialize_with = "optional",
++        skip_serializing_if = "Option::is_none"
++    )]
++    pub interruption_plan_ref: Option<RecordRef>,
++    /// Append-only protected stop decisions, including callback fallback diagnostics.
++    #[serde(default, skip_serializing_if = "Vec::is_empty")]
++    pub interruption_records: Vec<RecordRef>,
++    /// Current Host-defined business state; never interpreted as core status.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub app_state: Option<crate::AppState>,
+     /// Immutable logical-step submissions and their transcript boundaries.
+     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+     pub model_step_inputs: Vec<RecordRef>,
+@@ -794,10 +832,17 @@ impl RunSnapshot {
+     /// Check static checkpoint invariants without performing recovery or authorization.
+     pub fn validate(&self) -> Result<(), ContractError> {
+         let invalid = |path| ContractError::new(ErrorCode::InvalidSnapshot, path);
+-        // Version-one checkpoints lack the required interruption/segment record.
+-        // Never accept a fabricated interrupted state via the legacy decoder.
+-        if self.status == RunStatus::Interrupted {
+-            return Err(invalid("interrupted.requires_execution_checkpoint"));
++        if self.status == RunStatus::Interrupted
++            && (self.interruption_plan_ref.is_none()
++                || self.interruption_records.is_empty()
++                || self.wait.is_some()
++                || matches!(self.phase, RunPhase::Waiting | RunPhase::Finish)
++                || !matches!(
++                    self.outcome.as_ref().map(|outcome| &outcome.result),
++                    Some(OutcomeResult::Interrupted { .. })
++                ))
++        {
++            return Err(invalid("interrupted.evidence"));
+         }
+         crate::budget::validate_budget(self)?;
+         if &self.scope != self.profile.scope()
+@@ -840,6 +885,7 @@ impl RunSnapshot {
+             if outcome.result.status() != self.status
+                 || outcome.checkpoint_revision != self.revision
+                 || outcome.usage != self.usage
++                || outcome.app_state != self.app_state
+             {
+                 return Err(invalid("outcome"));
+             }
+@@ -1000,6 +1046,14 @@ impl RunSnapshot {
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+ #[serde(tag = "type", deny_unknown_fields)]
+ pub enum RunEventPayload {
++    /// Confirmed nonterminal stop, committed with its decision and outcome.
++    #[serde(rename = "run.interrupted")]
++    RunInterrupted {
++        /// Saved interval outcome.
++        outcome_ref: RecordRef,
++        /// Protected policy/default decision and safe callback diagnostics.
++        decision_ref: RecordRef,
++    },
+     /// A separately stored context view was adopted; original messages were not changed.
+     ContextRewritten {
+         /// Exact protected cumulative revision.
+diff --git a/crates/wickle/src/state.rs b/crates/wickle/src/state.rs
+index f0c95db1718476c71d7dff8c2d3d86cf771f465b..ea911113296c128e7de02a8b38648ca2bc8318a9 100644
+--- a/crates/wickle/src/state.rs
++++ b/crates/wickle/src/state.rs
+@@ -12,6 +12,7 @@ mod checkpoint;
+ mod context_state;
+ mod execution;
+ mod hook_state;
++mod interruption_state;
+ mod prepared_state;
+ mod reconciliation_state;
+ mod recovery_state;
+@@ -252,6 +253,7 @@ pub trait StateStore: crate::ExecutionTransactions + Send + Sync {
+         now_ms: i64,
+     ) -> PortFuture<'a, ()>;
+     /// Validate and commit state, transcript, records and events atomically.
++    /// A terminal commit also releases the current lease in the same transaction.
+     fn commit<'a>(
+         &'a self,
+         scope: &'a Scope,
+@@ -889,6 +891,7 @@ fn validate_snapshot_refs(
+ ) -> Result<(), ContractError> {
+     recovery_state::validate(state, additions, snapshot)?;
+     prepared_state::validate(state, additions, snapshot)?;
++    interruption_state::validate(state, additions, snapshot)?;
+     validate_source_snapshot(state, additions, snapshot)?;
+     skill_state::validate_skill_snapshot(state, additions, snapshot)?;
+     context_state::validate_snapshot(state, additions, snapshot)?;
+@@ -1374,6 +1377,7 @@ fn validate_events(
+     let mut seen = BTreeSet::new();
+     let mut started = 0;
+     let mut finished = 0;
++    let mut interrupted = 0;
+     let mut resumed = 0;
+     let reconciled = reconciliation_state::corrections(
+         state,
+@@ -1453,6 +1457,26 @@ fn validate_events(
+                 }
+                 request_ref
+             }
++            RunEventPayload::RunInterrupted {
++                outcome_ref,
++                decision_ref,
++            } => {
++                interrupted += 1;
++                let outcome: crate::RunOutcome = event_record(state, additions, outcome_ref)?;
++                interruption_state::validate_event(
++                    state,
++                    additions,
++                    snapshot,
++                    &outcome,
++                    decision_ref,
++                )?;
++                if snapshot.outcome.as_ref() != Some(&outcome)
++                    || snapshot.status != RunStatus::Interrupted
++                {
++                    return Err(error(ErrorCode::InvalidEvent, "events.run_interrupted"));
++                }
++                outcome_ref
++            }
+             RunEventPayload::RunFinished { outcome_ref } => {
+                 finished += 1;
+                 let outcome = snapshot
+@@ -1584,6 +1608,7 @@ fn validate_events(
+     if sequence != snapshot.last_event_seq
+         || (admission && (started != 1 || events.len() != 1))
+         || (snapshot.status.is_terminal() && finished != 1)
++        || (snapshot.status == RunStatus::Interrupted && interrupted != 1)
+         || (!admission
+             && resumed
+                 != snapshot.resume_receipts.len().saturating_sub(
+@@ -1598,6 +1623,16 @@ fn validate_events(
+     {
+         return Err(error(ErrorCode::InvalidEvent, "events"));
+     }
++    if !admission {
++        let mut history_events = state
++            .runs
++            .get(&snapshot.run_id)
++            .ok_or_else(not_found)?
++            .events
++            .clone();
++        history_events.extend_from_slice(events);
++        interruption_state::validate_history_events(state, additions, snapshot, &history_events)?;
++    }
+     if !admission {
+         let previous = &state
+             .runs
+@@ -1961,6 +1996,26 @@ fn validate_transition(previous: &RunSnapshot, next: &RunSnapshot) -> Result<(),
+     next.validate()?;
+     validate_hook_transition(previous, next)?;
+     validate_source_transition(previous, next)?;
++    if previous.interruption_plan_ref != next.interruption_plan_ref
++        || !next
++            .interruption_records
++            .starts_with(&previous.interruption_records)
++        || next.interruption_records.len() > previous.interruption_records.len() + 1
++        || (previous.app_state != next.app_state
++            && next.interruption_records.len() == previous.interruption_records.len())
++    {
++        return Err(error(ErrorCode::InvalidTransition, "interruption.history"));
++    }
++    let new_interruption =
++        next.interruption_records.len() == previous.interruption_records.len() + 1;
++    if (next.status == RunStatus::Interrupted && !new_interruption)
++        || (new_interruption && next.outcome.is_none())
++    {
++        return Err(error(
++            ErrorCode::InvalidTransition,
++            "interruption.settlement",
++        ));
++    }
+     if !next
+         .model_step_inputs
+         .starts_with(&previous.model_step_inputs)
+@@ -1980,6 +2035,15 @@ fn validate_transition(previous: &RunSnapshot, next: &RunSnapshot) -> Result<(),
+         return Err(error(ErrorCode::InvalidTransition, "resume_receipts"));
+     }
+     let resumed = next.resume_receipts.len() != previous.resume_receipts.len();
++    if previous.status == RunStatus::Interrupted
++        && next.status == RunStatus::Running
++        && next.recovery_receipts.len() != previous.recovery_receipts.len() + 1
++    {
++        return Err(error(
++            ErrorCode::InvalidTransition,
++            "interruption.explicit_recovery",
++        ));
++    }
+     if resumed {
+         let receipt = next.resume_receipts.last().expect("new receipt");
+         if previous.status != RunStatus::Waiting
+diff --git a/crates/wickle/src/state/checkpoint.rs b/crates/wickle/src/state/checkpoint.rs
+index 40703f418c0e823199ba373cd612d0433b6c55a6..277b92f343a099a0dd6a8edd7f5c30844a73bfc6 100644
+--- a/crates/wickle/src/state/checkpoint.rs
++++ b/crates/wickle/src/state/checkpoint.rs
+@@ -551,6 +551,19 @@ fn validate_history(
+                     return Err(invalid("checkpoint.run_started"));
+                 }
+             }
++            RunEventPayload::RunInterrupted {
++                outcome_ref,
++                decision_ref,
++            } => {
++                let outcome: RunOutcome = event_record(state, &empty, outcome_ref)?;
++                interruption_state::validate_event(
++                    state,
++                    &empty,
++                    &run.snapshot,
++                    &outcome,
++                    decision_ref,
++                )?;
++            }
+             RunEventPayload::RunFinished { outcome_ref } => {
+                 finished += 1;
+                 let outcome: RunOutcome = event_record(state, &empty, outcome_ref)?;
+@@ -720,6 +733,7 @@ fn validate_history(
+     {
+         return Err(invalid("checkpoint.events"));
+     }
++    interruption_state::validate_history_events(state, &empty, &run.snapshot, &run.events)?;
+     let events: Vec<_> = run.events.iter().collect();
+     let messages: Vec<_> = state
+         .sessions
+diff --git a/crates/wickle/src/state/execution.rs b/crates/wickle/src/state/execution.rs
+index db88d74e46b8b886bf6d30e60b781ba2a5851195..04155070513e6302f8575efb832a18c905fd8208 100644
+--- a/crates/wickle/src/state/execution.rs
++++ b/crates/wickle/src/state/execution.rs
+@@ -109,6 +109,7 @@ pub(super) fn advance_history(
+         .segments
+         .last_mut()
+         .ok_or_else(|| invalid("execution.segment"))?;
++    current.app_state = next.app_state.clone();
+     if let Some(outcome) = &next.outcome {
+         current.outcome = Some(SegmentOutcome::Settled {
+             outcome: Box::new(outcome.clone()),
+@@ -160,12 +161,27 @@ pub(super) fn validate_history(
+         {
+             return Err(invalid("execution.history"));
+         }
++        if let Some(next) = history.segments.get(i + 1) {
++            let settled_at = match &segment.outcome {
++                Some(SegmentOutcome::Settled { outcome }) => outcome.checkpoint_revision,
++                Some(SegmentOutcome::Interrupted { interruption }) => {
++                    interruption.checkpoint_revision
++                }
++                None => return Err(invalid("execution.unsettled_history")),
++            };
++            if settled_at >= next.accepted_revision {
++                return Err(invalid("execution.interval_overlap"));
++            }
++        }
+         revision = segment.accepted_revision;
+     }
+     let current = history
+         .segments
+         .last()
+         .ok_or_else(|| invalid("execution.segment"))?;
++    if current.app_state != snapshot.app_state {
++        return Err(invalid("execution.app_state"));
++    }
+     match (&snapshot.outcome, &current.outcome) {
+         (Some(expected), Some(SegmentOutcome::Settled { outcome }))
+             if expected == outcome.as_ref() => {}
+diff --git a/crates/wickle/src/state/interruption_state.rs b/crates/wickle/src/state/interruption_state.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..1715ee4c699a33c99a4b78314a95ff5902bb9caf
+--- /dev/null
++++ b/crates/wickle/src/state/interruption_state.rs
+@@ -0,0 +1,273 @@
++use super::*;
++use crate::*;
++fn invalid(path: &str) -> ContractError {
++    error(ErrorCode::InvalidSnapshot, path)
++}
++
++pub(super) fn validate(
++    state: &ScopeState,
++    additions: &BTreeMap<RecordKey, ProtectedRecord>,
++    snapshot: &RunSnapshot,
++) -> Result<(), ContractError> {
++    let Some(reference) = &snapshot.interruption_plan_ref else {
++        if snapshot.app_state.is_some()
++            || !snapshot.interruption_records.is_empty()
++            || snapshot.status == RunStatus::Interrupted
++        {
++            return Err(invalid("interruption.plan_missing"));
++        }
++        return Ok(());
++    };
++    let plan: InterruptionPlan = event_record(state, additions, reference)?;
++    plan.validate()?;
++    if let Some(app_state) = &snapshot.app_state {
++        plan.validate_app_state(app_state)?;
++    }
++    let mut seen = BTreeSet::new();
++    let mut last = None;
++    for reference in &snapshot.interruption_records {
++        if !seen.insert(record_key(reference)) {
++            return Err(invalid("interruption.duplicate"));
++        }
++        let record: InterruptionDecisionRecord = event_record(state, additions, reference)?;
++        if record.schema_version != "wickle.interruption-decision.v1"
++            || record.scope != snapshot.scope
++            || record.run_id != snapshot.run_id
++            || Some(&record.plan_ref) != snapshot.interruption_plan_ref.as_ref()
++            || record.interruption.checkpoint_revision >= snapshot.revision
++        {
++            return Err(invalid("interruption.record"));
++        }
++        if let Some(app_state) = &record.app_state {
++            plan.validate_app_state(app_state)?;
++        }
++        if matches!(
++            record.interruption.cause,
++            InterruptionCause::UserCancel
++                | InterruptionCause::BudgetExhausted
++                | InterruptionCause::OwnershipLost
++        ) && record.action != InterruptionAction::UseDefault
++        {
++            return Err(invalid("interruption.protected_cause"));
++        }
++        for reference in &record.interruption.unresolved_effects {
++            let result: ToolResult = event_record(state, additions, reference)?;
++            if result.status != ToolResultStatus::Unknown || result.effect != ToolEffect::Unknown {
++                return Err(invalid("interruption.effect_reference"));
++            }
++            validate_tool_pair(state, snapshot, &[], &result)?;
++        }
++        if let Some(history) = state.executions.get(&snapshot.run_id) {
++            if !history.segments.iter().any(|segment| {
++                segment.segment_id == record.interruption.segment_id
++                    && segment.accepted_revision <= record.interruption.checkpoint_revision
++            }) {
++                return Err(invalid("interruption.segment"));
++            }
++        }
++        let segment_outcome = state
++            .executions
++            .get(&snapshot.run_id)
++            .and_then(|history| {
++                history
++                    .segments
++                    .iter()
++                    .find(|segment| segment.segment_id == record.interruption.segment_id)
++            })
++            .and_then(|segment| match &segment.outcome {
++                Some(SegmentOutcome::Settled { outcome }) => Some(outcome.as_ref()),
++                _ => None,
++            });
++        let outcome = segment_outcome
++            .or_else(|| {
++                snapshot.outcome.as_ref().filter(|outcome| {
++                    record.interruption.checkpoint_revision.checked_add(1)
++                        == Some(outcome.checkpoint_revision)
++                })
++            })
++            .ok_or_else(|| invalid("interruption.segment_outcome"))?;
++        validate_result(&record, outcome, &snapshot.limits)?;
++        last = Some(record);
++    }
++    if let Some(last) = &last {
++        if snapshot.app_state != last.app_state {
++            return Err(invalid("interruption.app_state"));
++        }
++    }
++    if let Some(RunOutcome {
++        result: OutcomeResult::Interrupted { interruption },
++        ..
++    }) = &snapshot.outcome
++    {
++        let last = last.ok_or_else(|| invalid("interruption.record_missing"))?;
++        if &last.interruption != interruption
++            || !matches!(
++                last.action,
++                InterruptionAction::Pause | InterruptionAction::UseDefault
++            )
++        {
++            return Err(invalid("interruption.outcome"));
++        }
++    }
++    Ok(())
++}
++pub(super) fn validate_event(
++    state: &ScopeState,
++    additions: &BTreeMap<RecordKey, ProtectedRecord>,
++    snapshot: &RunSnapshot,
++    outcome: &RunOutcome,
++    decision_ref: &RecordRef,
++) -> Result<(), ContractError> {
++    outcome.validate()?;
++    let OutcomeResult::Interrupted { interruption } = &outcome.result else {
++        return Err(invalid("interruption.event_outcome"));
++    };
++    let decision: InterruptionDecisionRecord = event_record(state, additions, decision_ref)?;
++    if !snapshot.interruption_records.contains(decision_ref)
++        || decision.interruption != *interruption
++        || decision.app_state != outcome.app_state
++        || decision.scope != snapshot.scope
++        || decision.run_id != snapshot.run_id
++    {
++        return Err(invalid("interruption.event"));
++    }
++    Ok(())
++}
++
++fn validate_result(
++    decision: &InterruptionDecisionRecord,
++    outcome: &RunOutcome,
++    limits: &RunLimits,
++) -> Result<(), ContractError> {
++    outcome.validate()?;
++    if decision.interruption.checkpoint_revision.checked_add(1) != Some(outcome.checkpoint_revision)
++        || decision.app_state != outcome.app_state
++        || decision.interruption.unresolved_effects != outcome.unresolved_effects
++        || decision.interruption.recoverable
++            != matches!(outcome.result, OutcomeResult::Interrupted { .. })
++    {
++        return Err(invalid("interruption.result_identity"));
++    }
++    let allowed = match decision.interruption.cause {
++        InterruptionCause::UserCancel => {
++            decision.action == InterruptionAction::UseDefault
++                && matches!(outcome.result, OutcomeResult::Cancelled { .. })
++        }
++        InterruptionCause::BudgetExhausted => {
++            decision.action == InterruptionAction::UseDefault
++                && match outcome.result {
++                    OutcomeResult::Exhausted {
++                        budget: BudgetKind::ModelCalls,
++                    } => outcome.usage.model_calls >= limits.max_model_calls.get(),
++                    OutcomeResult::Exhausted {
++                        budget: BudgetKind::ToolAttempts,
++                    } => outcome.usage.tool_attempts >= limits.max_tool_attempts,
++                    OutcomeResult::Exhausted {
++                        budget: BudgetKind::RepairAttempts,
++                    } => outcome.usage.repair_attempts >= limits.max_repair_attempts,
++                    OutcomeResult::Exhausted {
++                        budget: BudgetKind::RecoveryAttempts,
++                    } => outcome.usage.recovery_attempts >= limits.max_recovery_attempts,
++                    OutcomeResult::Exhausted {
++                        budget: BudgetKind::Elapsed,
++                    } => outcome.usage.elapsed_ms >= limits.max_elapsed_ms.get(),
++                    _ => false,
++                }
++        }
++        InterruptionCause::OwnershipLost => false,
++        InterruptionCause::RecoveryUnavailable => {
++            matches!(&outcome.result, OutcomeResult::Failed { failure } if failure.code.as_str() == "recovery_unavailable")
++        }
++        InterruptionCause::HostShutdown | InterruptionCause::SegmentStopped => {
++            match decision.action {
++                InterruptionAction::UseDefault | InterruptionAction::Pause
++                    if decision.interruption.recoverable =>
++                {
++                    matches!(&outcome.result, OutcomeResult::Interrupted { interruption } if interruption == &decision.interruption)
++                }
++                InterruptionAction::UseDefault => {
++                    matches!(&outcome.result, OutcomeResult::Failed { failure } if failure.code.as_str() == "recovery_unavailable")
++                }
++                InterruptionAction::Cancel => {
++                    matches!(&outcome.result, OutcomeResult::Cancelled { reason } if reason == "execution_stop_policy")
++                }
++                InterruptionAction::Fail => {
++                    matches!(&outcome.result, OutcomeResult::Failed { failure } if failure.code.as_str() == "execution_stop_policy")
++                }
++                _ => false,
++            }
++        }
++    };
++    if !allowed {
++        return Err(invalid("interruption.result_cause"));
++    }
++    Ok(())
++}
++
++pub(super) fn validate_history_events(
++    state: &ScopeState,
++    additions: &BTreeMap<RecordKey, ProtectedRecord>,
++    snapshot: &RunSnapshot,
++    events: &[RunEvent],
++) -> Result<(), ContractError> {
++    for reference in &snapshot.interruption_records {
++        let decision: InterruptionDecisionRecord = event_record(state, additions, reference)?;
++        let mut matches = vec![];
++        for event in events {
++            let outcome_ref = match &event.payload {
++                RunEventPayload::RunInterrupted {
++                    outcome_ref,
++                    decision_ref,
++                } if decision_ref == reference => Some(outcome_ref),
++                RunEventPayload::RunFinished { outcome_ref } => {
++                    let outcome: RunOutcome = event_record(state, additions, outcome_ref)?;
++                    (decision.interruption.checkpoint_revision.checked_add(1)
++                        == Some(outcome.checkpoint_revision))
++                    .then_some(outcome_ref)
++                }
++                _ => None,
++            };
++            if let Some(outcome_ref) = outcome_ref {
++                let outcome: RunOutcome = event_record(state, additions, outcome_ref)?;
++                validate_result(&decision, &outcome, &snapshot.limits)?;
++                matches.push(event.seq.get());
++            }
++        }
++        if matches.len() != 1 {
++            return Err(invalid("interruption.event_coverage"));
++        }
++        let through = matches[0];
++        let mut uncertain: BTreeMap<Id, Vec<RecordRef>> = BTreeMap::new();
++        for event in events.iter().filter(|event| event.seq.get() <= through) {
++            match &event.payload {
++                RunEventPayload::ToolUnresolved { result_ref, .. } => {
++                    let result: ToolResult = event_record(state, additions, result_ref)?;
++                    uncertain
++                        .entry(result.call_id)
++                        .or_default()
++                        .push(result_ref.clone());
++                }
++                RunEventPayload::ToolSettled { result_ref } => {
++                    let result: ToolResult = event_record(state, additions, result_ref)?;
++                    if result.effect != ToolEffect::Unknown
++                        && result.status != ToolResultStatus::Unknown
++                    {
++                        uncertain.remove(&result.call_id);
++                    }
++                }
++                _ => {}
++            }
++        }
++        let expected: BTreeSet<_> = uncertain.values().flatten().map(record_key).collect();
++        let actual: BTreeSet<_> = decision
++            .interruption
++            .unresolved_effects
++            .iter()
++            .map(record_key)
++            .collect();
++        if actual != expected || actual.len() != decision.interruption.unresolved_effects.len() {
++            return Err(invalid("interruption.effect_evidence"));
++        }
++    }
++    Ok(())
++}
+diff --git a/crates/wickle/src/state/recovery_state.rs b/crates/wickle/src/state/recovery_state.rs
+index c6c901a9753cee7509c0d55be1d90b66f96c0e52..19b46c7e2fb5c4c94c35f376cf6b878c9d15c71a 100644
+--- a/crates/wickle/src/state/recovery_state.rs
++++ b/crates/wickle/src/state/recovery_state.rs
+@@ -36,7 +36,7 @@ fn validate_recovered(
+             event_record(state, additions, &receipt.source_snapshot_ref)?;
+         source.validate()?;
+         if command != receipt.command
+-            || source.status != RunStatus::Running
++            || !matches!(source.status, RunStatus::Running | RunStatus::Interrupted)
+             || source.scope != snapshot.scope
+             || source.run_id != snapshot.run_id
+             || source.request != snapshot.request
+@@ -157,7 +157,7 @@ pub(super) fn transition(
+     {
+         return Err(invalid());
+     }
+-    if previous.status != RunStatus::Running
++    if !matches!(previous.status, RunStatus::Running | RunStatus::Interrupted)
+         || next.status != RunStatus::Running
+         || next.resume_receipts != previous.resume_receipts
+         || receipt.accepted_revision != next.revision
+diff --git a/crates/wickle/src/views.rs b/crates/wickle/src/views.rs
+index 4a20b2fb810b76f528a8bed2dacf16e87c4cfbe1..56263baa41292a3e75147c4c7f871d06c5d8751d 100644
+--- a/crates/wickle/src/views.rs
++++ b/crates/wickle/src/views.rs
+@@ -142,6 +142,7 @@ impl PolicyGate {
+                 RunEventPayload::ToolUnresolved { .. } => "tool.unresolved",
+                 RunEventPayload::VerificationCompleted { .. } => "verification.completed",
+                 RunEventPayload::RunWaiting { .. } => "run.waiting",
++                RunEventPayload::RunInterrupted { .. } => "run.interrupted",
+                 RunEventPayload::RunResumed { .. } => "run.resumed",
+                 RunEventPayload::RunRecovered { .. } => "run.recovered",
+                 RunEventPayload::RunFinished { .. } => "run.finished",
+diff --git a/crates/wickle/tests/agent_interruption.rs b/crates/wickle/tests/agent_interruption.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..0f0f8dbdc6c10ba560faaeff3e0823981a865304
+--- /dev/null
++++ b/crates/wickle/tests/agent_interruption.rs
+@@ -0,0 +1,644 @@
++//! Execution stops preserve checkpoints and cannot override protected core causes.
++#[path = "support/agent.rs"]
++#[allow(dead_code)]
++mod support;
++use serde_json::json;
++use std::{
++    sync::{
++        Arc,
++        atomic::{AtomicUsize, Ordering},
++    },
++    time::Duration,
++};
++use support::*;
++use tokio::sync::Notify;
++use wickle::*;
++
++#[derive(Clone, Copy)]
++enum Behavior {
++    Pause,
++    Cancel,
++    Fail,
++    Pending,
++    Panic,
++    Error,
++    InvalidState,
++    DefaultState,
++}
++struct AppPolicy {
++    behavior: Behavior,
++    calls: AtomicUsize,
++    entered: Notify,
++}
++impl InterruptionPolicy for AppPolicy {
++    fn identity(&self) -> VersionedRef {
++        reference("maintenance")
++    }
++    fn decide<'a>(&'a self, info: &'a InterruptionInfo) -> PortFuture<'a, InterruptionDecision> {
++        Box::pin(async move {
++            self.calls.fetch_add(1, Ordering::SeqCst);
++            self.entered.notify_one();
++            assert_eq!(info.configuration.get("mode"), Some(&json!("safe")));
++            assert_eq!(info.scope, scope());
++            match self.behavior {
++                Behavior::Pending => std::future::pending().await,
++                Behavior::Panic => panic!("private callback panic"),
++                Behavior::Error => Err(ContractError::new(
++                    ErrorCode::InvalidContract,
++                    "private callback error",
++                )),
++                behavior => Ok(InterruptionDecision {
++                    action: match behavior {
++                        Behavior::Cancel => InterruptionAction::Cancel,
++                        Behavior::Fail => InterruptionAction::Fail,
++                        Behavior::DefaultState => InterruptionAction::UseDefault,
++                        _ => InterruptionAction::Pause,
++                    },
++                    app_state: Some(AppState {
++                        namespace: id("operations"),
++                        status: id("maintenance_hold"),
++                        metadata: [(
++                            "reason".into(),
++                            if matches!(behavior, Behavior::InvalidState) {
++                                json!(42)
++                            } else {
++                                json!("host maintenance")
++                            },
++                        )]
++                        .into(),
++                    }),
++                }),
++            }
++        })
++    }
++}
++fn policy(behavior: Behavior) -> (Arc<AppPolicy>, InterruptionPolicyBinding) {
++    let policy = Arc::new(AppPolicy {
++        behavior,
++        calls: AtomicUsize::new(0),
++        entered: Notify::new(),
++    });
++    let binding = InterruptionPolicyBinding {
++        policy: policy.clone(),
++        configuration: [("mode".into(), json!("safe"))].into(),
++        app_state_schema: Some(AppStateSchema {
++            namespace: id("operations"),
++            schema: json!({"type":"object","properties":{
++            "namespace":{"const":"operations"},"status":{"enum":["maintenance_hold"]},"metadata":{"type":"object","properties":{"reason":{"type":"string"}},"required":["reason"],"additionalProperties":false}
++        },"required":["namespace","status","metadata"],"additionalProperties":false}),
++        }),
++        timeout_ms: 1000.try_into().unwrap(),
++    };
++    (policy, binding)
++}
++async fn outcome(handle: &RunHandle) -> RunOutcome {
++    completed(
++        tokio::time::timeout(Duration::from_secs(12), handle.outcome(&context()))
++            .await
++            .unwrap()
++            .unwrap(),
++    )
++}
++#[tokio::test]
++async fn default_stop_records_a_nonterminal_checkpoint_and_does_not_restart_the_model() {
++    let fixture = Fixture::new(Response::Text, true);
++    let agent = fixture.agent();
++    let handle = fixture.started(&agent, "request").await;
++    fixture.model.entered.notified().await;
++    assert_eq!(
++        completed(
++            handle
++                .stop_execution(InterruptionCause::SegmentStopped, &context())
++                .await
++                .unwrap()
++        ),
++        ExecutionStopReceipt::Requested
++    );
++    let result = outcome(&handle).await;
++    let OutcomeResult::Interrupted { interruption } = &result.result else {
++        panic!("expected interruption: {result:?}")
++    };
++    assert_eq!(interruption.cause, InterruptionCause::SegmentStopped);
++    assert!(interruption.recoverable);
++    assert_eq!(result.app_state, None);
++    assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 1);
++    let saved = fixture.store.load(&scope(), handle.run_id()).await.unwrap();
++    assert_eq!(saved.session.active_run_id.as_ref(), Some(handle.run_id()));
++    assert_eq!(saved.snapshot.interruption_records.len(), 1);
++    let checkpoint = fixture.store.export_checkpoint(&scope()).unwrap();
++    StateStoreCheckpoint::from_json(
++        &serde_json::to_string(&checkpoint).unwrap(),
++        &scope(),
++        &checkpoint.digest(),
++    )
++    .unwrap();
++    let replay = fixture.started(&agent, "request").await;
++    assert_eq!(outcome(&replay).await, result);
++    assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 1);
++}
++#[tokio::test]
++async fn app_policy_can_pause_cancel_or_fail_but_business_state_does_not_define_core_status() {
++    for (behavior, status) in [
++        (Behavior::Pause, RunStatus::Interrupted),
++        (Behavior::Cancel, RunStatus::Cancelled),
++        (Behavior::Fail, RunStatus::Failed),
++    ] {
++        let fixture = Fixture::new(Response::Text, true);
++        let (policy, binding) = policy(behavior);
++        let mut bindings = fixture.bindings();
++        bindings.interruption_policy = Some(binding);
++        let agent = create_agent(profile(), bindings).unwrap();
++        let handle = fixture.started(&agent, "request").await;
++        fixture.model.entered.notified().await;
++        completed(
++            handle
++                .stop_execution(InterruptionCause::HostShutdown, &context())
++                .await
++                .unwrap(),
++        );
++        let result = outcome(&handle).await;
++        assert_eq!(result.result.status(), status);
++        assert_eq!(
++            result.app_state.as_ref().unwrap().status,
++            id("maintenance_hold")
++        );
++        assert_eq!(policy.calls.load(Ordering::SeqCst), 1);
++    }
++}
++#[tokio::test]
++async fn invalid_error_or_panicking_policy_uses_the_default_and_keeps_safe_diagnostics() {
++    for (behavior, code) in [
++        (Behavior::InvalidState, "invalid_decision"),
++        (Behavior::Error, "callback_error"),
++        (Behavior::Panic, "callback_panic"),
++    ] {
++        let fixture = Fixture::new(Response::Text, true);
++        let (_, binding) = policy(behavior);
++        let mut bindings = fixture.bindings();
++        bindings.interruption_policy = Some(binding);
++        let agent = create_agent(profile(), bindings).unwrap();
++        let handle = fixture.started(&agent, "request").await;
++        fixture.model.entered.notified().await;
++        completed(
++            handle
++                .stop_execution(InterruptionCause::HostShutdown, &context())
++                .await
++                .unwrap(),
++        );
++        let result = outcome(&handle).await;
++        assert_eq!(result.result.status(), RunStatus::Interrupted);
++        assert_eq!(result.app_state, None);
++        let saved = fixture.store.load(&scope(), handle.run_id()).await.unwrap();
++        let record = fixture
++            .store
++            .read_record(
++                &scope(),
++                saved.snapshot.interruption_records.last().unwrap(),
++            )
++            .await
++            .unwrap();
++        let decision: InterruptionDecisionRecord =
++            serde_json::from_value(record.value().clone()).unwrap();
++        assert_eq!(decision.callback_error, Some(id(code)));
++    }
++}
++#[tokio::test]
++async fn a_policy_cannot_turn_user_cancel_into_a_pause() {
++    for behavior in [Behavior::Pause, Behavior::DefaultState] {
++        let fixture = Fixture::new(Response::Text, true);
++        let (_, binding) = policy(behavior);
++        let mut bindings = fixture.bindings();
++        bindings.interruption_policy = Some(binding);
++        let agent = create_agent(profile(), bindings).unwrap();
++        let handle = fixture.started(&agent, "request").await;
++        fixture.model.entered.notified().await;
++        completed(
++            handle
++                .cancel(id("user_cancelled"), &context())
++                .await
++                .unwrap(),
++        );
++        let result = outcome(&handle).await;
++        assert_eq!(result.result.status(), RunStatus::Cancelled);
++        assert_eq!(
++            result.app_state.is_some(),
++            matches!(behavior, Behavior::DefaultState)
++        );
++    }
++}
++#[tokio::test(start_paused = true)]
++async fn callback_timeout_falls_back_after_one_second_without_extending_the_run_deadline() {
++    let fixture = Fixture::new(Response::Text, true);
++    let (policy, binding) = policy(Behavior::Pending);
++    let mut bindings = fixture.bindings();
++    bindings.interruption_policy = Some(binding);
++    bindings.settings.lease_ttl_ms = 30_000;
++    bindings.settings.heartbeat_interval_ms = 100;
++    let agent = create_agent(profile(), bindings).unwrap();
++    let handle = fixture.started(&agent, "request").await;
++    fixture.model.entered.notified().await;
++    let deadline = fixture
++        .store
++        .load(&scope(), handle.run_id())
++        .await
++        .unwrap()
++        .snapshot
++        .timing
++        .deadline_at_ms;
++    completed(
++        handle
++            .stop_execution(InterruptionCause::HostShutdown, &context())
++            .await
++            .unwrap(),
++    );
++    policy.entered.notified().await;
++    tokio::time::advance(Duration::from_millis(1001)).await;
++    assert_eq!(
++        outcome(&handle).await.result.status(),
++        RunStatus::Interrupted
++    );
++    let saved = fixture.store.load(&scope(), handle.run_id()).await.unwrap();
++    assert_eq!(saved.snapshot.timing.deadline_at_ms, deadline);
++    let record = fixture
++        .store
++        .read_record(
++            &scope(),
++            saved.snapshot.interruption_records.last().unwrap(),
++        )
++        .await
++        .unwrap();
++    assert_eq!(record.value()["callback_error"], json!("callback_timeout"));
++}
++
++async fn resume_after_release(
++    agent: &Agent,
++    command: ResumeCommand,
++) -> Result<RunHandle, ContractError> {
++    tokio::time::timeout(Duration::from_secs(5), async {
++        loop {
++            match agent.resume(command.clone(), context()).await {
++                Err(error) if error.code == ErrorCode::LeaseBusy => tokio::task::yield_now().await,
++                Ok(value) => return Ok(completed(value)),
++                Err(error) => return Err(error),
++            }
++        }
++    })
++    .await
++    .unwrap()
++}
++#[tokio::test]
++async fn explicit_recovery_keeps_app_state_and_requires_the_pinned_policy() {
++    let fixture = Fixture::new(Response::Text, true);
++    let (_, binding) = policy(Behavior::Pause);
++    let mut bindings = fixture.bindings();
++    bindings.interruption_policy = Some(binding);
++    let mut selected = profile();
++    selected.limits.max_recovery_attempts = 1;
++    let agent = create_agent(selected.clone(), bindings).unwrap();
++    let handle = fixture.started(&agent, "request").await;
++    fixture.model.entered.notified().await;
++    completed(
++        handle
++            .stop_execution(InterruptionCause::HostShutdown, &context())
++            .await
++            .unwrap(),
++    );
++    let stopped = outcome(&handle).await;
++    let saved = fixture.store.load(&scope(), handle.run_id()).await.unwrap();
++    let checkpoint = saved
++        .snapshot
++        .recovery_record(id("recovery-source"))
++        .unwrap();
++    let command = ResumeCommand {
++        command_id: id("resume-stop"),
++        run_id: handle.run_id().clone(),
++        expected_revision: saved.snapshot.revision,
++        action: ResumeAction::Recover {
++            recovery_ref: checkpoint.reference().clone(),
++        },
++    };
++    let missing = create_agent(selected, fixture.bindings()).unwrap();
++    assert_eq!(
++        resume_after_release(&missing, command.clone())
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::ComponentUnavailable
++    );
++    assert_eq!(
++        fixture
++            .store
++            .load(&scope(), handle.run_id())
++            .await
++            .unwrap()
++            .snapshot,
++        saved.snapshot
++    );
++    fixture.model.release.add_permits(1);
++    let resumed = resume_after_release(&agent, command).await.unwrap();
++    let result = outcome(&resumed).await;
++    assert_eq!(result.result.status(), RunStatus::Succeeded);
++    assert_eq!(result.app_state, stopped.app_state);
++    assert_eq!(outcome(&handle).await, stopped);
++    assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 2);
++}
++
++#[tokio::test(start_paused = true)]
++async fn a_pause_proposal_cannot_override_the_original_run_deadline() {
++    let fixture = Fixture::new(Response::Text, true);
++    let (_, binding) = policy(Behavior::Pause);
++    let mut bindings = fixture.bindings();
++    bindings.interruption_policy = Some(binding);
++    bindings.settings.lease_ttl_ms = 30_000;
++    bindings.settings.heartbeat_interval_ms = 100;
++    let mut selected = profile();
++    selected.limits.max_elapsed_ms = 100.try_into().unwrap();
++    let agent = create_agent(selected, bindings).unwrap();
++    let handle = fixture.started(&agent, "request").await;
++    fixture.model.entered.notified().await;
++    tokio::time::advance(Duration::from_millis(101)).await;
++    assert_eq!(
++        outcome(&handle).await.result,
++        OutcomeResult::Exhausted {
++            budget: BudgetKind::Elapsed
++        }
++    );
++    let saved = fixture.store.load(&scope(), handle.run_id()).await.unwrap();
++    let record = fixture
++        .store
++        .read_record(
++            &scope(),
++            saved.snapshot.interruption_records.last().unwrap(),
++        )
++        .await
++        .unwrap();
++    assert_eq!(record.value()["callback_error"], json!("invalid_decision"));
++}
++#[tokio::test]
++async fn rejected_stop_storage_is_not_reported_as_interrupted_and_lost_ack_reuses_the_saved_result()
++{
++    for lost_ack in [false, true] {
++        let fixture = Fixture::new(Response::Text, true);
++        let store = Arc::new(FinalCommitStore::new(
++            fixture.store.clone(),
++            if lost_ack {
++                FinalCommitMode::LoseAcknowledgement
++            } else {
++                FinalCommitMode::Reject
++            },
++        ));
++        let (policy, binding) = policy(Behavior::Pause);
++        let mut bindings = fixture.bindings();
++        bindings.state = store.clone();
++        bindings.interruption_policy = Some(binding);
++        let agent = create_agent(profile(), bindings).unwrap();
++        let handle = fixture.started(&agent, "request").await;
++        fixture.model.entered.notified().await;
++        completed(
++            handle
++                .stop_execution(InterruptionCause::HostShutdown, &context())
++                .await
++                .unwrap(),
++        );
++        let result = tokio::time::timeout(Duration::from_secs(5), handle.outcome(&context()))
++            .await
++            .unwrap();
++        if lost_ack {
++            assert_eq!(
++                completed(result.unwrap()).result.status(),
++                RunStatus::Interrupted
++            );
++        } else {
++            assert_eq!(result.unwrap_err().code, ErrorCode::PersistenceUnavailable);
++        }
++        let saved = fixture.store.load(&scope(), handle.run_id()).await.unwrap();
++        assert_eq!(
++            saved.snapshot.interruption_records.len(),
++            usize::from(lost_ack)
++        );
++        assert_eq!(saved.snapshot.outcome.is_some(), lost_ack);
++        assert_eq!(policy.calls.load(Ordering::SeqCst), 1);
++        assert_eq!(store.final_attempts.load(Ordering::SeqCst), 1);
++    }
++}
++#[tokio::test(start_paused = true)]
++async fn stalled_stop_persistence_is_bounded_by_the_five_second_cleanup_window() {
++    let fixture = Fixture::new(Response::Text, true);
++    let store = Arc::new(FinalCommitStore::new(
++        fixture.store.clone(),
++        FinalCommitMode::Pause,
++    ));
++    let mut bindings = fixture.bindings();
++    bindings.state = store.clone();
++    bindings.settings.lease_ttl_ms = 30_000;
++    let agent = create_agent(profile(), bindings).unwrap();
++    let handle = fixture.started(&agent, "request").await;
++    fixture.model.entered.notified().await;
++    completed(
++        handle
++            .stop_execution(InterruptionCause::HostShutdown, &context())
++            .await
++            .unwrap(),
++    );
++    store.final_entered.notified().await;
++    tokio::time::advance(Duration::from_millis(5001)).await;
++    assert_eq!(
++        handle.outcome(&context()).await.unwrap_err().code,
++        ErrorCode::PersistenceUnavailable
++    );
++    assert!(
++        fixture
++            .store
++            .load(&scope(), handle.run_id())
++            .await
++            .unwrap()
++            .snapshot
++            .outcome
++            .is_none()
++    );
++    assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 1);
++}
++#[tokio::test(start_paused = true)]
++async fn lost_ownership_never_invokes_policy_commits_a_stop_or_releases_the_old_lease() {
++    let fixture = Fixture::new(Response::Text, true);
++    let store = Arc::new(FinalCommitStore::new(
++        fixture.store.clone(),
++        FinalCommitMode::PassThrough,
++    ));
++    let (policy, binding) = policy(Behavior::Pause);
++    let mut bindings = fixture.bindings();
++    bindings.state = store.clone();
++    bindings.interruption_policy = Some(binding);
++    let agent = create_agent(profile(), bindings).unwrap();
++    let handle = fixture.started(&agent, "request").await;
++    fixture.model.entered.notified().await;
++    // Advance past the lease before the renewal task can run, simulating a suspended owner.
++    tokio::time::advance(Duration::from_millis(1001)).await;
++    assert_eq!(
++        handle.outcome(&context()).await.unwrap_err().code,
++        ErrorCode::LeaseLost
++    );
++    assert_eq!(policy.calls.load(Ordering::SeqCst), 0);
++    assert_eq!(store.release_calls.load(Ordering::SeqCst), 0);
++    let saved = fixture.store.load(&scope(), handle.run_id()).await.unwrap();
++    assert!(saved.snapshot.interruption_records.is_empty());
++    assert!(saved.snapshot.outcome.is_none());
++}
++
++fn replace_value(value: &mut serde_json::Value, old: &serde_json::Value, new: &serde_json::Value) {
++    if value == old {
++        *value = new.clone();
++        return;
++    }
++    match value {
++        serde_json::Value::Array(values) => values
++            .iter_mut()
++            .for_each(|value| replace_value(value, old, new)),
++        serde_json::Value::Object(values) => values
++            .values_mut()
++            .for_each(|value| replace_value(value, old, new)),
++        _ => {}
++    }
++}
++fn record_mut<'a>(
++    image: &'a mut serde_json::Value,
++    reference: &serde_json::Value,
++) -> &'a mut serde_json::Value {
++    &mut image["records"]
++        .as_array_mut()
++        .unwrap()
++        .iter_mut()
++        .find(|record| &record["reference"] == reference)
++        .unwrap()["value"]
++}
++fn rehash(image: &mut serde_json::Value) {
++    for _ in 0..20 {
++        let changes: Vec<_> = image["records"]
++            .as_array()
++            .unwrap()
++            .iter()
++            .filter_map(|record| {
++                let digest = json!(canonical_digest(&record["value"]));
++                if record["reference"]["digest"] == digest {
++                    return None;
++                }
++                let old = record["reference"].clone();
++                let mut new = old.clone();
++                new["digest"] = digest;
++                Some((old, new))
++            })
++            .collect();
++        if changes.is_empty() {
++            return;
++        }
++        for (old, new) in changes {
++            replace_value(image, &old, &new);
++        }
++    }
++    panic!("reference cycle");
++}
++#[tokio::test]
++async fn restored_stops_require_their_event_exact_checkpoint_and_cause_consistent_outcome() {
++    for behavior in [Behavior::Pause, Behavior::Fail] {
++        let fixture = Fixture::new(Response::Text, true);
++        let (_, binding) = policy(behavior);
++        let mut bindings = fixture.bindings();
++        bindings.interruption_policy = Some(binding);
++        let agent = create_agent(profile(), bindings).unwrap();
++        let handle = fixture.started(&agent, "request").await;
++        fixture.model.entered.notified().await;
++        completed(
++            handle
++                .stop_execution(InterruptionCause::HostShutdown, &context())
++                .await
++                .unwrap(),
++        );
++        outcome(&handle).await;
++        let image =
++            serde_json::to_value(fixture.store.export_checkpoint(&scope()).unwrap()).unwrap();
++        StateStoreCheckpoint::from_json(&image.to_string(), &scope(), &canonical_digest(&image))
++            .unwrap();
++        let decision_ref = image["runs"][0]["snapshot"]["interruption_records"][0].clone();
++        if matches!(behavior, Behavior::Pause) {
++            let mut missing = image.clone();
++            missing["runs"][0]["events"]
++                .as_array_mut()
++                .unwrap()
++                .retain(|event| event["payload"]["type"] != "run.interrupted");
++            let seq = missing["runs"][0]["snapshot"]["last_event_seq"]
++                .as_u64()
++                .unwrap();
++            missing["runs"][0]["snapshot"]["last_event_seq"] = json!(seq - 1);
++            assert!(
++                StateStoreCheckpoint::from_json(
++                    &missing.to_string(),
++                    &scope(),
++                    &canonical_digest(&missing)
++                )
++                .is_err()
++            );
++            let mut stale = image.clone();
++            let old = record_mut(&mut stale, &decision_ref)["interruption"].clone();
++            let mut new = old.clone();
++            new["checkpoint_revision"] = json!(old["checkpoint_revision"].as_u64().unwrap() - 1);
++            replace_value(&mut stale, &old, &new);
++            rehash(&mut stale);
++            assert!(
++                StateStoreCheckpoint::from_json(
++                    &stale.to_string(),
++                    &scope(),
++                    &canonical_digest(&stale)
++                )
++                .is_err()
++            );
++        } else {
++            let mut changed = image.clone();
++            let decision = record_mut(&mut changed, &decision_ref);
++            decision["interruption"]["cause"] = json!("user_cancel");
++            decision["action"] = json!("use_default");
++            rehash(&mut changed);
++            assert!(
++                StateStoreCheckpoint::from_json(
++                    &changed.to_string(),
++                    &scope(),
++                    &canonical_digest(&changed)
++                )
++                .is_err()
++            );
++        }
++    }
++}
++
++#[tokio::test]
++async fn a_live_stop_commit_cannot_omit_the_interrupted_event() {
++    let fixture = Fixture::new(Response::Text, true);
++    let store = Arc::new(FinalCommitStore::new(
++        fixture.store.clone(),
++        FinalCommitMode::OmitInterruptionEvent,
++    ));
++    let mut bindings = fixture.bindings();
++    bindings.state = store;
++    let agent = create_agent(profile(), bindings).unwrap();
++    let handle = fixture.started(&agent, "request").await;
++    fixture.model.entered.notified().await;
++    completed(
++        handle
++            .stop_execution(InterruptionCause::HostShutdown, &context())
++            .await
++            .unwrap(),
++    );
++    assert_eq!(
++        handle.outcome(&context()).await.unwrap_err().code,
++        ErrorCode::InvalidEvent
++    );
++    assert!(
++        fixture
++            .store
++            .load(&scope(), handle.run_id())
++            .await
++            .unwrap()
++            .snapshot
++            .interruption_records
++            .is_empty()
++    );
++}
+diff --git a/crates/wickle/tests/agent_tool_loop.rs b/crates/wickle/tests/agent_tool_loop.rs
+index 0fdeffab1033ed0f1bd0cb0de29679cc361088b1..1708ac435be43e6b0317f1b7647932b80d3e2ac8 100644
+--- a/crates/wickle/tests/agent_tool_loop.rs
++++ b/crates/wickle/tests/agent_tool_loop.rs
+@@ -2577,3 +2577,57 @@ async fn ready_only_execution_yields_to_lease_renewal_between_guarded_operations
+             > 300
+     );
+ }
++
++#[tokio::test]
++async fn execution_stop_preserves_an_uncertain_write_and_the_unstarted_remainder() {
++    let f = Fixture::new(
++        vec![
++            ("write", object(json!({"query":"apply"}))),
++            ("read", object(json!({"query":"inspect"}))),
++        ],
++        Behavior::Pending,
++    );
++    let agent = f.agent();
++    let handle = f.start(&agent).await;
++    tokio::time::timeout(Duration::from_secs(5), f.tools[1].entered.notified())
++        .await
++        .unwrap();
++    assert_eq!(
++        completed(
++            handle
++                .stop_execution(InterruptionCause::HostShutdown, &context())
++                .await
++                .unwrap()
++        ),
++        ExecutionStopReceipt::Requested
++    );
++    let outcome = f.outcome(&handle).await;
++    assert_eq!(outcome.result.status(), RunStatus::Interrupted);
++    assert_eq!(outcome.unresolved_effects.len(), 1);
++    assert_eq!(f.tools[1].applied.load(Ordering::SeqCst), 1);
++    assert_eq!(f.tools[0].calls.load(Ordering::SeqCst), 0);
++    let saved = f.base.store.load(&scope(), handle.run_id()).await.unwrap();
++    assert!(matches!(
++        saved.snapshot.tool_ledger[0].state,
++        ToolCallState::Unknown { .. }
++    ));
++    assert!(matches!(
++        saved.snapshot.tool_ledger[1].state,
++        ToolCallState::Planned { .. }
++    ));
++    let checkpoint = f.base.store.export_checkpoint(&scope()).unwrap();
++    StateStoreCheckpoint::from_json(
++        &serde_json::to_string(&checkpoint).unwrap(),
++        &scope(),
++        &checkpoint.digest(),
++    )
++    .unwrap();
++    let mut image = serde_json::to_value(&checkpoint).unwrap();
++    let old = serde_json::to_value(&outcome.unresolved_effects).unwrap();
++    replace_checkpoint_reference(&mut image, &old, &json!([]));
++    rehash_checkpoint(&mut image);
++    assert!(
++        StateStoreCheckpoint::from_json(&image.to_string(), &scope(), &canonical_digest(&image))
++            .is_err()
++    );
++}
+diff --git a/crates/wickle/tests/contracts.rs b/crates/wickle/tests/contracts.rs
+index 60d2d1659aa2c3ae0cb0208bc4cfaab91dfaa705..64185a73c20e5d68e489cdd801308d28a63cb53f 100644
+--- a/crates/wickle/tests/contracts.rs
++++ b/crates/wickle/tests/contracts.rs
+@@ -730,6 +730,9 @@ async fn checkpoint() -> RunSnapshot {
+         expires_at_ms: Some(100000),
+     };
+     RunSnapshot {
++        interruption_plan_ref: None,
++        interruption_records: vec![],
++        app_state: None,
+         model_step_inputs: vec![],
+         prepared_steps: vec![],
+         active_prepared_step: None,
+@@ -1016,6 +1019,7 @@ async fn success_requires_a_matching_completion_basis_and_verified_success_requi
+     snapshot.phase = RunPhase::Finish;
+     snapshot.wait = None;
+     snapshot.outcome = Some(RunOutcome {
++        app_state: None,
+         result: OutcomeResult::Succeeded {
+             completion_basis: CompletionBasis::TurnEnded,
+         },
+diff --git a/crates/wickle/tests/policy.rs b/crates/wickle/tests/policy.rs
+index 6479f2227c03d6f6200c62df89984ea3e956f8ff..44f252a723d9777c07fe0d463dfb0d433bedb2fd 100644
+--- a/crates/wickle/tests/policy.rs
++++ b/crates/wickle/tests/policy.rs
+@@ -698,6 +698,9 @@ async fn snapshot() -> RunSnapshot {
+         ..BudgetUsage::default()
+     };
+     RunSnapshot {
++        interruption_plan_ref: None,
++        interruption_records: vec![],
++        app_state: None,
+         model_step_inputs: vec![],
+         prepared_steps: vec![],
+         active_prepared_step: None,
+@@ -737,6 +740,7 @@ async fn snapshot() -> RunSnapshot {
+         system_inputs,
+         wait: None,
+         outcome: Some(RunOutcome {
++            app_state: None,
+             result: OutcomeResult::Failed {
+                 failure: Failure {
+                     code: id("provider_unavailable"),
+diff --git a/crates/wickle/tests/state_checkpoint.rs b/crates/wickle/tests/state_checkpoint.rs
+index d18c49f0082b4e081a03d0a797496581656c5ea5..77d967837e4a9dace223653ad91211efd32187c9 100644
+--- a/crates/wickle/tests/state_checkpoint.rs
++++ b/crates/wickle/tests/state_checkpoint.rs
+@@ -207,6 +207,7 @@ async fn historical_wait_and_resume_survive_a_finished_run_and_a_new_session_run
+     waiting.snapshot.phase = RunPhase::Waiting;
+     waiting.snapshot.wait = Some(wait);
+     waiting.snapshot.outcome = Some(RunOutcome {
++        app_state: None,
+         result: OutcomeResult::Waiting {
+             wait: waiting.snapshot.wait.clone().unwrap(),
+         },
+diff --git a/crates/wickle/tests/support/agent.rs b/crates/wickle/tests/support/agent.rs
+index b9ef9fcb0bb62d9d4c7e1dfc4a9d2f2d36b94002..38479c20d1c18086f79554ca6d5b7dc6e6922e7b 100644
+--- a/crates/wickle/tests/support/agent.rs
++++ b/crates/wickle/tests/support/agent.rs
+@@ -448,6 +448,7 @@ pub enum FinalCommitMode {
+     LoseRecoveryAcknowledgement,
+     RejectCandidate,
+     OmitVerificationEvent,
++    OmitInterruptionEvent,
+     RejectVerification,
+     LoseVerificationAcknowledgement,
+     PassThrough,
+@@ -464,6 +465,7 @@ pub struct FinalCommitStore {
+     pub final_entered: Notify,
+     pub release: Semaphore,
+     pub final_attempts: AtomicUsize,
++    pub release_calls: AtomicUsize,
+     pub context_attempts: AtomicUsize,
+     pub empty_page_entered: Notify,
+     pub empty_page_release: Semaphore,
+@@ -479,6 +481,7 @@ impl FinalCommitStore {
+             final_entered: Notify::new(),
+             release: Semaphore::new(0),
+             final_attempts: AtomicUsize::new(0),
++            release_calls: AtomicUsize::new(0),
+             context_attempts: AtomicUsize::new(0),
+             empty_page_entered: Notify::new(),
+             empty_page_release: Semaphore::new(0),
+@@ -580,6 +583,7 @@ impl StateStore for FinalCommitStore {
+         l: &'a RunLease,
+         n: i64,
+     ) -> PortFuture<'a, ()> {
++        self.release_calls.fetch_add(1, Ordering::SeqCst);
+         self.inner.release_lease(s, r, l, n)
+     }
+     fn read_events<'a>(
+@@ -624,6 +628,14 @@ impl StateStore for FinalCommitStore {
+     ) -> PortFuture<'a, StoredRun> {
+         Box::pin(async move {
+             let mut input = input;
++            if matches!(self.mode, FinalCommitMode::OmitInterruptionEvent)
++                && input.snapshot.status == RunStatus::Interrupted
++            {
++                input.events.retain(|event| {
++                    !matches!(event.payload, RunEventPayload::RunInterrupted { .. })
++                });
++                input.snapshot.last_event_seq -= 1;
++            }
+             if matches!(self.mode, FinalCommitMode::RejectRecoveryAcceptance)
+                 && input
+                     .events
+@@ -712,7 +724,9 @@ impl StateStore for FinalCommitStore {
+                     "verification.commit",
+                 ));
+             }
+-            if !input.snapshot.status.is_terminal() {
++            if !input.snapshot.status.is_terminal()
++                && input.snapshot.status != RunStatus::Interrupted
++            {
+                 return self.inner.commit(s, r, input).await;
+             }
+             self.final_attempts.fetch_add(1, Ordering::SeqCst);
+@@ -740,6 +754,7 @@ impl StateStore for FinalCommitStore {
+                 | FinalCommitMode::RejectModelResult
+                 | FinalCommitMode::RejectCandidate
+                 | FinalCommitMode::OmitVerificationEvent
++                | FinalCommitMode::OmitInterruptionEvent
+                 | FinalCommitMode::RejectVerification
+                 | FinalCommitMode::LoseVerificationAcknowledgement
+                 | FinalCommitMode::PassThrough
+@@ -773,6 +788,7 @@ impl Fixture {
+     pub fn bindings(&self) -> AgentBindings {
+         let gate = Arc::new(PolicyGate::new(self.policy.clone(), Duration::from_secs(1)).unwrap());
+         AgentBindings {
++            interruption_policy: None,
+             scope: scope(),
+             state: self.store.clone(),
+             policy: gate.clone(),
+diff --git a/crates/wickle/tests/support/mod.rs b/crates/wickle/tests/support/mod.rs
+index b405d37675f3e57f2f6e030f1b99472a69f03f61..54055277471caa1ab2bba6cbc611fd19140c99e4 100644
+--- a/crates/wickle/tests/support/mod.rs
++++ b/crates/wickle/tests/support/mod.rs
+@@ -102,6 +102,9 @@ pub async fn admission(
+         json!({"instructions":"Use evidence"}),
+     );
+     let snapshot = RunSnapshot {
++        interruption_plan_ref: None,
++        interruption_records: vec![],
++        app_state: None,
+         model_step_inputs: vec![],
+         prepared_steps: vec![],
+         active_prepared_step: None,
+@@ -198,6 +201,7 @@ pub fn finished(snapshot: &RunSnapshot, lease: RunLease, now: i64) -> CommitInpu
+     next.status = RunStatus::Succeeded;
+     next.phase = RunPhase::Finish;
+     let outcome = RunOutcome {
++        app_state: None,
+         result: OutcomeResult::Succeeded {
+             completion_basis: CompletionBasis::TurnEnded,
+         },
+diff --git a/docs/interruption-policy.md b/docs/interruption-policy.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..e5adc2fea8bb834672969f3650148a3c6bd96bda
+--- /dev/null
++++ b/docs/interruption-policy.md
+@@ -0,0 +1,69 @@
++# Execution interruption and application state
++
++Dropping an observation future does not cancel an agent. To stop an execution
++interval, call `RunHandle::stop_execution` with `SegmentStopped` or
++`HostShutdown` and an authorized `ExecutionContext`. Its `Requested` receipt
++means the local driver was signaled; await `handle.outcome(&context)` for the
++persisted result. `NotLocal` means this process has no active driver for that
++handle. The method does not deliver a stop to a remote worker.
++
++The default stop produces `OutcomeResult::Interrupted` when a recoverable
++checkpoint can be saved. The session retains its active run. Repeating the
++original request returns the saved result without dispatching another model
++call. Resume through explicit recovery; do not submit a replacement request
++into the occupied session. Calls whose external effects cannot be confirmed
++remain unresolved and must not be blindly retried.
++
++## Add business state
++
++Set `AgentBindings::interruption_policy` to an `InterruptionPolicyBinding`.
++Implement `InterruptionPolicy::identity` and `decide`. The callback receives
++`InterruptionInfo`: run identity, current phase, store capabilities, fixed
++configuration, current application state, and the interruption's cause,
++checkpoint and unresolved effects. It returns an `InterruptionDecision`:
++
++- `UseDefault` keeps the core's default decision.
++- `Pause` requests a recoverable interruption.
++- `Cancel` or `Fail` requests a terminal outcome.
++- Optional `AppState` contains your namespace, status and JSON metadata.
++
++Provide `AppStateSchema` whenever the callback returns application state. Its
++JSON Schema validates the entire `{namespace, status, metadata}` object. The
++namespace must also match exactly. Application state is limited to 16 KiB;
++the persisted policy plan is limited to 64 KiB. Keep credentials out of policy
++configuration and state.
++
++Application status is independent of core status. A policy cannot undo an
++explicit user cancellation, replenish an exhausted budget, turn ownership loss
++into success, or authorize more model/tool calls. The callback receives facts
++and proposes data; it should not perform external effects or mutate execution
++storage. The core validates the proposal and persists the accepted decision,
++application state and outcome together.
++
++Policy identity, configuration, schema and timeout are pinned at admission.
++Restore the same policy binding before recovery. A missing or changed binding
++rejects recovery without replacing the saved interrupted state.
++
++## Time bounds and failure behavior
++
++`AgentSettings::interruption_timeout_ms` defaults to 1,000 ms. The effective
++callback timeout is the smaller of this Host cap and the binding's timeout.
++Callback errors, panics, timeouts and invalid decisions fall back to the core
++default and leave a safe diagnostic in the protected interruption record.
++
++`AgentSettings::cleanup_timeout_ms` defaults to 5,000 ms and may be explicitly
++changed by the Host. Stop settlement and resource cleanup share this finite
++window; it does not extend the run's model or tool budget. After persistence,
++the owned lease is released before adapter cleanup. Terminal commits release
++it atomically. Known ownership loss prevents the former owner from committing
++or releasing the lease.
++
++Cleanup failures do not rewrite a stored outcome or repeat business work.
++Inspect `RunHandle::component_release` for local cleanup diagnostics. Storage
++or ownership failures can instead prevent a confirmed stop outcome and return
++a typed error. A forced process exit cannot guarantee callback or cleanup
++execution; recovery depends on stored checkpoints and lease fencing.
++
++Timeouts require cooperative asynchronous implementations. Blocking callbacks
++cannot be forcibly stopped by a Rust future timeout. Isolate such extensions
++in a Host-managed process when hard termination is required.
+diff --git a/tests/support/adapter_consumer.rs b/tests/support/adapter_consumer.rs
+index 3fddf45d1c05db66ec7896fee77712e3dd2111dd..1c5d457b139fa6fe7d35ce54f588a7bc48de18f3 100644
+--- a/tests/support/adapter_consumer.rs
++++ b/tests/support/adapter_consumer.rs
+@@ -599,6 +599,7 @@ fn agent(
+         create_agent(
+             profile,
+             AgentBindings {
++                interruption_policy: None,
+                 scope: scope.clone(),
+                 state: store,
+                 policy: policy.clone(),
+diff --git a/tests/support/agent_consumer.rs b/tests/support/agent_consumer.rs
+index 408351c5626f0322019af87fff857780e8919cb1..78d4a55fab08849de1f405f7ec38c15d931a66e7 100644
+--- a/tests/support/agent_consumer.rs
++++ b/tests/support/agent_consumer.rs
+@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
+ use std::{
+     sync::{
+         Arc,
+-        atomic::{AtomicUsize, Ordering},
++        atomic::{AtomicBool, AtomicUsize, Ordering},
+     },
+     time::Duration,
+ };
+@@ -192,6 +192,8 @@ impl ModelRouteInspector for ExampleInspector {
+     }
+ }
+ struct ExampleModel {
++    hold: AtomicBool,
++    entered: tokio::sync::Notify,
+     route: ResolvedModelRoute,
+     calls: AtomicUsize,
+     fail: bool,
+@@ -215,6 +217,10 @@ impl ModelPort for ExampleModel {
+         );
+         assert_eq!(request.route, self.route);
+         self.calls.fetch_add(1, Ordering::SeqCst);
++        if self.hold.load(Ordering::SeqCst) {
++            self.entered.notify_one();
++            return Box::pin(stream::pending());
++        }
+         let events = if self.fail {
+             vec![Ok(ModelEvent::ResponseError {
+                 kind: ModelFailureKind::RateLimited,
+@@ -266,11 +272,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+     let store = Arc::new(SqliteStateStore::open(&database)?);
+     let snapshot = routing_snapshot(&scope)?;
+     let first = Arc::new(ExampleModel {
++        hold: AtomicBool::new(false),
++        entered: tokio::sync::Notify::new(),
+         route: snapshot.route_for_binding(&reference("first"))?,
+         calls: AtomicUsize::new(0),
+         fail: true,
+     });
+     let second = Arc::new(ExampleModel {
++        hold: AtomicBool::new(false),
++        entered: tokio::sync::Notify::new(),
+         route: snapshot.route_for_binding(&reference("second"))?,
+         calls: AtomicUsize::new(0),
+         fail: false,
+@@ -307,6 +317,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+     let agent = create_agent(
+         profile,
+         AgentBindings {
++            interruption_policy: None,
+             scope: scope.clone(),
+             state: store.clone(),
+             policy,
+@@ -377,7 +388,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+     assert_eq!(completed(replay.outcome(&context).await?)?, outcome);
+     let submitted = store.read_execution(&scope, &run_id).await?.submitted.ok_or("submitted identity missing")?;
+     submitted.validate(JsonTextLimits::default())?;
+-    let mut changed = request;
++    let mut changed = request.clone();
+     changed.model_options.insert("reasoning_effort".into(), json!("changed"));
+     assert_eq!(agent.start(changed, context.clone()).await.unwrap_err().code, ErrorCode::RequestConflict);
+     assert_eq!(store.read_execution(&scope, &run_id).await?.submitted.as_ref().map(|s|s.digest()), Some(submitted.digest()));
+@@ -400,8 +411,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+         .await?;
+     assert_eq!(restored.snapshot.outcome, Some(outcome));
+     assert!(restored.session.active_run_id.is_none());
++    // Exercise a cooperative stop against the packaged library and SQLite store.
++    first.hold.store(true, Ordering::SeqCst);
++    let stopped_request = RunRequest {
++        request_id: id("maintenance-request"),
++        session_id: id("maintenance-session"),
++        ..request
++    };
++    let stopped = completed(agent.start(stopped_request.clone(), context.clone()).await?)?;
++    tokio::time::timeout(Duration::from_secs(5), first.entered.notified()).await?;
++    assert_eq!(completed(stopped.stop_execution(InterruptionCause::HostShutdown, &context).await?)?, ExecutionStopReceipt::Requested);
++    let stopped_outcome = completed(tokio::time::timeout(Duration::from_secs(5), stopped.outcome(&context)).await??)?;
++    assert!(matches!(&stopped_outcome.result, OutcomeResult::Interrupted { interruption }
++        if interruption.cause == InterruptionCause::HostShutdown && interruption.recoverable));
++    let reopened = SqliteStateStore::open(&database)?;
++    let saved = reopened.load(&scope, stopped.run_id()).await?;
++    assert_eq!(saved.snapshot.outcome, Some(stopped_outcome.clone()));
++    assert_eq!(saved.session.active_run_id.as_ref(), Some(stopped.run_id()));
++    let replay = completed(agent.start(stopped_request, context.clone()).await?)?;
++    assert_eq!(completed(replay.outcome(&context).await?)?, stopped_outcome);
++    assert_eq!(first.calls.load(Ordering::SeqCst), 2);
+     println!(
+-        "agent consumer: pure construction, detached execution after observer drop, fallback under shared budgets, stored outcome and event replay, duplicate request without new model calls, SQLite reopen"
++        "agent consumer: pure construction, detached execution after observer drop, fallback under shared budgets, stored outcome and event replay, duplicate request without new model calls, SQLite reopen, recoverable host stop and durable replay"
+     );
+     Ok(())
+ }
+diff --git a/tests/support/budget_consumer.rs b/tests/support/budget_consumer.rs
+index 9ac9f6798b12becc0f959be8eae0bf0c63760fb9..72e56d4edb55059fbe9ee7a0763320947eff9c7b 100644
+--- a/tests/support/budget_consumer.rs
++++ b/tests/support/budget_consumer.rs
+@@ -85,6 +85,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+     let started_at = clock.now()?.utc_ms;
+     let run_id = id("run");
+     let snapshot = RunSnapshot {
++        interruption_plan_ref: None,
++        interruption_records: vec![],
++        app_state: None,
+         model_step_inputs: vec![],
+         prepared_steps: vec![],
+         active_prepared_step: None,
+diff --git a/tests/support/compaction_consumer.rs b/tests/support/compaction_consumer.rs
+index 789a00d9f38b4b406590038ad9d12936e797bcac..744ed750ca1efd43076db9e025f6ee8215fe4868 100644
+--- a/tests/support/compaction_consumer.rs
++++ b/tests/support/compaction_consumer.rs
+@@ -285,6 +285,7 @@ fn make_agent(
+     create_agent(
+         profile,
+         AgentBindings {
++            interruption_policy: None,
+             scope: context.data.scope.clone(),
+             state: store,
+             policy: policy.clone(),
+diff --git a/tests/support/context_consumer.rs b/tests/support/context_consumer.rs
+index be04968caae746eac404df83bec9cfe4b4809ac4..5979ab16a435d7c44188a2a271d4a5a714e7322e 100644
+--- a/tests/support/context_consumer.rs
++++ b/tests/support/context_consumer.rs
+@@ -99,6 +99,9 @@ fn admission(
+     );
+     let scope = profile.scope().clone();
+     let snapshot = RunSnapshot {
++        interruption_plan_ref: None,
++        interruption_records: vec![],
++        app_state: None,
+         model_step_inputs: vec![],
+         prepared_steps: vec![],
+         active_prepared_step: None,
+@@ -308,6 +311,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+     snapshot.usage.elapsed_ms = 1;
+     snapshot.timing.last_observed_at_ms = 1001;
+     let outcome = RunOutcome {
++        app_state: None,
+         result: OutcomeResult::Cancelled {
+             reason: "Demonstration complete".into(),
+         },
+diff --git a/tests/support/event_consumer.rs b/tests/support/event_consumer.rs
+index 78d91a7ac0015433fab67358ca00faa580f52346..b843b69fda797c1e41ce6566d6814fddb4977fae 100644
+--- a/tests/support/event_consumer.rs
++++ b/tests/support/event_consumer.rs
+@@ -352,6 +352,7 @@ fn agent(
+     let agent = create_agent(
+         profile,
+         AgentBindings {
++            interruption_policy: None,
+             scope: scope.clone(),
+             state: store,
+             policy: policy.clone(),
+diff --git a/tests/support/gather_consumer.rs b/tests/support/gather_consumer.rs
+index 64efba2d9ebcbac281d8ae955c32ad4af042ce75..0f1a5a98169eab4ea510a10823b3173cef77a4ff 100644
+--- a/tests/support/gather_consumer.rs
++++ b/tests/support/gather_consumer.rs
+@@ -478,6 +478,7 @@ mod host {
+             create_agent(
+                 profile,
+                 AgentBindings {
++                    interruption_policy: None,
+                     scope: self.scope.clone(),
+                     state: self.store.clone(),
+                     policy: policy.clone(),
+diff --git a/tests/support/hooks_consumer.rs b/tests/support/hooks_consumer.rs
+index fe84e71165272b5bdc57cb547855f0380ce94a02..96876945d2b757f99cb379c5791d789d773dd206 100644
+--- a/tests/support/hooks_consumer.rs
++++ b/tests/support/hooks_consumer.rs
+@@ -533,6 +533,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+         create_agent(
+             profile.clone(),
+             AgentBindings {
++                interruption_policy: None,
+                 scope: scope.clone(),
+                 state: store,
+                 policy: policy.clone(),
+diff --git a/tests/support/input_binding_consumer.rs b/tests/support/input_binding_consumer.rs
+index 2ef96e28b61e76b2140609184f3da48faf19f086..d4542ee3f8314441ce8e66a9985c41cc670eb9ab 100644
+--- a/tests/support/input_binding_consumer.rs
++++ b/tests/support/input_binding_consumer.rs
+@@ -243,6 +243,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+     let now = clock.now()?.utc_ms;
+     let run = id("run");
+     let snapshot = RunSnapshot {
++        interruption_plan_ref: None,
++        interruption_records: vec![],
++        app_state: None,
+         model_step_inputs: vec![],
+         prepared_steps: vec![],
+         active_prepared_step: None,
+diff --git a/tests/support/lifecycle_consumer.rs b/tests/support/lifecycle_consumer.rs
+index 55c263efe14cf8f29eb7f1b323ad88a6a3b578a7..bd884cafdb3d1592b8aa0283253bf7fdccdc84c2 100644
+--- a/tests/support/lifecycle_consumer.rs
++++ b/tests/support/lifecycle_consumer.rs
+@@ -199,6 +199,7 @@ mod host {
+             create_agent(
+                 profile,
+                 AgentBindings {
++                    interruption_policy: None,
+                     scope: scope.clone(),
+                     state: store,
+                     policy: policy.clone(),
+diff --git a/tests/support/recovery_consumer.rs b/tests/support/recovery_consumer.rs
+index cd70415fc2c540af5d4b52e929bc8f67a9fcf6eb..024f45d1ccb389123d3aca7cec19e816f963c75c 100644
+--- a/tests/support/recovery_consumer.rs
++++ b/tests/support/recovery_consumer.rs
+@@ -65,7 +65,7 @@ mod host {
+         let scope = Scope { tenant_id: id("tenant"), workspace_id: id("workspace"), user_id: None };
+         let store = Arc::new(SqliteStateStore::open(directory.join("state.sqlite"))?);
+         let routing = routing_snapshot(&scope)?;
+-        let model = Arc::new(ProcessModel { inner: ExampleModel { route: routing.route_for_binding(&reference("first"))?, calls: AtomicUsize::new(0), fail: false }, directory: directory.to_owned(), interrupt });
++        let model = Arc::new(ProcessModel { inner: ExampleModel { hold: AtomicBool::new(false), entered: tokio::sync::Notify::new(), route: routing.route_for_binding(&reference("first"))?, calls: AtomicUsize::new(0), fail: false }, directory: directory.to_owned(), interrupt });
+         let policy = Arc::new(PolicyGate::new(Arc::new(ExamplePolicy), Duration::from_secs(1))?);
+         let profile = AgentProfile::from_json(r#"{
+             "schema_version":"wickle.agent-profile.v1","agent_id":"assistant","version":"1.0.0",
+@@ -77,6 +77,7 @@ mod host {
+         let mut settings = AgentSettings { require_durable: true, max_output_tokens: 128.try_into()?, ..AgentSettings::default() };
+         if interrupt { settings.lease_ttl_ms = 1000; settings.heartbeat_interval_ms = 100; }
+         let agent = create_agent(profile, AgentBindings {
++            interruption_policy: None,
+             scope: scope.clone(), state: store.clone(), policy: policy.clone(), profile_resolver: Arc::new(Catalog),
+             model_exchange: Arc::new(ModelExchange::new(model, policy).with_route_inspector(Arc::new(ExampleInspector), Duration::from_secs(1))?),
+             router: Arc::new(PolicyModelRouter::new(routing)?), host_instructions: vec!["Preserve the requested output.".into()],
+diff --git a/tests/support/report_process_consumer.rs b/tests/support/report_process_consumer.rs
+index 43999e61069c003561f7cb5ad4cc57c35549e403..f619c207a83e1dc9097640cb9d81bc568625ee64 100644
+--- a/tests/support/report_process_consumer.rs
++++ b/tests/support/report_process_consumer.rs
+@@ -200,6 +200,7 @@ mod host {
+             create_agent(
+                 profile,
+                 AgentBindings {
++                    interruption_policy: None,
+                     scope: scope.clone(),
+                     state: store,
+                     policy: policy.clone(),
+diff --git a/tests/support/resume_consumer.rs b/tests/support/resume_consumer.rs
+index fd36c398b68ffa8a96955c1f24508810f7f34c28..a6306043239d776523e000a62fd59645887b4b50 100644
+--- a/tests/support/resume_consumer.rs
++++ b/tests/support/resume_consumer.rs
+@@ -412,6 +412,7 @@ fn agent(
+     create_agent(
+         profile,
+         AgentBindings {
++            interruption_policy: None,
+             scope: scope.clone(),
+             state: store,
+             policy: policy.clone(),
+diff --git a/tests/support/routing_consumer.rs b/tests/support/routing_consumer.rs
+index 69da97b391ffc932c3555b22d3819422bfb28f1f..58175dd538f47d9ac8c61f76841efcb91ec49bbc 100644
+--- a/tests/support/routing_consumer.rs
++++ b/tests/support/routing_consumer.rs
+@@ -303,6 +303,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+         ProtectedRecord::new(id("request-record"), 1, serde_json::to_value(&request)?);
+     let prompt = ProtectedRecord::new(id("prompt"), 1, json!({"text":"Use evidence"}));
+     let snapshot = RunSnapshot {
++        interruption_plan_ref: None,
++        interruption_records: vec![],
++        app_state: None,
+         model_step_inputs: vec![],
+         prepared_steps: vec![],
+         active_prepared_step: None,
+diff --git a/tests/support/skills_consumer.rs b/tests/support/skills_consumer.rs
+index 18ba36b2c5bf4fa6bf13770e7e3a2dffa5006bca..3837e6352c37cd3b615ee75beff40213ca012fe6 100644
+--- a/tests/support/skills_consumer.rs
++++ b/tests/support/skills_consumer.rs
+@@ -207,7 +207,7 @@ fn make_agent(profile:AgentProfile,context:&ExecutionContext,store:Arc<SqliteSta
+  let metadata=skills.component_metadata(&ComponentRef {kind:ComponentKind::Tool,id:loader.compiled.descriptor().tool.id.clone(),version:Some(loader.compiled.descriptor().tool.version.clone())}).ok_or_else(||ContractError::new(ErrorCode::ComponentUnavailable,"consumer.loader"))?;
+  let registry=Arc::new(AdapterRegistry::new(context.data.scope.clone(),vec![],vec![],vec![CatalogToolRegistration {metadata,tool:loader}],vec![],vec![])?);
+  let runtime=Arc::new(AdapterRuntime::new(registry,store.clone(),policy.clone(),clock.clone()));
+- create_agent(profile,AgentBindings {scope:context.data.scope.clone(),state:store,policy:policy.clone(),profile_resolver:Arc::new(Metadata(skills.clone())),model_exchange:Arc::new(ModelExchange::new(model,policy).with_route_inspector(Arc::new(Inspector),Duration::from_secs(1))?),router:Arc::new(PolicyModelRouter::new(routing(&context.data.scope)?)?),host_instructions:vec!["Use the explicitly selected procedure.".into()],system_inputs:SystemInputRegistry::new(vec![])?,tools:None,system_input_resolver:None,external_receipt_verifier:None,hooks:None,components:Some(runtime),context_sources:None,context_token_estimator:None,context_runtime:None, verification: None,skills:Some(skills),artifacts:Some(artifacts),clock,ids:Arc::new(RandomIdSource),token_estimator:Arc::new(Estimate),settings:AgentSettings {require_durable:true,max_output_tokens:128.try_into().unwrap(),..Default::default()}})
++ create_agent(profile,AgentBindings {interruption_policy: None,scope:context.data.scope.clone(),state:store,policy:policy.clone(),profile_resolver:Arc::new(Metadata(skills.clone())),model_exchange:Arc::new(ModelExchange::new(model,policy).with_route_inspector(Arc::new(Inspector),Duration::from_secs(1))?),router:Arc::new(PolicyModelRouter::new(routing(&context.data.scope)?)?),host_instructions:vec!["Use the explicitly selected procedure.".into()],system_inputs:SystemInputRegistry::new(vec![])?,tools:None,system_input_resolver:None,external_receipt_verifier:None,hooks:None,components:Some(runtime),context_sources:None,context_token_estimator:None,context_runtime:None, verification: None,skills:Some(skills),artifacts:Some(artifacts),clock,ids:Arc::new(RandomIdSource),token_estimator:Arc::new(Estimate),settings:AgentSettings {require_durable:true,max_output_tokens:128.try_into().unwrap(),..Default::default()}})
+ }
+ #[tokio::main(flavor="current_thread")]
+ async fn main()->Result<(),Box<dyn std::error::Error>> {
+diff --git a/tests/support/source_consumer.rs b/tests/support/source_consumer.rs
+index d3cb5afc8530ae6a6c414c3bac30fdd491527f7d..f9a2da704786025b9e04c2a4cfdd56ecb18cf6d9 100644
+--- a/tests/support/source_consumer.rs
++++ b/tests/support/source_consumer.rs
+@@ -360,6 +360,7 @@ fn agent(
+     let agent = create_agent(
+         profile,
+         AgentBindings {
++            interruption_policy: None,
+             scope: scope.clone(),
+             state: store,
+             policy: policy.clone(),
+diff --git a/tests/support/sqlite_consumer.rs b/tests/support/sqlite_consumer.rs
+index e16521fd6f296c275da1021db0c2d616b9519257..1b6781b81910b7e679472fbc197ee00837f07b24 100644
+--- a/tests/support/sqlite_consumer.rs
++++ b/tests/support/sqlite_consumer.rs
+@@ -137,6 +137,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+         ProtectedRecord::new(id("request-record"), 1, serde_json::to_value(&request)?);
+     let prompt = ProtectedRecord::new(id("prompt"), 1, json!({"text":"Use evidence"}));
+     let snapshot = RunSnapshot {
++        interruption_plan_ref: None,
++        interruption_records: vec![],
++        app_state: None,
+         model_step_inputs: vec![],
+         prepared_steps: vec![],
+         active_prepared_step: None,
+@@ -231,6 +234,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+     next.status = RunStatus::Succeeded;
+     next.phase = RunPhase::Finish;
+     let outcome = RunOutcome {
++        app_state: None,
+         result: OutcomeResult::Succeeded {
+             completion_basis: CompletionBasis::TurnEnded,
+         },
+diff --git a/tests/support/state_consumer.rs b/tests/support/state_consumer.rs
+index 0a2287a4e29207849d79289efe27843cf990a81e..ce3aaf22bca49c02d48fb8ba1f3ca94947670a20 100644
+--- a/tests/support/state_consumer.rs
++++ b/tests/support/state_consumer.rs
+@@ -66,6 +66,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+         ProtectedRecord::new(id("request-record"), 1, serde_json::to_value(&request)?);
+     let prompt = ProtectedRecord::new(id("prompt"), 1, json!({"text":"Use evidence"}));
+     let snapshot = RunSnapshot {
++        interruption_plan_ref: None,
++        interruption_records: vec![],
++        app_state: None,
+         model_step_inputs: vec![],
+         prepared_steps: vec![],
+         active_prepared_step: None,
+@@ -148,6 +151,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+     next.status = RunStatus::Succeeded;
+     next.phase = RunPhase::Finish;
+     let outcome = RunOutcome {
++        app_state: None,
+         result: OutcomeResult::Succeeded {
+             completion_basis: CompletionBasis::TurnEnded,
+         },
+diff --git a/tests/support/tool_loop_consumer.rs b/tests/support/tool_loop_consumer.rs
+index 17be4f50087ab584019af8f8fd2ab8a311da0ea1..97bafa1e63c8b389caabc0a09f8d08f19ece56e9 100644
+--- a/tests/support/tool_loop_consumer.rs
++++ b/tests/support/tool_loop_consumer.rs
+@@ -413,6 +413,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+         create_agent(
+             profile.clone(),
+             AgentBindings {
++                interruption_policy: None,
+                 scope: scope.clone(),
+                 state: store,
+                 policy: policy.clone(),
+diff --git a/tests/support/verification_consumer.rs b/tests/support/verification_consumer.rs
+index 01cc17038ab123b9e8092463a9c29b9b6825338d..a04c9ca275bfe4fabac14403718c3f9ed60e3df6 100644
+--- a/tests/support/verification_consumer.rs
++++ b/tests/support/verification_consumer.rs
+@@ -224,6 +224,7 @@ fn make_agent(
+     create_agent(
+         profile,
+         AgentBindings {
++            interruption_policy: None,
+             scope: context.data.scope.clone(),
+             state: store,
+             policy: policy.clone(),

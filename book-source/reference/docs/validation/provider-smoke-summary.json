@@ -1,0 +1,216 @@
+{
+  "schema_version": "wickle.provider-smoke-summary.v1",
+  "scope": "Synthetic read-only Tool, default/omitted and null model arguments, system binding, computed answer, SQLite reopen and duplicate suppression. Runs used pre-merge development code. Merged commit references locate the resulting changes; they do not certify execution of those exact post-merge checkouts or promote future bindings/accounts.",
+  "observations": [
+    {
+      "provider": "openai",
+      "model_id": "gpt-6-astra",
+      "api_contract": {
+        "operation": "responses",
+        "version": "v1"
+      },
+      "result": "passed",
+      "model_options": {
+        "reasoning_effort": "medium"
+      },
+      "max_output_tokens": 4096,
+      "model_requests": 2,
+      "metadata_requests": 2,
+      "tool_executions": 1,
+      "sqlite_reopen_verified": true,
+      "duplicate_start_extra_calls": 0,
+      "system_input_binding_verified": true,
+      "reported_models": [
+        {
+          "model_id": "gpt-6-astra",
+          "model_version": null
+        },
+        {
+          "model_id": "gpt-6-astra",
+          "model_version": null
+        }
+      ],
+      "immutable_release_claim": false,
+      "production_support_claim": false,
+      "run_started_at": "2026-09-23T14:44:50.551000+00:00",
+      "merged_implementation_commit": "1fbb643b1ae798b1312a305e9869b8a2a3b456b9"
+    },
+    {
+      "provider": "azure-openai",
+      "model_id": "gpt-6-astra",
+      "api_contract": {
+        "operation": "responses",
+        "version": "v1"
+      },
+      "result": "passed",
+      "model_options": {
+        "reasoning_effort": "medium"
+      },
+      "max_output_tokens": 4096,
+      "model_requests": 2,
+      "metadata_requests": 2,
+      "tool_executions": 1,
+      "sqlite_reopen_verified": true,
+      "duplicate_start_extra_calls": 0,
+      "system_input_binding_verified": true,
+      "reported_models": [
+        {
+          "model_id": "gpt-6-astra",
+          "model_version": null
+        },
+        {
+          "model_id": "gpt-6-astra",
+          "model_version": null
+        }
+      ],
+      "immutable_release_claim": false,
+      "production_support_claim": false,
+      "run_started_at": "2026-09-23T08:59:54.656000+00:00",
+      "merged_implementation_commit": "c81215a7a4b4872366b9491ed3cb0751e4610820"
+    },
+    {
+      "provider": "anthropic",
+      "model_id": "claude-opus-5",
+      "api_contract": {
+        "operation": "messages",
+        "version": "2023-06-01"
+      },
+      "result": "passed",
+      "model_options": {
+        "effort": "medium"
+      },
+      "max_output_tokens": 4096,
+      "model_requests": 2,
+      "metadata_requests": 2,
+      "tool_executions": 1,
+      "sqlite_reopen_verified": true,
+      "duplicate_start_extra_calls": 0,
+      "system_input_binding_verified": true,
+      "reported_models": [
+        {
+          "model_id": "claude-opus-5",
+          "model_version": null
+        },
+        {
+          "model_id": "claude-opus-5",
+          "model_version": null
+        }
+      ],
+      "immutable_release_claim": false,
+      "production_support_claim": false,
+      "run_started_at": "2026-09-23T09:30:47.611000+00:00",
+      "merged_implementation_commit": "b0da12cc9415c99326df5189c7918f311d4f3395"
+    },
+    {
+      "provider": "google-gemini",
+      "model_id": "models/gemini-3.8-flash",
+      "api_contract": {
+        "operation": "stream_generate_content",
+        "version": "v1"
+      },
+      "result": "passed",
+      "model_options": {
+        "thinking_level": "medium"
+      },
+      "max_output_tokens": 4096,
+      "model_requests": 2,
+      "metadata_requests": 2,
+      "tool_executions": 1,
+      "sqlite_reopen_verified": true,
+      "duplicate_start_extra_calls": 0,
+      "system_input_binding_verified": true,
+      "reported_models": [
+        {
+          "model_id": null,
+          "model_version": "gemini-3.8-flash"
+        },
+        {
+          "model_id": null,
+          "model_version": "gemini-3.8-flash"
+        }
+      ],
+      "immutable_release_claim": false,
+      "production_support_claim": false,
+      "run_started_at": "2026-09-23T11:05:57.579000+00:00",
+      "merged_implementation_commit": "da7c0537883b0bb8c9cb18c34a760176bbe9430d"
+    },
+    {
+      "provider": "google-gemini",
+      "model_id": "models/gemini-3.8-flash",
+      "api_contract": {
+        "operation": "stream_generate_content",
+        "version": "v1beta"
+      },
+      "result": "passed",
+      "model_options": {
+        "thinking_level": "medium"
+      },
+      "max_output_tokens": 4096,
+      "model_requests": 2,
+      "metadata_requests": 2,
+      "tool_executions": 1,
+      "sqlite_reopen_verified": true,
+      "duplicate_start_extra_calls": 0,
+      "system_input_binding_verified": true,
+      "reported_models": [
+        {
+          "model_id": null,
+          "model_version": "gemini-3.8-flash"
+        },
+        {
+          "model_id": null,
+          "model_version": "gemini-3.8-flash"
+        }
+      ],
+      "immutable_release_claim": false,
+      "production_support_claim": false,
+      "run_started_at": "2026-09-23T11:07:51.009000+00:00",
+      "merged_implementation_commit": "da7c0537883b0bb8c9cb18c34a760176bbe9430d"
+    },
+    {
+      "provider": "xai",
+      "model_id": "grok-4.6",
+      "api_contract": {
+        "operation": "responses",
+        "version": "v1"
+      },
+      "result": "passed",
+      "model_options": {
+        "reasoning_effort": "high"
+      },
+      "max_output_tokens": 4096,
+      "model_requests": 2,
+      "metadata_requests": 2,
+      "tool_executions": 1,
+      "sqlite_reopen_verified": true,
+      "duplicate_start_extra_calls": 0,
+      "system_input_binding_verified": true,
+      "reported_models": [
+        {
+          "model_id": "grok-4.6",
+          "model_version": null
+        },
+        {
+          "model_id": "grok-4.6",
+          "model_version": null
+        }
+      ],
+      "immutable_release_claim": false,
+      "production_support_claim": false,
+      "run_started_at": "2026-09-23T11:57:26.232000+00:00",
+      "merged_implementation_commit": "7d9c034a23ddb41fa397433f61ff0c8e5d4d72a2"
+    }
+  ],
+  "not_run": [
+    {
+      "provider": "aws-bedrock",
+      "reason": "No configured model selector for the new contract check.",
+      "checked_on": "2026-09-23"
+    },
+    {
+      "provider": "google-vertex",
+      "reason": "Current credential refresh/project authorization unavailable; local contracts passed.",
+      "checked_on": "2026-09-23"
+    }
+  ]
+}

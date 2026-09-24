@@ -1,0 +1,3237 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 736ac12c5fac6c4dbb4b3094d598eb848f0fe7af..6edb94572fd359f7f5e11e3bfc36296a94241525 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -43,6 +43,18 @@ version = "1.5.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
+ 
++[[package]]
++name = "aws-credential-types"
++version = "1.2.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "4471bef4c22a06d2c7a1b6492493d3fdf24a805323109d6874f9c94d5906ac14"
++dependencies = [
++ "aws-smithy-async",
++ "aws-smithy-runtime-api",
++ "aws-smithy-types",
++ "zeroize",
++]
++
+ [[package]]
+ name = "aws-lc-rs"
+ version = "1.18.1"
+@@ -66,6 +78,108 @@ dependencies = [
+  "pkg-config",
+ ]
+ 
++[[package]]
++name = "aws-sigv4"
++version = "1.3.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "69d03c3c05ff80d54ff860fe38c726f6f494c639ae975203a101335f223386db"
++dependencies = [
++ "aws-credential-types",
++ "aws-smithy-http",
++ "aws-smithy-runtime-api",
++ "aws-smithy-types",
++ "bytes",
++ "form_urlencoded",
++ "hex",
++ "hmac",
++ "http 0.2.12",
++ "once_cell",
++ "percent-encoding",
++ "sha2 0.10.9",
++ "time",
++ "tracing",
++]
++
++[[package]]
++name = "aws-smithy-async"
++version = "1.2.5"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "1e190749ea56f8c42bf15dd76c65e14f8f765233e6df9b0506d9d934ebef867c"
++dependencies = [
++ "futures-util",
++ "pin-project-lite",
++ "tokio",
++]
++
++[[package]]
++name = "aws-smithy-eventstream"
++version = "0.60.8"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7c45d3dddac16c5c59d553ece225a88870cf81b7b813c9cc17b78cf4685eac7a"
++dependencies = [
++ "aws-smithy-types",
++ "bytes",
++ "crc32fast",
++]
++
++[[package]]
++name = "aws-smithy-http"
++version = "0.62.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "c5949124d11e538ca21142d1fba61ab0a2a2c1bc3ed323cdb3e4b878bfb83166"
++dependencies = [
++ "aws-smithy-runtime-api",
++ "aws-smithy-types",
++ "bytes",
++ "bytes-utils",
++ "futures-core",
++ "http 0.2.12",
++ "http 1.5.0",
++ "http-body 0.4.6",
++ "once_cell",
++ "percent-encoding",
++ "pin-project-lite",
++ "pin-utils",
++ "tracing",
++]
++
++[[package]]
++name = "aws-smithy-runtime-api"
++version = "1.7.4"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "3da37cf5d57011cb1753456518ec76e31691f1f474b73934a284eb2a1c76510f"
++dependencies = [
++ "aws-smithy-async",
++ "aws-smithy-types",
++ "bytes",
++ "http 0.2.12",
++ "http 1.5.0",
++ "pin-project-lite",
++ "tokio",
++ "tracing",
++ "zeroize",
++]
++
++[[package]]
++name = "aws-smithy-types"
++version = "1.3.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "836155caafba616c0ff9b07944324785de2ab016141c3550bd1c07882f8cee8f"
++dependencies = [
++ "base64-simd",
++ "bytes",
++ "bytes-utils",
++ "http 0.2.12",
++ "http-body 0.4.6",
++ "itoa",
++ "num-integer",
++ "pin-project-lite",
++ "pin-utils",
++ "ryu",
++ "serde",
++ "time",
++]
++
+ [[package]]
+ name = "base64"
+ version = "0.22.1"
+@@ -78,6 +192,16 @@ version = "0.23.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
+ 
++[[package]]
++name = "base64-simd"
++version = "0.8.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "339abbe78e73178762e23bea9dfd08e697eb3f3301cd4be981c0f78ba5859195"
++dependencies = [
++ "outref",
++ "vsimd",
++]
++
+ [[package]]
+ name = "bit-set"
+ version = "0.8.0"
+@@ -99,6 +223,15 @@ version = "2.13.2"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "3ded4057c258ba199e2d26386d3af3780957ecaee6c4ef4041c6b4b8b97c0b06"
+ 
++[[package]]
++name = "block-buffer"
++version = "0.10.4"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "3078c7629b62d3f0439517fa394996acacc5cbc91c5a20d8c658e77abd503a71"
++dependencies = [
++ "generic-array",
++]
++
+ [[package]]
+ name = "block-buffer"
+ version = "0.12.1"
+@@ -132,6 +265,16 @@ version = "1.12.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
+ 
++[[package]]
++name = "bytes-utils"
++version = "0.1.4"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7dafe3a8757b027e2be6e4e5601ed563c55989fcf1546e933c66c8eb3a058d35"
++dependencies = [
++ "bytes",
++ "either",
++]
++
+ [[package]]
+ name = "cc"
+ version = "1.4.5"
+@@ -163,7 +306,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "65c35e4b699c7e15ccbe7ee35c005e4fc0a278d22238a2857e6ce2dadeda1b06"
+ dependencies = [
+  "cfg-if",
+- "cpufeatures",
++ "cpufeatures 0.3.1",
+  "rand_core",
+ ]
+ 
+@@ -202,6 +345,15 @@ version = "0.8.7"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
+ 
++[[package]]
++name = "cpufeatures"
++version = "0.2.17"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "59ed5838eebb26a2bb2e58f6d5b5316989ae9d08bab10e0e6d103e656d1b0280"
++dependencies = [
++ "libc",
++]
++
+ [[package]]
+ name = "cpufeatures"
+ version = "0.3.1"
+@@ -211,6 +363,25 @@ dependencies = [
+  "libc",
+ ]
+ 
++[[package]]
++name = "crc32fast"
++version = "1.5.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "01a7799fd6b852db0e61728dde9a204c423b44d689dbd432522543614b490e78"
++dependencies = [
++ "cfg-if",
++]
++
++[[package]]
++name = "crypto-common"
++version = "0.1.7"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "78c8292055d1c1df0cce5d180393dc8cce0abec0a7102adb6c7b1eef6016d60a"
++dependencies = [
++ "generic-array",
++ "typenum",
++]
++
+ [[package]]
+ name = "crypto-common"
+ version = "0.2.2"
+@@ -226,14 +397,34 @@ version = "2.11.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "4583a4551df46e2792f82ceeac45e850d2e2d5debba0b91f102385cda5b11f06"
+ 
++[[package]]
++name = "deranged"
++version = "0.5.8"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7cd812cc2bc1d69d4764bd80df88b4317eaef9e773c75226407d9bc0876b211c"
++dependencies = [
++ "powerfmt",
++]
++
++[[package]]
++name = "digest"
++version = "0.10.7"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292"
++dependencies = [
++ "block-buffer 0.10.4",
++ "crypto-common 0.1.7",
++ "subtle",
++]
++
+ [[package]]
+ name = "digest"
+ version = "0.11.3"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "f1dd6dbb5841937940781866fa1281a1ff7bd3bf827091440879f9994983d5c2"
+ dependencies = [
+- "block-buffer",
+- "crypto-common",
++ "block-buffer 0.12.1",
++ "crypto-common 0.2.2",
+ ]
+ 
+ [[package]]
+@@ -253,6 +444,12 @@ version = "1.0.5"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
+ 
++[[package]]
++name = "either"
++version = "1.18.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "252afb9ae5eaa683babdc6a068b3f5726eb19e05070c731f9b2a23a7c3e8ed34"
++
+ [[package]]
+ name = "email_address"
+ version = "0.2.9"
+@@ -308,6 +505,12 @@ dependencies = [
+  "serde",
+ ]
+ 
++[[package]]
++name = "fnv"
++version = "1.0.7"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
++
+ [[package]]
+ name = "foldhash"
+ version = "0.2.0"
+@@ -390,6 +593,16 @@ dependencies = [
+  "slab",
+ ]
+ 
++[[package]]
++name = "generic-array"
++version = "0.14.7"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "85649ca51fd72272d7821adaf274ad91c288277713d9c18820d8499a7ff69e9a"
++dependencies = [
++ "typenum",
++ "version_check",
++]
++
+ [[package]]
+ name = "getrandom"
+ version = "0.2.17"
+@@ -448,6 +661,32 @@ version = "0.5.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
+ 
++[[package]]
++name = "hex"
++version = "0.4.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
++
++[[package]]
++name = "hmac"
++version = "0.12.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "6c49c37c09c17a53d937dfbb742eb3a961d65a994e6bcdcf37e7399d0cc8ab5e"
++dependencies = [
++ "digest 0.10.7",
++]
++
++[[package]]
++name = "http"
++version = "0.2.12"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "601cbb57e577e2f5ef5be8e7b83f0f63994f25aa94d673e54a92d5c516d101f1"
++dependencies = [
++ "bytes",
++ "fnv",
++ "itoa",
++]
++
+ [[package]]
+ name = "http"
+ version = "1.5.0"
+@@ -458,6 +697,17 @@ dependencies = [
+  "itoa",
+ ]
+ 
++[[package]]
++name = "http-body"
++version = "0.4.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7ceab25649e9960c0311ea418d17bee82c0dcec1bd053b5f9a66e265a693bed2"
++dependencies = [
++ "bytes",
++ "http 0.2.12",
++ "pin-project-lite",
++]
++
+ [[package]]
+ name = "http-body"
+ version = "1.1.0"
+@@ -465,7 +715,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "ca2a8f2913ee65f60facd6a5905613afaa448497a0230cc41ce022d93290bc2c"
+ dependencies = [
+  "bytes",
+- "http",
++ "http 1.5.0",
+ ]
+ 
+ [[package]]
+@@ -476,8 +726,8 @@ checksum = "23169fe34a5fbcdd3f3862e78fb9b6fccd5f02a6dc6f732547005d45631ce71c"
+ dependencies = [
+  "bytes",
+  "futures-core",
+- "http",
+- "http-body",
++ "http 1.5.0",
++ "http-body 1.1.0",
+  "pin-project-lite",
+ ]
+ 
+@@ -506,8 +756,8 @@ dependencies = [
+  "bytes",
+  "futures-channel",
+  "futures-core",
+- "http",
+- "http-body",
++ "http 1.5.0",
++ "http-body 1.1.0",
+  "httparse",
+  "itoa",
+  "pin-project-lite",
+@@ -522,7 +772,7 @@ version = "0.27.9"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "33ca68d021ef39cf6463ab54c1d0f5daf03377b70561305bb89a8f83aab66e0f"
+ dependencies = [
+- "http",
++ "http 1.5.0",
+  "hyper",
+  "hyper-util",
+  "rustls",
+@@ -541,8 +791,8 @@ dependencies = [
+  "bytes",
+  "futures-channel",
+  "futures-util",
+- "http",
+- "http-body",
++ "http 1.5.0",
++ "http-body 1.1.0",
+  "hyper",
+  "ipnet",
+  "libc",
+@@ -907,6 +1157,12 @@ dependencies = [
+  "num-traits",
+ ]
+ 
++[[package]]
++name = "num-conv"
++version = "0.1.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "51d515d32fb182ee37cda2ccdcb92950d6a3c2893aa280e540671c2cd0f3b1d9"
++
+ [[package]]
+ name = "num-integer"
+ version = "0.1.47"
+@@ -999,6 +1255,12 @@ version = "0.2.17"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
+ 
++[[package]]
++name = "pin-utils"
++version = "0.1.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
++
+ [[package]]
+ name = "pkg-config"
+ version = "0.3.34"
+@@ -1014,6 +1276,12 @@ dependencies = [
+  "zerovec",
+ ]
+ 
++[[package]]
++name = "powerfmt"
++version = "0.2.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "439ee305def115ba05938db6eb1644ff94165c5ab5e9420d1c1bcedbba909391"
++
+ [[package]]
+ name = "proc-macro2"
+ version = "1.0.107"
+@@ -1211,8 +1479,8 @@ dependencies = [
+  "base64 0.23.1",
+  "bytes",
+  "futures-core",
+- "http",
+- "http-body",
++ "http 1.5.0",
++ "http-body 1.1.0",
+  "http-body-util",
+  "hyper",
+  "hyper-rustls",
+@@ -1360,6 +1628,12 @@ version = "1.0.23"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
+ 
++[[package]]
++name = "ryu"
++version = "1.0.23"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
++
+ [[package]]
+ name = "same-file"
+ version = "1.0.6"
+@@ -1457,6 +1731,17 @@ dependencies = [
+  "zmij",
+ ]
+ 
++[[package]]
++name = "sha2"
++version = "0.10.9"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283"
++dependencies = [
++ "cfg-if",
++ "cpufeatures 0.2.17",
++ "digest 0.10.7",
++]
++
+ [[package]]
+ name = "sha2"
+ version = "0.11.0"
+@@ -1464,8 +1749,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "446ba717509524cb3f22f17ecc096f10f4822d76ab5c0b9822c5f9c284e825f4"
+ dependencies = [
+  "cfg-if",
+- "cpufeatures",
+- "digest",
++ "cpufeatures 0.3.1",
++ "digest 0.11.3",
+ ]
+ 
+ [[package]]
+@@ -1607,6 +1892,36 @@ dependencies = [
+  "syn 3.0.5",
+ ]
+ 
++[[package]]
++name = "time"
++version = "0.3.45"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "f9e442fc33d7fdb45aa9bfeb312c095964abdf596f7567261062b2a7107aaabd"
++dependencies = [
++ "deranged",
++ "num-conv",
++ "powerfmt",
++ "serde_core",
++ "time-core",
++ "time-macros",
++]
++
++[[package]]
++name = "time-core"
++version = "0.1.7"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "8b36ee98fd31ec7426d599183e8fe26932a8dc1fb76ddb6214d05493377d34ca"
++
++[[package]]
++name = "time-macros"
++version = "0.2.25"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "71e552d1249bf61ac2a52db88179fd0673def1e1ad8243a00d9ec9ed71fee3dd"
++dependencies = [
++ "num-conv",
++ "time-core",
++]
++
+ [[package]]
+ name = "tinystr"
+ version = "0.8.4"
+@@ -1706,8 +2021,8 @@ dependencies = [
+  "bitflags",
+  "bytes",
+  "futures-util",
+- "http",
+- "http-body",
++ "http 1.5.0",
++ "http-body 1.1.0",
+  "pin-project-lite",
+  "tower",
+  "tower-layer",
+@@ -1734,9 +2049,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "63e71662fa4b2a2c3a26f570f037eb95bb1f85397f3cd8076caed2f026a6d100"
+ dependencies = [
+  "pin-project-lite",
++ "tracing-attributes",
+  "tracing-core",
+ ]
+ 
++[[package]]
++name = "tracing-attributes"
++version = "0.1.31"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7490cfa5ec963746568740651ac6781f701c9c5ea257c58e057f3ba8cf69e8da"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "syn 2.0.119",
++]
++
+ [[package]]
+ name = "tracing-core"
+ version = "0.1.36"
+@@ -1949,7 +2276,7 @@ dependencies = [
+  "jsonschema",
+  "serde",
+  "serde_json",
+- "sha2",
++ "sha2 0.11.0",
+  "thiserror",
+  "tokio",
+  "tokio-util",
+@@ -1994,6 +2321,29 @@ dependencies = [
+  "wickle-model-responses",
+ ]
+ 
++[[package]]
++name = "wickle-model-bedrock"
++version = "0.1.0"
++dependencies = [
++ "aws-credential-types",
++ "aws-sigv4",
++ "aws-smithy-async",
++ "aws-smithy-eventstream",
++ "aws-smithy-http",
++ "aws-smithy-runtime-api",
++ "aws-smithy-types",
++ "base64 0.22.1",
++ "bytes",
++ "futures-util",
++ "reqwest",
++ "serde_json",
++ "tokio",
++ "tokio-util",
++ "wickle",
++ "wickle-model-anthropic",
++ "wickle-model-responses",
++]
++
+ [[package]]
+ name = "wickle-model-openai"
+ version = "0.1.0"
+diff --git a/Cargo.toml b/Cargo.toml
+index 5242b431e1fa87deccba1d3438c575a01a79741a..dd043e112a0e5e96e3d0f36720612d9f2a4d03a7 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -1,5 +1,5 @@
+ [workspace]
+-members = ["crates/wickle", "crates/wickle-model-router", "crates/wickle-state-sqlite", "crates/wickle-adapter-runtime", "crates/wickle-model-openai", "crates/wickle-model-responses", "crates/wickle-model-azure-openai", "crates/wickle-model-anthropic"]
++members = ["crates/wickle", "crates/wickle-model-router", "crates/wickle-state-sqlite", "crates/wickle-adapter-runtime", "crates/wickle-model-openai", "crates/wickle-model-responses", "crates/wickle-model-azure-openai", "crates/wickle-model-anthropic", "crates/wickle-model-bedrock"]
+ default-members = ["crates/wickle"]
+ resolver = "3"
+ 
+diff --git a/README.de.md b/README.de.md
+index 4a0748aa5abcb42c7f74d574624e751f153f297d..930248047dc8aea4f47d36470c684e8e7afb0236 100644
+--- a/README.de.md
++++ b/README.de.md
+@@ -27,3 +27,5 @@ Der [OpenAI-Responses-Adapter](docs/openai.md) unterstützt begrenzte HTTP/SSE-G
+ Informationen zu Azure-Bereitstellungen und vom Host verwalteten API-Schlüsseln oder Entra-Token stehen im [Leitfaden zum Azure-OpenAI-Adapter](docs/azure-openai.md).
+ 
+ Claude Messages, die Erhaltung von Thinking-Signaturen und Zugangsdaten pro Workspace beschreibt der [Anthropic-Adapter-Leitfaden](docs/anthropic.md).
++
++AWS-Signaturen, Inferenzprofile und Streaming-Protokolle beschreibt der [Bedrock-Adapter-Leitfaden](docs/bedrock.md).
+diff --git a/README.es.md b/README.es.md
+index 877289121d003e4c80d083a367c88839bffd5b40..16de23f151bd9de6f8848969eb2d30de1b952adf 100644
+--- a/README.es.md
++++ b/README.es.md
+@@ -27,3 +27,5 @@ El [adaptador OpenAI Responses](docs/openai.md) ofrece generación HTTP/SSE con
+ Para despliegues de Azure y autenticación con claves API o Entra gestionada por el Host, consulta la [guía del adaptador Azure OpenAI](docs/azure-openai.md).
+ 
+ Consulta la [guía del adaptador Anthropic](docs/anthropic.md) para Claude Messages, conservación de firmas de thinking y credenciales por workspace.
++
++Consulta la [guía del adaptador Bedrock](docs/bedrock.md) para firmas AWS, perfiles de inferencia y protocolos de streaming.
+diff --git a/README.fr.md b/README.fr.md
+index 4d907d365dfc2b7c6f4739d15e20662189e2dbb6..041fbcb375e24aaa0159e35264982d4bd8b1c2f0 100644
+--- a/README.fr.md
++++ b/README.fr.md
+@@ -27,3 +27,5 @@ L’[adaptateur OpenAI Responses](docs/openai.md) propose la génération HTTP/S
+ Pour les déploiements Azure et l’authentification par clé API ou Entra gérée par le Host, consultez le [guide de l’adaptateur Azure OpenAI](docs/azure-openai.md).
+ 
+ Consultez le [guide de l’adaptateur Anthropic](docs/anthropic.md) pour Claude Messages, la conservation des signatures thinking et les identifiants par workspace.
++
++Consultez le [guide de l’adaptateur Bedrock](docs/bedrock.md) pour la signature AWS, les profils d’inférence et les protocoles de streaming.
+diff --git a/README.ja.md b/README.ja.md
+index dc7f60b2f6bd0b2af11020e9a6bccb630a1de110..307d5ff0c7760640f796bd72210d9e80fbcf1963 100644
+--- a/README.ja.md
++++ b/README.ja.md
+@@ -27,3 +27,5 @@ Agent Profile でエージェントの振る舞いを設定し、アダプター
+ Azure リソースのデプロイと Host が管理する API キー・Entra 認証については、[Azure OpenAI アダプターガイド](docs/azure-openai.md)を参照してください。
+ 
+ Claude Messages、thinking の署名保持、workspace ごとの認証については、[Anthropic アダプターガイド](docs/anthropic.md)を参照してください。
++
++AWS 署名、推論プロファイル、Bedrock ストリームについては、[Bedrock アダプターガイド](docs/bedrock.md)を参照してください。
+diff --git a/README.ko.md b/README.ko.md
+index bdaade29ab7e9c2678b8ccc64afc1afce4e725c4..9c5787beb11921b116b4bc3d3b8cdb665f63ccfb 100644
+--- a/README.ko.md
++++ b/README.ko.md
+@@ -27,3 +27,5 @@ Agent Profile로 에이전트의 동작을 구성하고, 어댑터를 통해 다
+ Azure 리소스별 배포와 Host가 관리하는 API key·Entra 인증은 [Azure OpenAI 어댑터 가이드](docs/azure-openai.md)를 참고하세요.
+ 
+ Claude Messages, thinking 서명 보존, workspace별 인증은 [Anthropic 어댑터 가이드](docs/anthropic.md)를 참고하세요.
++
++AWS 서명, inference profile과 Bedrock 스트림은 [Bedrock 어댑터 가이드](docs/bedrock.md)를 참고하세요.
+diff --git a/README.md b/README.md
+index c7ac7515ec2a6e6ba7b11576724f1cdfbaed7fff..c40251aeba5cb356d30d8a6bebf37d8aa79e3467 100644
+--- a/README.md
++++ b/README.md
+@@ -27,3 +27,5 @@ The [OpenAI Responses adapter](docs/openai.md) provides bounded HTTP/SSE generat
+ For resource-scoped Azure deployments and Host-managed API-key/Entra authentication, see the [Azure OpenAI adapter guide](docs/azure-openai.md).
+ 
+ For Claude Messages, signed thinking replay and workspace-scoped credentials, see the [Anthropic adapter guide](docs/anthropic.md).
++
++For AWS signing, inference profiles and both Bedrock stream protocols, see the [Bedrock adapter guide](docs/bedrock.md).
+diff --git a/README.ru.md b/README.ru.md
+index d3403d1fd7906db74a6eb3f53c3c3e31d278c613..dd285910fe74237af4e1eb7bd8f6a4b4c134dcce 100644
+--- a/README.ru.md
++++ b/README.ru.md
+@@ -27,3 +27,5 @@ Wickle — движок агентов, который EpsilonDelta разраб
+ Развёртывания Azure и аутентификация через ключ API или Entra, управляемая Host, описаны в [руководстве по адаптеру Azure OpenAI](docs/azure-openai.md).
+ 
+ Claude Messages, сохранение подписей thinking и учётные данные workspace описаны в [руководстве по адаптеру Anthropic](docs/anthropic.md).
++
++Подпись AWS, профили вывода и потоковые протоколы описаны в [руководстве по адаптеру Bedrock](docs/bedrock.md).
+diff --git a/README.zh-CN.md b/README.zh-CN.md
+index 44cbcce0d1ef6860ceaef610b92a1678e3786520..f1729ea59dedba9d7c5f51378dface14ec2b1ec3 100644
+--- a/README.zh-CN.md
++++ b/README.zh-CN.md
+@@ -27,3 +27,5 @@ Wickle 是 EpsilonDelta 正在使用 Rust 开发的智能体引擎，旨在以
+ Azure 资源部署及由 Host 管理的 API 密钥和 Entra 身份验证，请参阅 [Azure OpenAI 适配器指南](docs/azure-openai.md)。
+ 
+ Claude Messages、thinking 签名保留及 workspace 身份验证请参阅 [Anthropic 适配器指南](docs/anthropic.md)。
++
++AWS 签名、推理配置文件和 Bedrock 流协议请参阅 [Bedrock 适配器指南](docs/bedrock.md)。
+diff --git a/crates/wickle-model-anthropic/src/codec.rs b/crates/wickle-model-anthropic/src/codec.rs
+index 7a266db45ac0bc411be1ba998ececd2c58e0d9c6..910ef87c618abe8010ac02d9c1bfbfb86cc8281f 100644
+--- a/crates/wickle-model-anthropic/src/codec.rs
++++ b/crates/wickle-model-anthropic/src/codec.rs
+@@ -6,7 +6,8 @@ pub(crate) const REPLAY_KIND: &str = "wickle.anthropic.messages.v1";
+ pub(crate) fn invalid() -> ContractError {
+     error(ErrorCode::InvalidContract, "content")
+ }
+-pub(crate) fn encode_request(request: &ModelRequest) -> Result<Value, ContractError> {
++/// Encode the Messages wire contract while preserving route-bound content.
++pub fn encode_request(request: &ModelRequest) -> Result<Value, ContractError> {
+     request.validate()?;
+     if request.options.keys().any(|key| {
+         !matches!(
+@@ -186,7 +187,12 @@ pub(crate) fn encode_request(request: &ModelRequest) -> Result<Value, ContractEr
+                 .filter(|n| *n >= 1024 && *n < request.max_output_tokens.get())
+                 .ok_or_else(|| error(ErrorCode::ModelOptionUnsupported, "thinking_budget"))?;
+             if matches!(
+-                request.route.model_id.as_str(),
++                request
++                    .route
++                    .model_id
++                    .as_str()
++                    .strip_prefix("anthropic.")
++                    .unwrap_or(request.route.model_id.as_str()),
+                 "claude-opus-5" | "claude-sonnet-5" | "claude-opus-4-7" | "claude-opus-4-8"
+             ) {
+                 return Err(error(ErrorCode::ModelOptionUnsupported, "manual_thinking"));
+@@ -198,7 +204,13 @@ pub(crate) fn encode_request(request: &ModelRequest) -> Result<Value, ContractEr
+                 return Err(error(ErrorCode::ModelOptionUnsupported, "thinking_budget"));
+             }
+             if mode == Some("disabled")
+-                && request.route.model_id.as_str() == "claude-opus-5"
++                && request
++                    .route
++                    .model_id
++                    .as_str()
++                    .strip_prefix("anthropic.")
++                    .unwrap_or(request.route.model_id.as_str())
++                    == "claude-opus-5"
+                 && matches!(
+                     request.options.get("effort").and_then(Value::as_str),
+                     Some("xhigh" | "max")
+diff --git a/crates/wickle-model-anthropic/src/lib.rs b/crates/wickle-model-anthropic/src/lib.rs
+index 7ae671980a6e1df83885e5eeb1b55459e122f90f..43dc31df655a65bf0c569134e230c81e15ecaff5 100644
+--- a/crates/wickle-model-anthropic/src/lib.rs
++++ b/crates/wickle-model-anthropic/src/lib.rs
+@@ -12,3 +12,9 @@ use wickle::{ContractError, ErrorCode};
+ fn error(code: ErrorCode, location: &str) -> ContractError {
+     ContractError::new(code, format!("anthropic.{location}"))
+ }
++
++/// Messages wire primitives for platform adapters with independent authentication.
++pub mod protocol {
++    pub use crate::codec::encode_request;
++    pub use crate::response::Decoder as MessagesDecoder;
++}
+diff --git a/crates/wickle-model-anthropic/src/response.rs b/crates/wickle-model-anthropic/src/response.rs
+index c818fd1061a13d0b5669183e0bfce384805a02b8..665f5a99491e441da41472c90f82279ceb0f35bb 100644
+--- a/crates/wickle-model-anthropic/src/response.rs
++++ b/crates/wickle-model-anthropic/src/response.rs
+@@ -11,8 +11,10 @@ struct Block {
+     arguments: String,
+     closed: bool,
+ }
+-pub(crate) struct Decoder<'a> {
++/// Validates one Messages stream independently of its HTTP or AWS framing.
++pub struct Decoder<'a> {
+     request: &'a ModelRequest,
++    /// Provider-reported metadata, with an optional transport request identifier.
+     pub metadata: ModelResponseMetadata,
+     message_id: Option<String>,
+     blocks: Vec<Block>,
+@@ -23,6 +25,7 @@ pub(crate) struct Decoder<'a> {
+     tools: usize,
+ }
+ impl<'a> Decoder<'a> {
++    /// Begin one physical attempt without making a network request.
+     pub fn new(request: &'a ModelRequest, request_id: Option<Id>) -> Self {
+         Self {
+             request,
+@@ -39,6 +42,7 @@ impl<'a> Decoder<'a> {
+             tools: 0,
+         }
+     }
++    /// Consume one complete JSON Messages event and produce normalized deltas.
+     pub fn event(&mut self, event: SseEvent) -> Result<Vec<ModelEvent>, ContractError> {
+         if self.terminal.is_some() {
+             return Err(invalid());
+@@ -285,6 +289,7 @@ impl<'a> Decoder<'a> {
+             .ok_or_else(invalid)?;
+         Ok(output)
+     }
++    /// Return a validated terminal only after clean transport EOF.
+     pub fn finish(&mut self) -> Result<ModelEvent, ContractError> {
+         self.terminal.take().ok_or_else(invalid)
+     }
+diff --git a/crates/wickle-model-bedrock/Cargo.toml b/crates/wickle-model-bedrock/Cargo.toml
+new file mode 100644
+index 0000000000000000000000000000000000000000..3d10030b934a3f4e042ff71bdb64e1d465fa4626
+--- /dev/null
++++ b/crates/wickle-model-bedrock/Cargo.toml
+@@ -0,0 +1,32 @@
++[package]
++name = "wickle-model-bedrock"
++version.workspace = true
++edition.workspace = true
++rust-version.workspace = true
++repository.workspace = true
++description = "AWS Bedrock Claude model adapters for Wickle"
++publish = false
++include = ["Cargo.toml", "src/**"]
++[dependencies]
++wickle = { path = "../wickle", version = "=0.1.0" }
++wickle-model-anthropic = { path = "../wickle-model-anthropic", version = "=0.1.0" }
++wickle-model-responses = { path = "../wickle-model-responses", version = "=0.1.0" }
++reqwest.workspace = true
++serde_json.workspace = true
++futures-util.workspace = true
++tokio.workspace = true
++tokio-util.workspace = true
++aws-sigv4 = { version = "=1.3.0", default-features = false, features = ["sign-http"] }
++aws-credential-types = "=1.2.2"
++aws-smithy-eventstream = "=0.60.8"
++aws-smithy-types = "=1.3.0"
++# Bound the signer family to the verified MSRV-compatible API generation.
++aws-smithy-runtime-api = "=1.7.4"
++aws-smithy-async = "=1.2.5"
++aws-smithy-http = "=0.62.0"
++bytes = "=1.12.1"
++base64 = "=0.22.1"
++[dev-dependencies]
++tokio = { workspace = true, features = ["net", "io-util", "rt-multi-thread", "test-util"] }
++[lints]
++workspace = true
+diff --git a/crates/wickle-model-bedrock/src/auth.rs b/crates/wickle-model-bedrock/src/auth.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..65c7d5ee38bf401fdb43018b4e0fd42db70b32a3
+--- /dev/null
++++ b/crates/wickle-model-bedrock/src/auth.rs
+@@ -0,0 +1,241 @@
++use crate::error;
++use aws_credential_types::Credentials;
++use aws_sigv4::{
++    http_request::{SignableBody, SignableRequest, SigningSettings, sign},
++    sign::v4,
++};
++use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
++use std::{
++    fmt,
++    time::{Duration, UNIX_EPOCH},
++};
++use wickle::*;
++
++/// Distinguishes inference access from AWS control-plane model inspection.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum BedrockAudience {
++    /// One model inference request.
++    Inference,
++    /// Foundation-model or inference-profile metadata.
++    Metadata,
++}
++/// Host authorization context; the adapter does not load an environment chain.
++pub struct BedrockCredentialContext<'a> {
++    /// Authenticated connection owner.
++    pub scope: &'a Scope,
++    /// Requested service purpose.
++    pub audience: BedrockAudience,
++    /// Explicit request origin region.
++    pub region: &'a str,
++    /// Cancellation while loading or refreshing credentials.
++    pub cancellation: &'a tokio_util::sync::CancellationToken,
++    /// Deadline covering credential resolution and HTTP.
++    pub deadline: tokio::time::Instant,
++}
++/// Host-supplied credentials. No credential material enters the catalog or model body.
++#[derive(Clone)]
++pub enum BedrockCredential {
++    /// IAM credentials, optionally temporary, signed with the AWS SigV4 library.
++    Aws(Credentials),
++    /// Bedrock API key/token, usable for inference only.
++    Bearer(String),
++}
++impl fmt::Debug for BedrockCredential {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.write_str("BedrockCredential([redacted])")
++    }
++}
++/// Applications can adapt an AWS SDK credential chain without putting it in the core.
++pub trait BedrockCredentialProvider: Send + Sync {
++    /// Resolve credentials for this scope and service purpose.
++    fn credential<'a>(
++        &'a self,
++        context: &'a BedrockCredentialContext<'a>,
++    ) -> PortFuture<'a, BedrockCredential>;
++}
++impl BedrockCredentialProvider for BedrockCredential {
++    fn credential<'a>(
++        &'a self,
++        _: &'a BedrockCredentialContext<'a>,
++    ) -> PortFuture<'a, BedrockCredential> {
++        Box::pin(async { Ok(self.clone()) })
++    }
++}
++pub(crate) struct SigningRequest<'a> {
++    pub method: &'a str,
++    pub url: &'a reqwest::Url,
++    pub body: &'a [u8],
++    pub service: &'a str,
++    pub clock: &'a dyn Clock,
++    pub headers: HeaderMap,
++}
++pub(crate) async fn authorize(
++    provider: &dyn BedrockCredentialProvider,
++    context: BedrockCredentialContext<'_>,
++    request: SigningRequest<'_>,
++) -> Result<HeaderMap, ContractError> {
++    let credential = tokio::select! {biased;
++        _=context.cancellation.cancelled()=>return Err(error(ErrorCode::Cancelled,"credential")),
++        _=tokio::time::sleep_until(context.deadline)=>return Err(error(ErrorCode::DeadlineExceeded,"credential")),
++        result=provider.credential(&context)=>result.map_err(|_|error(ErrorCode::AccessDenied,"credential"))?,
++    };
++    let mut headers = request.headers;
++    match credential {
++        BedrockCredential::Bearer(token) => {
++            if context.audience != BedrockAudience::Inference
++                || token.is_empty()
++                || token.chars().any(char::is_whitespace)
++            {
++                return Err(error(ErrorCode::AccessDenied, "bearer"));
++            }
++            let mut value = HeaderValue::from_str(&format!("Bearer {token}"))
++                .map_err(|_| error(ErrorCode::AccessDenied, "bearer"))?;
++            value.set_sensitive(true);
++            headers.insert("authorization", value);
++        }
++        BedrockCredential::Aws(credentials) => {
++            // A refresh can take time; check expiry and sign only after it completes.
++            let millis = u64::try_from(request.clock.now()?.utc_ms)
++                .map_err(|_| error(ErrorCode::ClockUnavailable, "signing_time"))?;
++            let time = UNIX_EPOCH
++                .checked_add(Duration::from_millis(millis))
++                .ok_or_else(|| error(ErrorCode::ClockUnavailable, "signing_time"))?;
++            if credentials.expiry().is_some_and(|expiry| expiry <= time) {
++                return Err(error(ErrorCode::AccessDenied, "expired_credential"));
++            }
++            let identity = credentials.into();
++            let parameters = v4::SigningParams::builder()
++                .identity(&identity)
++                .region(context.region)
++                .name(request.service)
++                .time(time)
++                .settings(SigningSettings::default())
++                .build()
++                .map_err(|_| error(ErrorCode::AccessDenied, "signing_parameters"))?
++                .into();
++            let values: Vec<_> = headers
++                .iter()
++                .map(|(name, value)| value.to_str().map(|value| (name.as_str(), value)))
++                .collect::<Result<_, _>>()
++                .map_err(|_| error(ErrorCode::InvalidContract, "headers"))?;
++            let signable = SignableRequest::new(
++                request.method,
++                request.url.as_str(),
++                values.into_iter(),
++                SignableBody::Bytes(request.body),
++            )
++            .map_err(|_| error(ErrorCode::AccessDenied, "signable_request"))?;
++            let (instructions, _) = sign(signable, &parameters)
++                .map_err(|_| error(ErrorCode::AccessDenied, "signature"))?
++                .into_parts();
++            if !instructions.params().is_empty() {
++                return Err(error(ErrorCode::InvalidContract, "signature_query"));
++            }
++            let (signed, _) = instructions.into_parts();
++            for header in signed {
++                let name = HeaderName::from_bytes(header.name().as_bytes())
++                    .map_err(|_| error(ErrorCode::InvalidContract, "signature_header"))?;
++                let mut value = HeaderValue::from_str(header.value())
++                    .map_err(|_| error(ErrorCode::InvalidContract, "signature_header"))?;
++                value.set_sensitive(
++                    header.sensitive() || name == "authorization" || name == "x-amz-security-token",
++                );
++                headers.insert(name, value);
++            }
++        }
++    }
++    Ok(headers)
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    struct FixedClock;
++    impl Clock for FixedClock {
++        fn now(&self) -> Result<ClockReading, ContractError> {
++            Ok(ClockReading {
++                utc_ms: 1735689600000,
++                monotonic_ms: 0,
++            })
++        }
++        fn sleep_until<'a>(&'a self, _: u64) -> PortFuture<'a, ()> {
++            Box::pin(std::future::pending())
++        }
++    }
++    #[tokio::test]
++    async fn signing_matches_an_independent_botocore_reference() {
++        let scope = Scope {
++            tenant_id: Id::new("tenant").unwrap(),
++            workspace_id: Id::new("workspace").unwrap(),
++            user_id: None,
++        };
++        let cancellation = Default::default();
++        let credential = BedrockCredential::Aws(Credentials::new(
++            "AKIDEXAMPLE",
++            "test-secret",
++            Some("test-session".into()),
++            None,
++            "fixture",
++        ));
++        let url =
++            reqwest::Url::parse("https://bedrock-mantle.us-east-1.api.aws/anthropic/v1/messages")
++                .unwrap();
++        let mut headers = HeaderMap::new();
++        headers.insert("content-type", HeaderValue::from_static("application/json"));
++        headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
++        let headers=authorize(&credential,BedrockCredentialContext{scope:&scope,audience:BedrockAudience::Inference,region:"us-east-1",cancellation:&cancellation,deadline:tokio::time::Instant::now()+std::time::Duration::from_secs(1)},SigningRequest{method:"POST",url:&url,body:br#"{"model":"anthropic.claude-opus-5","messages":[],"max_tokens":8,"stream":true}"#,service:"bedrock-mantle",clock:&FixedClock,headers}).await.unwrap();
++        // Generated independently by botocore SigV4Auth, not the implementation under test.
++        assert_eq!(
++            headers["authorization"],
++            "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20250101/us-east-1/bedrock-mantle/aws4_request, SignedHeaders=anthropic-version;content-type;host;x-amz-date;x-amz-security-token, Signature=dc66a56c9bce0eb42494f3b79f654bea31449e043e98573b9bb615dc7a1c44f1"
++        );
++        assert_eq!(headers["x-amz-date"], "20250101T000000Z");
++        assert_eq!(headers["x-amz-security-token"], "test-session");
++        assert!(headers["authorization"].is_sensitive());
++        assert!(headers["x-amz-security-token"].is_sensitive());
++    }
++    #[tokio::test]
++    async fn encoded_profile_arn_signature_matches_botocore() {
++        let scope = Scope {
++            tenant_id: Id::new("tenant").unwrap(),
++            workspace_id: Id::new("workspace").unwrap(),
++            user_id: None,
++        };
++        let cancellation = Default::default();
++        let credential = BedrockCredential::Aws(Credentials::new(
++            "AKIDEXAMPLE",
++            "test-secret",
++            Some("test-session".into()),
++            None,
++            "fixture",
++        ));
++        let url = reqwest::Url::parse("https://bedrock-runtime.us-east-1.amazonaws.com/model/arn:aws:bedrock:us-east-1:123456789012:inference-profile%2Fprofile/invoke-with-response-stream").unwrap();
++        let mut headers = HeaderMap::new();
++        headers.insert("content-type", HeaderValue::from_static("application/json"));
++        let headers = authorize(
++            &credential,
++            BedrockCredentialContext {
++                scope: &scope,
++                audience: BedrockAudience::Inference,
++                region: "us-east-1",
++                cancellation: &cancellation,
++                deadline: tokio::time::Instant::now() + Duration::from_secs(1),
++            },
++            SigningRequest {
++                method: "POST",
++                url: &url,
++                body: br#"{"anthropic_version":"bedrock-2023-05-31","messages":[],"max_tokens":8}"#,
++                service: "bedrock",
++                clock: &FixedClock,
++                headers,
++            },
++        )
++        .await
++        .unwrap();
++        // Independent botocore reference includes canonical URI double encoding.
++        assert_eq!(
++            headers["authorization"],
++            "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20250101/us-east-1/bedrock/aws4_request, SignedHeaders=content-type;host;x-amz-date;x-amz-security-token, Signature=6506f742d4c41cbb50b62a020f1c026d844d42a224fcec4aa114fa8489a623cc"
++        );
++    }
++}
+diff --git a/crates/wickle-model-bedrock/src/connection.rs b/crates/wickle-model-bedrock/src/connection.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..cc1b94c7a7c419aae7970a0e25e0d17ac1c7b96d
+--- /dev/null
++++ b/crates/wickle-model-bedrock/src/connection.rs
+@@ -0,0 +1,295 @@
++use crate::{BedrockCredentialProvider, error};
++use reqwest::{Client, Url};
++use serde_json::json;
++use std::{fmt, sync::Arc, time::Duration};
++use wickle::*;
++
++/// AWS endpoint family, with its own SigV4 service identity.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum BedrockEndpoint {
++    /// Standard Bedrock runtime.
++    Runtime,
++    /// Bedrock Mantle.
++    Mantle,
++}
++/// Explicit inference wire contract; endpoint and model support are checked separately.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum BedrockOperation {
++    /// Native Anthropic Messages with SSE.
++    Messages,
++    /// Runtime InvokeModelWithResponseStream with AWS event-stream framing.
++    InvokeStream,
++}
++/// Preserve the exact model/profile selector separately from the route's model release.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub enum BedrockSelector {
++    /// Foundation model ID or foundation-model ARN.
++    Foundation(String),
++    /// Inference profile ID or ARN.
++    InferenceProfile(String),
++}
++impl BedrockSelector {
++    /// Actual inference selector, without changing prefixes or ARN encoding.
++    pub fn value(&self) -> &str {
++        match self {
++            Self::Foundation(v) | Self::InferenceProfile(v) => v,
++        }
++    }
++    pub(crate) fn kind(&self) -> &'static str {
++        match self {
++            Self::Foundation(_) => "foundation",
++            Self::InferenceProfile(_) => "inference_profile",
++        }
++    }
++}
++/// Explicit Host configuration. No environment variables are read by this crate.
++#[derive(Clone, Debug)]
++pub struct BedrockOptions {
++    /// Request origin and signing region; not a claim about execution location.
++    pub region: String,
++    /// Inference endpoint family.
++    pub endpoint: BedrockEndpoint,
++    /// Selected wire operation.
++    pub operation: BedrockOperation,
++    /// Exact model/profile target.
++    pub selector: BedrockSelector,
++    /// Optional HTTPS origin override, or explicit loopback HTTP for fixtures.
++    pub endpoint_url: Option<String>,
++    /// Optional control-plane HTTPS origin override, or loopback test origin.
++    pub metadata_url: Option<String>,
++    /// Optional profile destination restriction, enforced by metadata inspection.
++    /// Empty means no destination-location guarantee.
++    pub allowed_destination_regions: Vec<String>,
++    /// Connection establishment bound.
++    pub connect_timeout: Duration,
++    /// Bound on a physical request; the call context can impose a shorter deadline.
++    pub request_timeout: Duration,
++    /// Maximum raw transport bytes.
++    pub max_transport_bytes: usize,
++    /// Maximum one SSE record or AWS event-stream frame.
++    pub max_event_bytes: usize,
++    /// Maximum raw protocol events, independent of normalized ModelEvent limits.
++    pub max_protocol_events: usize,
++}
++impl BedrockOptions {
++    /// Default to the Runtime native Messages route for an explicitly chosen region.
++    pub fn new(region: impl Into<String>, selector: BedrockSelector) -> Self {
++        Self {
++            region: region.into(),
++            endpoint: BedrockEndpoint::Runtime,
++            operation: BedrockOperation::Messages,
++            selector,
++            endpoint_url: None,
++            metadata_url: None,
++            allowed_destination_regions: vec![],
++            connect_timeout: Duration::from_secs(10),
++            request_timeout: Duration::from_secs(120),
++            max_transport_bytes: 8 * 1024 * 1024,
++            max_event_bytes: 1024 * 1024,
++            max_protocol_events: 16384,
++        }
++    }
++}
++/// Scoped connection with an explicit credential revision.
++#[derive(Clone)]
++pub struct BedrockConnection(pub(crate) Arc<Connection>);
++#[derive(Clone)]
++pub(crate) struct Connection {
++    pub client: Client,
++    pub url: Url,
++    pub metadata_base: Url,
++    pub options: BedrockOptions,
++    pub scope: Scope,
++    pub binding: ModelPortBinding,
++    pub target: JsonObject,
++    pub credentials: Arc<dyn BedrockCredentialProvider>,
++    pub clock: Arc<dyn Clock>,
++}
++impl fmt::Debug for BedrockConnection {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_struct("BedrockConnection")
++            .field("binding", &self.0.binding)
++            .finish_non_exhaustive()
++    }
++}
++impl BedrockConnection {
++    /// Construct without network access or implicit AWS credential-chain loading.
++    pub fn new(
++        scope: Scope,
++        connection_ref: VersionedRef,
++        credentials: Arc<dyn BedrockCredentialProvider>,
++        mut options: BedrockOptions,
++    ) -> Result<Self, ContractError> {
++        if !region(&options.region)
++            || options.selector.value().is_empty()
++            || options.selector.value().chars().any(char::is_control)
++            || options.connect_timeout.is_zero()
++            || options.request_timeout.is_zero()
++            || options.max_transport_bytes == 0
++            || options.max_event_bytes < 16
++            || options.max_event_bytes > options.max_transport_bytes
++            || options.max_protocol_events == 0
++            || (options.endpoint == BedrockEndpoint::Mantle
++                && options.operation == BedrockOperation::InvokeStream)
++            || options
++                .allowed_destination_regions
++                .iter()
++                .any(|v| !region(v))
++            || (!options.allowed_destination_regions.is_empty()
++                && matches!(options.selector, BedrockSelector::Foundation(_)))
++        {
++            return Err(error(ErrorCode::InvalidConfiguration, "connection"));
++        }
++        options.allowed_destination_regions.sort();
++        options.allowed_destination_regions.dedup();
++        let default = match options.endpoint {
++            BedrockEndpoint::Runtime => {
++                format!("https://bedrock-runtime.{}.amazonaws.com/", options.region)
++            }
++            BedrockEndpoint::Mantle => {
++                format!("https://bedrock-mantle.{}.api.aws/", options.region)
++            }
++        };
++        let base = origin(options.endpoint_url.as_deref().unwrap_or(&default))?;
++        let mut url = base.clone();
++        match options.operation {
++            BedrockOperation::Messages => url.set_path("/anthropic/v1/messages"),
++            BedrockOperation::InvokeStream => {
++                url.path_segments_mut()
++                    .map_err(|_| error(ErrorCode::InvalidConfiguration, "endpoint"))?
++                    .clear()
++                    .push("model")
++                    .push(options.selector.value())
++                    .push("invoke-with-response-stream");
++            }
++        }
++        let metadata_default = format!("https://bedrock.{}.amazonaws.com/", options.region);
++        let metadata_base = origin(options.metadata_url.as_deref().unwrap_or(&metadata_default))?;
++        let target = JsonObject::from([
++            ("endpoint".into(), json!(base.as_str())),
++            (
++                "endpoint_kind".into(),
++                json!(match options.endpoint {
++                    BedrockEndpoint::Runtime => "runtime",
++                    BedrockEndpoint::Mantle => "mantle",
++                }),
++            ),
++            ("region".into(), json!(options.region)),
++            (
++                "selector".into(),
++                json!({"kind":options.selector.kind(),"value":options.selector.value()}),
++            ),
++            ("metadata_endpoint".into(), json!(metadata_base.as_str())),
++            (
++                "allowed_destination_regions".into(),
++                json!(options.allowed_destination_regions),
++            ),
++        ]);
++        let client = Client::builder()
++            .redirect(reqwest::redirect::Policy::none())
++            .retry(reqwest::retry::never())
++            .connect_timeout(options.connect_timeout)
++            .timeout(options.request_timeout)
++            .build()
++            .map_err(|_| error(ErrorCode::ComponentUnavailable, "client"))?;
++        Ok(Self(Arc::new(Connection {
++            client,
++            url,
++            metadata_base,
++            options,
++            scope,
++            target,
++            credentials,
++            clock: Arc::new(SystemClock::new()),
++            binding: ModelPortBinding {
++                provider: Id::new("aws-bedrock")?,
++                adapter: VersionedRef {
++                    id: Id::new("wickle-model-bedrock")?,
++                    version: Id::new(env!("CARGO_PKG_VERSION"))?,
++                },
++                connection_ref,
++            },
++        })))
++    }
++    /// Use the Host's clock for request signing; timers still obey the call deadline.
++    pub fn with_clock(self, clock: Arc<dyn Clock>) -> Self {
++        Self(Arc::new(Connection {
++            clock,
++            ..(*self.0).clone()
++        }))
++    }
++    /// Concrete provider/adapter/credential identity for the catalog.
++    pub fn binding(&self) -> ModelPortBinding {
++        self.0.binding.clone()
++    }
++    /// Canonical endpoint, selector, origin region and destination policy.
++    pub fn target(&self) -> &JsonObject {
++        &self.0.target
++    }
++    /// Owner namespace.
++    pub fn scope(&self) -> &Scope {
++        &self.0.scope
++    }
++    /// Operation and protocol version selected at construction.
++    pub fn api_contract(&self) -> ApiContract {
++        match self.0.options.operation {
++            BedrockOperation::Messages => ApiContract {
++                operation: Id::new("messages").expect("static"),
++                version: Id::new("2023-06-01").expect("static"),
++            },
++            BedrockOperation::InvokeStream => ApiContract {
++                operation: Id::new("invoke_model_with_response_stream").expect("static"),
++                version: Id::new("bedrock-2023-05-31").expect("static"),
++            },
++        }
++    }
++    pub(crate) fn validate(
++        &self,
++        route: &ResolvedModelRoute,
++        scope: &Scope,
++    ) -> Result<(), ContractError> {
++        if scope != &self.0.scope {
++            return Err(error(ErrorCode::AccessDenied, "scope"));
++        }
++        if !self.0.binding.matches_route(route)
++            || route.target != self.0.target
++            || route.api_contract != self.api_contract()
++        {
++            return Err(error(ErrorCode::ModelBindingInvalid, "route"));
++        }
++        Ok(())
++    }
++    pub(crate) fn signing_service(&self) -> &'static str {
++        match self.0.options.endpoint {
++            BedrockEndpoint::Runtime => "bedrock",
++            BedrockEndpoint::Mantle => "bedrock-mantle",
++        }
++    }
++}
++fn region(value: &str) -> bool {
++    !value.is_empty()
++        && value
++            .bytes()
++            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
++}
++fn origin(value: &str) -> Result<Url, ContractError> {
++    let url = Url::parse(value).map_err(|_| error(ErrorCode::InvalidConfiguration, "endpoint"))?;
++    let loopback = url.host_str().is_some_and(|host| {
++        host == "localhost"
++            || host
++                .trim_matches(['[', ']'])
++                .parse::<std::net::IpAddr>()
++                .is_ok_and(|ip| ip.is_loopback())
++    });
++    if !(url.scheme() == "https" || (url.scheme() == "http" && loopback))
++        || url.host_str().is_none()
++        || !url.username().is_empty()
++        || url.password().is_some()
++        || url.query().is_some()
++        || url.fragment().is_some()
++        || url.path() != "/"
++    {
++        return Err(error(ErrorCode::InvalidConfiguration, "endpoint"));
++    }
++    Ok(url)
++}
+diff --git a/crates/wickle-model-bedrock/src/framing.rs b/crates/wickle-model-bedrock/src/framing.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..518e5b4c7d4a82f9aac7a79c928afb5ce7e38f5d
+--- /dev/null
++++ b/crates/wickle-model-bedrock/src/framing.rs
+@@ -0,0 +1,143 @@
++use crate::{BedrockOperation, BedrockOptions, error};
++use base64::{Engine, engine::general_purpose::STANDARD};
++use bytes::BytesMut;
++use serde_json::{Value, json};
++use std::collections::BTreeMap;
++use wickle::*;
++use wickle_model_responses::{SseDecoder, SseEvent};
++
++pub(crate) enum Framing {
++    Sse(SseDecoder),
++    Aws(AwsFrames),
++}
++impl Framing {
++    pub fn new(options: &BedrockOptions) -> Self {
++        match options.operation {
++            BedrockOperation::Messages => Self::Sse(SseDecoder::new(
++                options.max_transport_bytes,
++                options.max_event_bytes,
++                options.max_protocol_events,
++            )),
++            BedrockOperation::InvokeStream => Self::Aws(AwsFrames {
++                buffer: BytesMut::new(),
++                bytes: 0,
++                frames: 0,
++                max_bytes: options.max_transport_bytes,
++                max_frame: options.max_event_bytes,
++                max_frames: options.max_protocol_events,
++            }),
++        }
++    }
++    pub fn push(&mut self, bytes: &[u8]) -> Result<Vec<SseEvent>, ContractError> {
++        match self {
++            Self::Sse(value) => value.push(bytes),
++            Self::Aws(value) => value.push(bytes),
++        }
++    }
++    pub fn finish(&self) -> Result<(), ContractError> {
++        match self {
++            Self::Sse(value) => value.finish(),
++            Self::Aws(value) => {
++                if value.buffer.is_empty() {
++                    Ok(())
++                } else {
++                    Err(invalid())
++                }
++            }
++        }
++    }
++}
++pub(crate) struct AwsFrames {
++    buffer: BytesMut,
++    bytes: usize,
++    frames: usize,
++    max_bytes: usize,
++    max_frame: usize,
++    max_frames: usize,
++}
++impl AwsFrames {
++    fn push(&mut self, bytes: &[u8]) -> Result<Vec<SseEvent>, ContractError> {
++        self.bytes = self
++            .bytes
++            .checked_add(bytes.len())
++            .filter(|n| *n <= self.max_bytes)
++            .ok_or_else(invalid)?;
++        self.buffer.extend_from_slice(bytes);
++        let mut events = vec![];
++        while self.buffer.len() >= 4 {
++            let len =
++                u32::from_be_bytes(self.buffer[..4].try_into().map_err(|_| invalid())?) as usize;
++            if len < 16 || len > self.max_frame {
++                return Err(invalid());
++            }
++            if self.buffer.len() < len {
++                break;
++            }
++            self.frames = self
++                .frames
++                .checked_add(1)
++                .filter(|n| *n <= self.max_frames)
++                .ok_or_else(invalid)?;
++            let frame = self.buffer.split_to(len).freeze();
++            // The AWS library validates both prelude and message CRCs and headers.
++            let message = aws_smithy_eventstream::frame::read_message_from(&frame[..])
++                .map_err(|_| invalid())?;
++            let mut headers = BTreeMap::new();
++            for header in message.headers() {
++                let name = header.name().as_str();
++                if headers.contains_key(name) {
++                    return Err(invalid());
++                }
++                headers.insert(name, header.value());
++            }
++            let text = |key| {
++                headers
++                    .get(key)
++                    .and_then(|v| v.as_string().ok())
++                    .map(|v| v.as_str())
++            };
++            match text(":message-type") {
++                Some("event") if text(":event-type") == Some("chunk") => {
++                    if text(":content-type").is_some_and(|v| v != "application/json") {
++                        return Err(invalid());
++                    }
++                    let body = std::str::from_utf8(message.payload()).map_err(|_| invalid())?;
++                    let body = parse_json(body)?;
++                    let encoded = body
++                        .get("bytes")
++                        .and_then(Value::as_str)
++                        .ok_or_else(invalid)?;
++                    let decoded = STANDARD.decode(encoded).map_err(|_| invalid())?;
++                    let data = String::from_utf8(decoded).map_err(|_| invalid())?;
++                    // The Messages decoder owns JSON/block/terminal validation.
++                    events.push(SseEvent { name: None, data });
++                }
++                Some("exception" | "error") => {
++                    let kind = match text(":exception-type").or_else(|| text(":error-code")) {
++                        Some("throttlingException") => "rate_limit_error",
++                        Some("modelTimeoutException") => {
++                            return Err(error(ErrorCode::DeadlineExceeded, "model_timeout"));
++                        }
++                        Some(
++                            "internalServerException"
++                            | "modelStreamErrorException"
++                            | "serviceUnavailableException",
++                        ) => "api_error",
++                        Some("validationException") => "invalid_request_error",
++                        Some("accessDeniedException") => "permission_error",
++                        _ => return Err(invalid()),
++                    };
++                    events.push(SseEvent {
++                        name: Some("error".into()),
++                        data: json!({"type":"error","error":{"type":kind}}).to_string(),
++                    });
++                }
++                _ => return Err(invalid()),
++            }
++        }
++        Ok(events)
++    }
++}
++fn invalid() -> ContractError {
++    error(ErrorCode::InvalidContract, "aws_event_stream")
++}
+diff --git a/crates/wickle-model-bedrock/src/inspection.rs b/crates/wickle-model-bedrock/src/inspection.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..a051363a8c109061537f5258341ccb7c81752628
+--- /dev/null
++++ b/crates/wickle-model-bedrock/src/inspection.rs
+@@ -0,0 +1,246 @@
++use crate::{
++    BedrockAudience, BedrockConnection, BedrockCredentialContext, BedrockCredentialProvider,
++    BedrockSelector, auth, error,
++};
++use serde_json::{Value, json};
++use std::{collections::BTreeMap, sync::Arc};
++use wickle::*;
++
++/// Provider-documented release facts, independent of inference-profile mutability.
++#[derive(Clone, Debug)]
++pub struct BedrockSnapshot {
++    /// Exact foundation model ID reported by AWS metadata.
++    pub model_id: Id,
++    /// Release established by trusted provider evidence.
++    pub model_version: Id,
++    /// Host-owned evidence reference.
++    pub evidence_ref: Id,
++}
++/// Queries AWS control-plane metadata with separately supplied IAM credentials.
++#[derive(Clone)]
++pub struct BedrockInspector {
++    connection: BedrockConnection,
++    credentials: Arc<dyn BedrockCredentialProvider>,
++    snapshots: Arc<BTreeMap<Id, BedrockSnapshot>>,
++}
++impl BedrockInspector {
++    /// Construct without network calls. A Bedrock bearer token cannot authorize this lookup.
++    pub fn new(
++        connection: BedrockConnection,
++        credentials: Arc<dyn BedrockCredentialProvider>,
++        snapshots: Vec<BedrockSnapshot>,
++    ) -> Result<Self, ContractError> {
++        let mut known = BTreeMap::new();
++        for snapshot in snapshots {
++            if known.insert(snapshot.model_id.clone(), snapshot).is_some() {
++                return Err(error(ErrorCode::InvalidConfiguration, "snapshots"));
++            }
++        }
++        Ok(Self {
++            connection,
++            credentials,
++            snapshots: Arc::new(known),
++        })
++    }
++}
++impl ModelRouteInspector for BedrockInspector {
++    fn inspect<'a>(
++        &'a self,
++        route: &'a ResolvedModelRoute,
++        context: &'a ModelInspectionContext,
++    ) -> PortFuture<'a, ModelRouteObservation> {
++        Box::pin(async move {
++            self.connection.validate(route, &context.scope)?;
++            let options = &self.connection.0.options;
++            let profile = matches!(options.selector, BedrockSelector::InferenceProfile(_));
++            let mut url = self.connection.0.metadata_base.clone();
++            url.path_segments_mut()
++                .map_err(|_| error(ErrorCode::InvalidConfiguration, "metadata_url"))?
++                .clear()
++                .push(if profile {
++                    "inference-profiles"
++                } else {
++                    "foundation-models"
++                })
++                .push(options.selector.value());
++            let operation = async {
++                let mut headers = reqwest::header::HeaderMap::new();
++                headers.insert(
++                    "accept",
++                    reqwest::header::HeaderValue::from_static("application/json"),
++                );
++                let headers = auth::authorize(
++                    self.credentials.as_ref(),
++                    BedrockCredentialContext {
++                        scope: &context.scope,
++                        audience: BedrockAudience::Metadata,
++                        region: &options.region,
++                        cancellation: &context.cancellation,
++                        deadline: context.deadline,
++                    },
++                    auth::SigningRequest {
++                        method: "GET",
++                        url: &url,
++                        body: &[],
++                        service: "bedrock",
++                        clock: self.connection.0.clock.as_ref(),
++                        headers,
++                    },
++                )
++                .await?;
++                let mut response = self
++                    .connection
++                    .0
++                    .client
++                    .get(url)
++                    .headers(headers)
++                    .send()
++                    .await
++                    .map_err(|_| unavailable())?;
++                if response.status().as_u16() == 404 {
++                    return Ok(ModelRouteObservation {
++                        route_digest: route.digest(),
++                        availability: ModelRouteAvailability::Unavailable,
++                        model_id: None,
++                        model_version: None,
++                        deployment_revision: None,
++                        version_semantics: VersionSemantics::Unverified,
++                        evidence_ref: Id::new("aws.bedrock.metadata")?,
++                    });
++                }
++                if !response.status().is_success() {
++                    return Err(unavailable());
++                }
++                let mut bytes = vec![];
++                while let Some(chunk) = response.chunk().await.map_err(|_| unavailable())? {
++                    if bytes.len().saturating_add(chunk.len())
++                        > 65_536.min(options.max_transport_bytes)
++                    {
++                        return Err(unavailable());
++                    }
++                    bytes.extend_from_slice(&chunk);
++                }
++                let body = std::str::from_utf8(&bytes)
++                    .ok()
++                    .and_then(|s| parse_json(s).ok())
++                    .ok_or_else(unavailable)?;
++                let (model, availability, revision) = if profile {
++                    if text(&body, "inferenceProfileId")? != options.selector.value()
++                        && text(&body, "inferenceProfileArn")? != options.selector.value()
++                    {
++                        return Err(drift());
++                    }
++                    let models = body
++                        .get("models")
++                        .and_then(Value::as_array)
++                        .filter(|m| !m.is_empty())
++                        .ok_or_else(unavailable)?;
++                    let mut actual = None;
++                    for model in models {
++                        let (region, id) = foundation_arn(text(model, "modelArn")?)?;
++                        if !options.allowed_destination_regions.is_empty()
++                            && !options
++                                .allowed_destination_regions
++                                .iter()
++                                .any(|v| v == region)
++                        {
++                            return Err(error(ErrorCode::AccessDenied, "profile_destination"));
++                        }
++                        if actual.is_some_and(|old| old != id) {
++                            return Err(drift());
++                        }
++                        actual = Some(id);
++                    }
++                    let revision = canonical_digest(
++                        &json!({"arn":body.get("inferenceProfileArn"),"models":models,"status":body.get("status"),"updated_at":body.get("updatedAt")}),
++                    );
++                    (
++                        Id::new(actual.ok_or_else(unavailable)?)?,
++                        if text(&body, "status")? == "ACTIVE" {
++                            ModelRouteAvailability::Available
++                        } else {
++                            ModelRouteAvailability::Unknown
++                        },
++                        Some(Id::new(revision.as_str())?),
++                    )
++                } else {
++                    let details = body.get("modelDetails").ok_or_else(unavailable)?;
++                    let id = text(details, "modelId")?;
++                    let arn = text(details, "modelArn")?;
++                    if options.selector.value() != id && options.selector.value() != arn {
++                        return Err(drift());
++                    }
++                    let (_, arn_id) = foundation_arn(arn)?;
++                    if arn_id != id || text(details, "providerName")? != "Anthropic" {
++                        return Err(drift());
++                    }
++                    if details.get("responseStreamingSupported") != Some(&json!(true)) {
++                        return Err(error(ErrorCode::ModelCapabilityUnsupported, "streaming"));
++                    }
++                    let available = match details
++                        .pointer("/modelLifecycle/status")
++                        .and_then(Value::as_str)
++                    {
++                        Some("ACTIVE" | "LEGACY") => ModelRouteAvailability::Available,
++                        _ => ModelRouteAvailability::Unknown,
++                    };
++                    (Id::new(id)?, available, None)
++                };
++                let snapshot = self.snapshots.get(&model);
++                Ok(ModelRouteObservation {
++                    route_digest: route.digest(),
++                    availability,
++                    model_id: Some(model.clone()),
++                    model_version: snapshot.map(|s| s.model_version.clone()),
++                    deployment_revision: revision,
++                    version_semantics: if profile {
++                        VersionSemantics::MutableDeployment
++                    } else if snapshot.is_some() {
++                        VersionSemantics::Pinned
++                    } else {
++                        VersionSemantics::Unverified
++                    },
++                    evidence_ref: snapshot
++                        .map(|s| s.evidence_ref.clone())
++                        .unwrap_or(Id::new("aws.bedrock.metadata")?),
++                })
++            };
++            tokio::select! {biased;
++                _=context.cancellation.cancelled()=>Err(error(ErrorCode::Cancelled,"inspection")),
++                _=tokio::time::sleep_until(context.deadline)=>Err(error(ErrorCode::DeadlineExceeded,"inspection")),
++                result=operation=>result,
++            }
++        })
++    }
++}
++fn text<'a>(v: &'a Value, key: &str) -> Result<&'a str, ContractError> {
++    v.get(key)
++        .and_then(Value::as_str)
++        .filter(|v| !v.is_empty())
++        .ok_or_else(unavailable)
++}
++fn foundation_arn(value: &str) -> Result<(&str, &str), ContractError> {
++    let fields: Vec<_> = value.splitn(6, ':').collect();
++    if fields.len() != 6
++        || fields[0] != "arn"
++        || !matches!(
++            fields[1],
++            "aws" | "aws-cn" | "aws-us-gov" | "aws-iso" | "aws-iso-b" | "aws-iso-e" | "aws-iso-f"
++        )
++        || fields[2] != "bedrock"
++        || fields[3].is_empty()
++    {
++        return Err(unavailable());
++    }
++    let id = fields[5]
++        .strip_prefix("foundation-model/")
++        .filter(|v| !v.is_empty() && !v.contains('/'))
++        .ok_or_else(unavailable)?;
++    Ok((fields[3], id))
++}
++fn unavailable() -> ContractError {
++    error(ErrorCode::ModelInspectionUnavailable, "metadata")
++}
++fn drift() -> ContractError {
++    error(ErrorCode::ModelVersionDrift, "metadata_target")
++}
+diff --git a/crates/wickle-model-bedrock/src/lib.rs b/crates/wickle-model-bedrock/src/lib.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..96dcff8de11b24629b7205a10d6c46e3049e063b
+--- /dev/null
++++ b/crates/wickle-model-bedrock/src/lib.rs
+@@ -0,0 +1,20 @@
++//! AWS Bedrock Claude with explicit credentials, endpoint contracts and bounded streams.
++#![forbid(unsafe_code)]
++mod auth;
++mod connection;
++mod framing;
++mod inspection;
++mod model;
++pub use auth::{
++    BedrockAudience, BedrockCredential, BedrockCredentialContext, BedrockCredentialProvider,
++};
++pub use aws_credential_types::Credentials as AwsCredentials;
++pub use connection::{
++    BedrockConnection, BedrockEndpoint, BedrockOperation, BedrockOptions, BedrockSelector,
++};
++pub use inspection::{BedrockInspector, BedrockSnapshot};
++pub use model::BedrockModel;
++use wickle::{ContractError, ErrorCode};
++fn error(code: ErrorCode, location: &str) -> ContractError {
++    ContractError::new(code, format!("bedrock.{location}"))
++}
+diff --git a/crates/wickle-model-bedrock/src/model.rs b/crates/wickle-model-bedrock/src/model.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..c4f24ddf5b7acc0442b8985382f99c9bb586b3e5
+--- /dev/null
++++ b/crates/wickle-model-bedrock/src/model.rs
+@@ -0,0 +1,336 @@
++use crate::{
++    BedrockAudience, BedrockConnection, BedrockCredentialContext, BedrockEndpoint,
++    BedrockOperation, auth, error, framing::Framing,
++};
++use futures_util::stream;
++use reqwest::Response;
++use serde_json::Value;
++use std::collections::VecDeque;
++use wickle::*;
++use wickle_model_anthropic::protocol::{MessagesDecoder, encode_request};
++
++/// One Bedrock Claude POST per invocation, streamed into Wickle model events.
++/// The adapter does not retry, run Tool handlers, or load environment variables.
++#[derive(Debug, Clone)]
++pub struct BedrockModel {
++    connection: BedrockConnection,
++}
++impl BedrockModel {
++    /// Bind an already configured connection without making a network request.
++    pub fn new(connection: BedrockConnection) -> Self {
++        Self { connection }
++    }
++}
++impl ModelPort for BedrockModel {
++    fn binding(&self) -> ModelPortBinding {
++        self.connection.binding()
++    }
++    fn generate<'a>(
++        &'a self,
++        request: &'a ModelRequest,
++        context: &'a ModelCallContext,
++    ) -> PortStream<'a, ModelEvent> {
++        let state = State {
++            connection: &self.connection,
++            request,
++            context,
++            response: None,
++            decoder: MessagesDecoder::new(request, None),
++            framing: Framing::new(&self.connection.0.options),
++            queue: VecDeque::new(),
++            started: false,
++            finished: false,
++        };
++        Box::pin(stream::unfold(state, |mut state| async move {
++            loop {
++                if !state.finished && state.context.cancellation.is_cancelled() {
++                    state.queue.clear();
++                    state.fail(error(ErrorCode::Cancelled, "stream"));
++                }
++                if !state.finished && tokio::time::Instant::now() >= state.context.deadline {
++                    state.queue.clear();
++                    state.fail(error(ErrorCode::DeadlineExceeded, "stream"));
++                }
++                if let Some(event) = state.queue.pop_front() {
++                    return Some((event, state));
++                }
++                if state.finished {
++                    return None;
++                }
++                if !state.started {
++                    state.started = true;
++                    if let Err(failure) = state.start().await {
++                        state.fail(failure);
++                    }
++                    continue;
++                }
++                let result = {
++                    let response = state
++                        .response
++                        .as_mut()
++                        .expect("started response or finished state");
++                    tokio::select! { biased;
++                        _ = state.context.cancellation.cancelled() => Err(error(ErrorCode::Cancelled, "stream")),
++                        _ = tokio::time::sleep_until(state.context.deadline) => Err(error(ErrorCode::DeadlineExceeded, "stream")),
++                        chunk = response.chunk() => chunk.map_err(transport_error),
++                    }
++                };
++                match result {
++                    Ok(Some(bytes)) => match state.framing.push(&bytes) {
++                        Ok(events) => {
++                            for event in events {
++                                match state.decoder.event(event) {
++                                    Ok(events) => state.queue.extend(events.into_iter().map(Ok)),
++                                    Err(error) => {
++                                        state.fail(error);
++                                        break;
++                                    }
++                                }
++                            }
++                        }
++                        Err(error) => state.fail(error),
++                    },
++                    Ok(None) => match state.framing.finish().and_then(|_| state.decoder.finish()) {
++                        Ok(event) => {
++                            state.queue.push_back(Ok(event));
++                            state.finished = true;
++                            state.response = None;
++                        }
++                        Err(error) => state.fail(error),
++                    },
++                    Err(error) => state.fail(error),
++                }
++            }
++        }))
++    }
++}
++struct State<'a> {
++    connection: &'a BedrockConnection,
++    request: &'a ModelRequest,
++    context: &'a ModelCallContext,
++    response: Option<Response>,
++    decoder: MessagesDecoder<'a>,
++    framing: Framing,
++    queue: VecDeque<Result<ModelEvent, ContractError>>,
++    started: bool,
++    finished: bool,
++}
++impl State<'_> {
++    async fn start(&mut self) -> Result<(), ContractError> {
++        self.connection
++            .validate(&self.request.route, &self.context.scope)?;
++        if self.context.attempt_id != self.request.request_id {
++            return Err(error(ErrorCode::RequestConflict, "attempt"));
++        }
++        self.request.validate()?;
++        if self.connection.0.options.endpoint == BedrockEndpoint::Mantle
++            && matches!(self.request.output, ModelOutput::JsonSchema { .. })
++        {
++            return Err(error(
++                ErrorCode::ModelCapabilityUnsupported,
++                "mantle_json_output",
++            ));
++        }
++        let mut value = encode_request(self.request)?;
++        match self.connection.0.options.operation {
++            BedrockOperation::Messages => {
++                value["model"] = serde_json::json!(self.connection.0.options.selector.value())
++            }
++            BedrockOperation::InvokeStream => {
++                let object = value.as_object_mut().expect("encoded object");
++                object.remove("model");
++                object.remove("stream");
++                object.insert(
++                    "anthropic_version".into(),
++                    serde_json::json!("bedrock-2023-05-31"),
++                );
++            }
++        }
++        let body =
++            serde_json::to_vec(&value).map_err(|_| error(ErrorCode::InvalidJson, "request"))?;
++        if body.len() > self.request.limits.max_input_bytes {
++            return Err(error(ErrorCode::ModelCapabilityUnsupported, "request_size"));
++        }
++        let url = self.connection.0.url.clone();
++        let mut headers = reqwest::header::HeaderMap::new();
++        headers.insert(
++            "content-type",
++            reqwest::header::HeaderValue::from_static("application/json"),
++        );
++        headers.insert(
++            "accept",
++            reqwest::header::HeaderValue::from_static(self.content_type()),
++        );
++        headers.insert(
++            "accept-encoding",
++            reqwest::header::HeaderValue::from_static("identity"),
++        );
++        if self.connection.0.options.operation == BedrockOperation::Messages {
++            headers.insert(
++                "anthropic-version",
++                reqwest::header::HeaderValue::from_static("2023-06-01"),
++            );
++        }
++        let headers = match auth::authorize(
++            self.connection.0.credentials.as_ref(),
++            BedrockCredentialContext {
++                scope: &self.context.scope,
++                audience: BedrockAudience::Inference,
++                region: &self.connection.0.options.region,
++                cancellation: &self.context.cancellation,
++                deadline: self.context.deadline,
++            },
++            auth::SigningRequest {
++                method: "POST",
++                url: &url,
++                body: &body,
++                service: self.connection.signing_service(),
++                clock: self.connection.0.clock.as_ref(),
++                headers,
++            },
++        )
++        .await
++        {
++            Ok(headers) => headers,
++            Err(failure) if failure.code == ErrorCode::AccessDenied => {
++                self.queue.push_back(Ok(ModelEvent::ResponseError {
++                    kind: ModelFailureKind::Authentication,
++                    metadata: self.decoder.metadata.clone(),
++                }));
++                self.finished = true;
++                return Ok(());
++            }
++            Err(failure) => return Err(failure),
++        };
++        let operation = self
++            .connection
++            .0
++            .client
++            .post(url)
++            .headers(headers)
++            .body(body)
++            .send();
++        let mut response = tokio::select! { biased;
++            _ = self.context.cancellation.cancelled() => return Err(error(ErrorCode::Cancelled, "request")),
++            _ = tokio::time::sleep_until(self.context.deadline) => return Err(error(ErrorCode::DeadlineExceeded, "request")),
++            result = operation => result.map_err(transport_error)?,
++        };
++        self.decoder.metadata.provider_request_id = response
++            .headers()
++            .get("request-id")
++            .or_else(|| response.headers().get("x-amzn-requestid"))
++            .or_else(|| response.headers().get("x-amz-request-id"))
++            .map(|value| {
++                value
++                    .to_str()
++                    .map_err(|_| error(ErrorCode::InvalidContract, "request_id"))
++                    .and_then(Id::new)
++            })
++            .transpose()?;
++        if !response.status().is_success() {
++            let status = response.status().as_u16();
++            let mut kind = match status {
++                401 | 403 => ModelFailureKind::Authentication,
++                404 => ModelFailureKind::Unavailable,
++                413 => ModelFailureKind::ContextOverflow,
++                408 | 504 => ModelFailureKind::Timeout,
++                429 => ModelFailureKind::RateLimited,
++                500..=599 => ModelFailureKind::Transport,
++                _ => ModelFailureKind::Unsupported,
++            };
++            if status == 400 {
++                let mut bytes = vec![];
++                loop {
++                    let chunk = tokio::select! { biased;
++                        _ = self.context.cancellation.cancelled() => return Err(error(ErrorCode::Cancelled, "error_body")),
++                        _ = tokio::time::sleep_until(self.context.deadline) => return Err(error(ErrorCode::DeadlineExceeded, "error_body")),
++                        chunk = response.chunk() => chunk.map_err(transport_error)?,
++                    };
++                    let Some(chunk) = chunk else {
++                        break;
++                    };
++                    if bytes.len().saturating_add(chunk.len())
++                        > 65_536.min(self.connection.0.options.max_transport_bytes)
++                    {
++                        break;
++                    }
++                    bytes.extend_from_slice(&chunk);
++                }
++                if let Ok(value) = std::str::from_utf8(&bytes)
++                    .map_err(|_| ())
++                    .and_then(|text| parse_json(text).map_err(|_| ()))
++                {
++                    if value.pointer("/error/code").and_then(Value::as_str)
++                        == Some("context_length_exceeded")
++                    {
++                        kind = ModelFailureKind::ContextOverflow;
++                    }
++                }
++            }
++            self.queue.push_back(Ok(ModelEvent::ResponseError {
++                kind,
++                metadata: self.decoder.metadata.clone(),
++            }));
++            self.finished = true;
++            return Ok(());
++        }
++        let content_type = response
++            .headers()
++            .get("content-type")
++            .and_then(|value| value.to_str().ok())
++            .and_then(|value| value.split(';').next())
++            .map(str::trim);
++        if !content_type.is_some_and(|value| value.eq_ignore_ascii_case(self.content_type())) {
++            return Err(error(ErrorCode::InvalidContract, "content_type"));
++        }
++        if response
++            .content_length()
++            .is_some_and(|bytes| bytes > self.connection.0.options.max_transport_bytes as u64)
++        {
++            return Err(error(ErrorCode::InvalidContract, "response_size"));
++        }
++        self.response = Some(response);
++        Ok(())
++    }
++    fn content_type(&self) -> &'static str {
++        match self.connection.0.options.operation {
++            BedrockOperation::Messages => "text/event-stream",
++            BedrockOperation::InvokeStream => "application/vnd.amazon.eventstream",
++        }
++    }
++    fn fail(&mut self, failure: ContractError) {
++        self.finished = true;
++        self.response = None;
++        if matches!(
++            failure.code,
++            ErrorCode::Cancelled | ErrorCode::AccessDenied | ErrorCode::RequestConflict
++        ) {
++            self.queue.push_back(Err(failure));
++            return;
++        }
++        let kind = match failure.code {
++            ErrorCode::DeadlineExceeded => ModelFailureKind::Timeout,
++            ErrorCode::ModelUnavailable => ModelFailureKind::Transport,
++            ErrorCode::ModelOptionUnsupported
++            | ErrorCode::ModelCapabilityUnsupported
++            | ErrorCode::CapabilityUnsupported
++            | ErrorCode::ModelBindingInvalid
++            | ErrorCode::InvalidConfiguration => ModelFailureKind::Unsupported,
++            _ => ModelFailureKind::Protocol,
++        };
++        self.queue.push_back(Ok(ModelEvent::ResponseError {
++            kind,
++            metadata: self.decoder.metadata.clone(),
++        }));
++    }
++}
++fn transport_error(error_value: reqwest::Error) -> ContractError {
++    error(
++        if error_value.is_timeout() {
++            ErrorCode::DeadlineExceeded
++        } else {
++            ErrorCode::ModelUnavailable
++        },
++        "transport",
++    )
++}
+diff --git a/crates/wickle-model-bedrock/tests/bedrock.rs b/crates/wickle-model-bedrock/tests/bedrock.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..1f83c394dc9a76765728fbd09897e5513901cbdf
+--- /dev/null
++++ b/crates/wickle-model-bedrock/tests/bedrock.rs
+@@ -0,0 +1,649 @@
++//! AWS signing, endpoint, binary/SSE framing and metadata contracts without AWS calls.
++mod support;
++use aws_smithy_types::event_stream::{Header, HeaderValue, Message};
++use base64::{Engine, engine::general_purpose::STANDARD};
++use futures_util::StreamExt;
++use serde_json::{Value, json};
++use std::{sync::Arc, time::Duration};
++use support::*;
++use wickle::*;
++use wickle_model_bedrock::*;
++
++fn frame(value: &Value) -> Vec<u8> {
++    let payload =
++        serde_json::to_vec(&json!({"bytes":STANDARD.encode(serde_json::to_vec(value).unwrap())}))
++            .unwrap();
++    let message = Message::new(payload)
++        .add_header(Header::new(
++            ":message-type",
++            HeaderValue::String("event".into()),
++        ))
++        .add_header(Header::new(
++            ":event-type",
++            HeaderValue::String("chunk".into()),
++        ))
++        .add_header(Header::new(
++            ":content-type",
++            HeaderValue::String("application/json".into()),
++        ));
++    let mut bytes = vec![];
++    aws_smithy_eventstream::frame::write_message_to(&message, &mut bytes).unwrap();
++    bytes
++}
++fn reply(operation: BedrockOperation, data: &[Value]) -> Reply {
++    let mut reply = Reply::sse(data);
++    reply.headers = vec![("x-amzn-requestid", "aws-request".into())];
++    if operation == BedrockOperation::InvokeStream {
++        reply.content_type = "application/vnd.amazon.eventstream";
++        reply.body = data.iter().flat_map(frame).collect();
++        reply.chunk = 3;
++    }
++    reply
++}
++fn configured(
++    server: &Server,
++    operation: BedrockOperation,
++    endpoint: BedrockEndpoint,
++    bearer: bool,
++) -> BedrockConnection {
++    let mut options = options(server);
++    options.operation = operation;
++    options.endpoint = endpoint;
++    let credential = if bearer {
++        Arc::new(BedrockCredential::Bearer("test-bearer".into()))
++            as Arc<dyn BedrockCredentialProvider>
++    } else {
++        credentials()
++    };
++    BedrockConnection::new(scope(), reference("account"), credential, options)
++        .unwrap()
++        .with_clock(Arc::new(FixedClock))
++}
++
++#[tokio::test]
++async fn each_wire_operation_preserves_model_and_uses_its_own_auth_contract() {
++    for (operation, endpoint, bearer) in [
++        (BedrockOperation::Messages, BedrockEndpoint::Runtime, true),
++        (BedrockOperation::Messages, BedrockEndpoint::Mantle, false),
++        (
++            BedrockOperation::InvokeStream,
++            BedrockEndpoint::Runtime,
++            false,
++        ),
++    ] {
++        let server = Server::new(vec![reply(operation, &events(MODEL, "42"))]).await;
++        let connection = configured(&server, operation, endpoint, bearer);
++        let request = request(&connection, MODEL);
++        let model = BedrockModel::new(connection);
++        let response =
++            collect_model_response(&request, model.generate(&request, &context(&request)))
++                .await
++                .unwrap();
++        assert_eq!(response.text, "42");
++        assert_eq!(
++            response.metadata.provider_request_id,
++            Some(id("aws-request"))
++        );
++        assert_eq!(response.metadata.reported_model_id, Some(id(MODEL)));
++        assert_eq!(response.metadata.usage.unwrap().output_tokens, Some(15));
++        assert_eq!(
++            response.continuation[0].data()["blocks"][0]["signature"],
++            "signature-fixture"
++        );
++        let calls = server.requests.lock().unwrap();
++        assert_eq!(calls.len(), 1);
++        let call = &calls[0];
++        let headers = call.headers.to_ascii_lowercase();
++        assert_eq!(call.method, "POST");
++        if bearer {
++            assert!(headers.contains("authorization: bearer test-bearer"));
++            assert!(!headers.contains("x-amz-security-token"));
++        } else {
++            assert!(headers.contains("x-amz-security-token: test-session"));
++            assert!(headers.contains(if endpoint == BedrockEndpoint::Mantle {
++                "/us-east-1/bedrock-mantle/aws4_request"
++            } else {
++                "/us-east-1/bedrock/aws4_request"
++            }));
++            assert!(!headers.contains("test-secret"));
++        }
++        match operation {
++            BedrockOperation::Messages => {
++                assert_eq!(call.path, "/anthropic/v1/messages");
++                assert_eq!(call.body["model"], MODEL);
++                assert_eq!(call.body["stream"], true);
++                assert!(call.body.get("anthropic_version").is_none());
++                assert!(headers.contains("anthropic-version: 2023-06-01"));
++            }
++            BedrockOperation::InvokeStream => {
++                assert_eq!(
++                    call.path,
++                    format!("/model/{MODEL}/invoke-with-response-stream")
++                );
++                assert_eq!(call.body["anthropic_version"], "bedrock-2023-05-31");
++                assert!(call.body.get("model").is_none());
++                assert!(call.body.get("stream").is_none());
++            }
++        }
++        assert_eq!(call.body["output_config"]["effort"], "medium");
++        assert!(!call.body.to_string().contains("hidden-workspace"));
++    }
++}
++
++#[tokio::test]
++async fn corrupted_truncated_or_oversized_aws_frames_never_complete() {
++    for case in ["crc", "truncated", "length", "count"] {
++        let mut response = reply(BedrockOperation::InvokeStream, &events(MODEL, "answer"));
++        match case {
++            "crc" => response.body[12] ^= 1,
++            "truncated" => {
++                response.body.pop();
++            }
++            "length" => response.body[..4].copy_from_slice(&u32::MAX.to_be_bytes()),
++            _ => {}
++        }
++        let server = Server::new(vec![response]).await;
++        let mut options = options(&server);
++        options.operation = BedrockOperation::InvokeStream;
++        if case == "count" {
++            options.max_protocol_events = 1;
++        }
++        let connection =
++            BedrockConnection::new(scope(), reference("account"), credentials(), options)
++                .unwrap()
++                .with_clock(Arc::new(FixedClock));
++        let request = request(&connection, MODEL);
++        let model = BedrockModel::new(connection);
++        assert!(
++            collect_model_response(&request, model.generate(&request, &context(&request)))
++                .await
++                .is_err(),
++            "{case}"
++        );
++    }
++}
++
++#[tokio::test]
++async fn scope_contract_unsupported_features_and_expired_credentials_stop_before_http() {
++    for case in ["scope", "route", "api", "json", "expired"] {
++        let server = Server::new(vec![]).await;
++        let mut options = options(&server);
++        options.endpoint = BedrockEndpoint::Mantle;
++        let credential: Arc<dyn BedrockCredentialProvider> = if case == "expired" {
++            Arc::new(BedrockCredential::Aws(AwsCredentials::new(
++                "AKIDEXAMPLE",
++                "secret",
++                None,
++                Some(std::time::UNIX_EPOCH),
++                "fixture",
++            )))
++        } else {
++            credentials()
++        };
++        let connection = BedrockConnection::new(scope(), reference("account"), credential, options)
++            .unwrap()
++            .with_clock(Arc::new(FixedClock));
++        let mut request = request(&connection, MODEL);
++        let mut context = context(&request);
++        let model = BedrockModel::new(connection);
++        match case {
++            "scope" => context.scope.workspace_id = id("other"),
++            "route" => {
++                request
++                    .route
++                    .target
++                    .insert("region".into(), json!("us-west-2"));
++            }
++            "api" => request.route.api_contract.version = id("other"),
++            "json" => {
++                request.output = ModelOutput::JsonSchema {
++                    schema: json!({"type":"object","properties":{},"additionalProperties":false}),
++                }
++            }
++            _ => {}
++        }
++        let failure = collect_model_response(&request, model.generate(&request, &context))
++            .await
++            .unwrap_err();
++        if case == "expired" {
++            assert_eq!(failure.kind, ModelFailureKind::Authentication);
++        }
++        assert!(server.requests.lock().unwrap().is_empty());
++    }
++}
++
++fn foundation() -> Value {
++    json!({"modelDetails":{"modelId":MODEL,"modelArn":format!("arn:aws:bedrock:us-east-1::foundation-model/{MODEL}"),"providerName":"Anthropic","responseStreamingSupported":true,"modelLifecycle":{"status":"ACTIVE"}}})
++}
++fn profile() -> Value {
++    json!({"inferenceProfileId":"profile","inferenceProfileArn":"arn:aws:bedrock:us-east-1:123456789012:inference-profile/profile","status":"ACTIVE","models":[{"modelArn":format!("arn:aws:bedrock:us-east-1::foundation-model/{MODEL}")},{"modelArn":format!("arn:aws:bedrock:us-west-2::foundation-model/{MODEL}")}],"updatedAt":"2025-01-01T00:00:00Z"})
++}
++fn inspect_context() -> ModelInspectionContext {
++    ModelInspectionContext {
++        scope: scope(),
++        principal_ref: id("user"),
++        capability_grant_ref: id("grant"),
++        cancellation: Default::default(),
++        deadline: tokio::time::Instant::now() + Duration::from_secs(3),
++    }
++}
++fn snapshot() -> BedrockSnapshot {
++    BedrockSnapshot {
++        model_id: id(MODEL),
++        model_version: id("release"),
++        evidence_ref: id("documented-claude-release"),
++    }
++}
++
++#[tokio::test]
++async fn foundation_metadata_needs_its_own_iam_access_and_actual_release_evidence() {
++    let server = Server::new(vec![
++        Reply::json(200, foundation()),
++        Reply::json(200, foundation()),
++    ])
++    .await;
++    let connection = connection(&server);
++    let request = request(&connection, MODEL);
++    let unknown = BedrockInspector::new(connection.clone(), credentials(), vec![])
++        .unwrap()
++        .inspect(&request.route, &inspect_context())
++        .await
++        .unwrap();
++    assert!(unknown.model_version.is_none());
++    assert_eq!(unknown.version_semantics, VersionSemantics::Unverified);
++    let known = BedrockInspector::new(connection.clone(), credentials(), vec![snapshot()])
++        .unwrap()
++        .inspect(&request.route, &inspect_context())
++        .await
++        .unwrap();
++    known
++        .validate(&request.route, VersionPolicy::RequirePinned)
++        .unwrap();
++    let denied = BedrockInspector::new(
++        connection,
++        Arc::new(BedrockCredential::Bearer("inference-only".into())),
++        vec![snapshot()],
++    )
++    .unwrap()
++    .inspect(&request.route, &inspect_context())
++    .await
++    .unwrap_err();
++    assert_eq!(denied.code, ErrorCode::AccessDenied);
++    let calls = server.requests.lock().unwrap();
++    assert_eq!(calls.len(), 2);
++    for call in calls.iter() {
++        assert_eq!(call.method, "GET");
++        assert_eq!(call.path, format!("/foundation-models/{MODEL}"));
++        assert!(call.headers.contains("/us-east-1/bedrock/aws4_request"));
++        assert!(call.body.is_null());
++    }
++}
++
++#[tokio::test]
++async fn profile_destinations_and_revision_are_checked_separately_from_origin_region() {
++    for mode in ["allowed", "destination", "model-drift"] {
++        let mut changed = profile();
++        if mode == "model-drift" {
++            changed["models"][1]["modelArn"] =
++                json!("arn:aws:bedrock:us-west-2::foundation-model/anthropic.other-model");
++        } else {
++            changed["updatedAt"] = json!("2025-02-01T00:00:00Z");
++        }
++        let server =
++            Server::new(vec![Reply::json(200, profile()), Reply::json(200, changed)]).await;
++        let mut options = options(&server);
++        options.selector = BedrockSelector::InferenceProfile("profile".into());
++        options.allowed_destination_regions = if mode == "destination" {
++            vec!["us-east-1".into()]
++        } else {
++            vec!["us-east-1".into(), "us-west-2".into()]
++        };
++        let connection =
++            BedrockConnection::new(scope(), reference("account"), credentials(), options)
++                .unwrap()
++                .with_clock(Arc::new(FixedClock));
++        let mut request = request(&connection, MODEL);
++        request.route.version_semantics = VersionSemantics::MutableDeployment;
++        let inspector = BedrockInspector::new(connection, credentials(), vec![snapshot()]).unwrap();
++        let first = inspector.inspect(&request.route, &inspect_context()).await;
++        if mode == "destination" {
++            assert_eq!(first.unwrap_err().code, ErrorCode::AccessDenied);
++            continue;
++        }
++        let first = first.unwrap();
++        first
++            .validate(&request.route, VersionPolicy::AllowMutable)
++            .unwrap();
++        assert_eq!(first.version_semantics, VersionSemantics::MutableDeployment);
++        request.route.deployment_revision = first.deployment_revision;
++        let next = inspector.inspect(&request.route, &inspect_context()).await;
++        if mode == "model-drift" {
++            assert_eq!(next.unwrap_err().code, ErrorCode::ModelVersionDrift);
++        } else {
++            assert_eq!(
++                next.unwrap()
++                    .validate(&request.route, VersionPolicy::AllowMutable)
++                    .unwrap_err()
++                    .code,
++                ErrorCode::ModelVersionDrift
++            );
++        }
++        assert_eq!(
++            server.requests.lock().unwrap()[0].path,
++            "/inference-profiles/profile"
++        );
++    }
++}
++
++#[tokio::test]
++async fn aws_exception_frames_and_http_failures_do_not_retry_or_expose_private_messages() {
++    for binary in [false, true] {
++        let mut response = Reply::json(429, json!({"message":"private details"}));
++        if binary {
++            let msg = Message::new(br#"{"message":"private details"}"#.to_vec())
++                .add_header(Header::new(
++                    ":message-type",
++                    HeaderValue::String("exception".into()),
++                ))
++                .add_header(Header::new(
++                    ":exception-type",
++                    HeaderValue::String("throttlingException".into()),
++                ));
++            response.status = 200;
++            response.content_type = "application/vnd.amazon.eventstream";
++            response.body.clear();
++            aws_smithy_eventstream::frame::write_message_to(&msg, &mut response.body).unwrap();
++        }
++        let server = Server::new(vec![response]).await;
++        let connection = configured(
++            &server,
++            BedrockOperation::InvokeStream,
++            BedrockEndpoint::Runtime,
++            false,
++        );
++        let request = request(&connection, MODEL);
++        let model = BedrockModel::new(connection);
++        let failure =
++            collect_model_response(&request, model.generate(&request, &context(&request)))
++                .await
++                .unwrap_err();
++        assert_eq!(failure.kind, ModelFailureKind::RateLimited);
++        assert!(!format!("{failure:?}").contains("private details"));
++        assert_eq!(server.requests.lock().unwrap().len(), 1);
++    }
++}
++
++#[tokio::test]
++async fn cancellation_and_deadline_close_both_stream_types_without_retry() {
++    for operation in [BedrockOperation::Messages, BedrockOperation::InvokeStream] {
++        for cancel in [true, false] {
++            let mut data = events(MODEL, "partial");
++            data.truncate(6);
++            let mut response = reply(operation, &data);
++            response.stall = true;
++            let server = Server::new(vec![response]).await;
++            let connection = configured(&server, operation, BedrockEndpoint::Runtime, false);
++            let request = request(&connection, MODEL);
++            let model = BedrockModel::new(connection);
++            let mut context = context(&request);
++            context.deadline = tokio::time::Instant::now() + Duration::from_secs(2);
++            let mut stream = model.generate(&request, &context);
++            assert!(matches!(
++                stream.next().await.unwrap().unwrap(),
++                ModelEvent::TextDelta { .. }
++            ));
++            server.entered.notified().await;
++            if cancel {
++                context.cancellation.cancel();
++            }
++            let next = stream.next().await.unwrap();
++            if cancel {
++                assert_eq!(next.unwrap_err().code, ErrorCode::Cancelled);
++            } else {
++                assert!(matches!(
++                    next.unwrap(),
++                    ModelEvent::ResponseError {
++                        kind: ModelFailureKind::Timeout,
++                        ..
++                    }
++                ));
++            }
++            assert!(stream.next().await.is_none());
++            tokio::time::timeout(Duration::from_secs(1), server.closed.notified())
++                .await
++                .unwrap();
++            assert_eq!(server.requests.lock().unwrap().len(), 1);
++        }
++    }
++}
++
++#[tokio::test]
++async fn redirects_never_forward_signed_credentials() {
++    let destination = Server::new(vec![]).await;
++    let mut response = Reply::json(307, json!({}));
++    response
++        .headers
++        .push(("location", destination.base.clone()));
++    let server = Server::new(vec![response]).await;
++    let connection = connection(&server);
++    let request = request(&connection, MODEL);
++    let model = BedrockModel::new(connection);
++    assert!(
++        collect_model_response(&request, model.generate(&request, &context(&request)))
++            .await
++            .is_err()
++    );
++    assert_eq!(server.requests.lock().unwrap().len(), 1);
++    assert!(destination.requests.lock().unwrap().is_empty());
++}
++
++fn tool_events() -> Vec<Value> {
++    let mut data = events(MODEL, "");
++    data.truncate(4);
++    data.extend([
++        json!({"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_1","name":"lookup","input":{},"caller":{"type":"direct"}}}),
++        json!({"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"query\":"}}),
++        json!({"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"\"alpha\"}"}}),
++        json!({"type":"content_block_stop","index":1}),
++        json!({"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":20}}),
++        json!({"type":"message_stop"}),
++    ]);
++    data
++}
++fn tool(request: &mut ModelRequest) {
++    request.tools = vec![ModelTool {
++        name: id("lookup"),
++        description: "Read a record".into(),
++        model_input_schema: json!({"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"}},"required":["query"],"additionalProperties":false}),
++    }];
++}
++
++#[tokio::test]
++async fn profile_arn_and_signed_tool_continuation_survive_both_wire_operations() {
++    let arn = "arn:aws:bedrock:us-east-1:123456789012:inference-profile/profile";
++    for operation in [BedrockOperation::Messages, BedrockOperation::InvokeStream] {
++        let server = Server::new(vec![
++            reply(operation, &tool_events()),
++            reply(operation, &events(MODEL, "42")),
++        ])
++        .await;
++        let mut options = options(&server);
++        options.operation = operation;
++        options.selector = BedrockSelector::InferenceProfile(arn.into());
++        let connection =
++            BedrockConnection::new(scope(), reference("account"), credentials(), options)
++                .unwrap()
++                .with_clock(Arc::new(FixedClock));
++        let mut request = request(&connection, MODEL);
++        tool(&mut request);
++        let model = BedrockModel::new(connection);
++        let first = collect_model_response(&request, model.generate(&request, &context(&request)))
++            .await
++            .unwrap();
++        assert_eq!(first.finish, ModelFinish::ToolCalls);
++        assert_eq!(first.tool_calls[0].model_inputs["query"], "alpha");
++        request.messages.push(ModelMessage {
++            role: ModelRole::Assistant,
++            content: vec![
++                ModelContent::ToolCall {
++                    provider_call_id: id("toolu_1"),
++                    name: id("lookup"),
++                    arguments: JsonObject::from([("query".into(), json!("alpha"))]),
++                },
++                ModelContent::Opaque {
++                    continuation: first.continuation[0].clone(),
++                },
++            ],
++        });
++        request.messages.push(ModelMessage {
++            role: ModelRole::Tool,
++            content: vec![ModelContent::ToolResult {
++                provider_call_id: id("toolu_1"),
++                content: json!({"answer":42}),
++            }],
++        });
++        request.request_id = id("next-attempt");
++        let second = collect_model_response(&request, model.generate(&request, &context(&request)))
++            .await
++            .unwrap();
++        assert_eq!(second.text, "42");
++        let calls = server.requests.lock().unwrap();
++        assert_eq!(calls.len(), 2);
++        let body = &calls[1].body;
++        let blocks = body["messages"][1]["content"].as_array().unwrap();
++        assert_eq!(blocks.len(), 2);
++        assert_eq!(blocks[0]["signature"], "signature-fixture");
++        assert_eq!(blocks[1]["id"], "toolu_1");
++        assert_eq!(blocks[1]["input"]["query"], "alpha");
++        assert_eq!(body["messages"][2]["content"][0]["tool_use_id"], "toolu_1");
++        match operation {
++            BedrockOperation::Messages => assert_eq!(body["model"], arn),
++            BedrockOperation::InvokeStream => assert_eq!(
++                calls[1].path,
++                "/model/arn:aws:bedrock:us-east-1:123456789012:inference-profile%2Fprofile/invoke-with-response-stream"
++            ),
++        }
++    }
++}
++
++struct AdvancingCredentials {
++    clock: Arc<std::sync::atomic::AtomicI64>,
++    expired: bool,
++}
++struct AdvancingClock(Arc<std::sync::atomic::AtomicI64>);
++impl Clock for AdvancingClock {
++    fn now(&self) -> Result<ClockReading, ContractError> {
++        Ok(ClockReading {
++            utc_ms: self.0.load(std::sync::atomic::Ordering::SeqCst),
++            monotonic_ms: 0,
++        })
++    }
++    fn sleep_until<'a>(&'a self, _: u64) -> PortFuture<'a, ()> {
++        Box::pin(std::future::pending())
++    }
++}
++impl BedrockCredentialProvider for AdvancingCredentials {
++    fn credential<'a>(
++        &'a self,
++        _: &'a BedrockCredentialContext<'a>,
++    ) -> PortFuture<'a, BedrockCredential> {
++        Box::pin(async move {
++            self.clock
++                .store(1735689610000, std::sync::atomic::Ordering::SeqCst);
++            Ok(BedrockCredential::Aws(AwsCredentials::new(
++                "AKIDEXAMPLE",
++                "secret",
++                None,
++                self.expired
++                    .then_some(std::time::UNIX_EPOCH + Duration::from_secs(1735689605)),
++                "fixture",
++            )))
++        })
++    }
++}
++#[tokio::test]
++async fn credential_expiry_and_signature_use_time_after_refresh() {
++    for expired in [true, false] {
++        let server = Server::new(vec![reply(
++            BedrockOperation::Messages,
++            &events(MODEL, "42"),
++        )])
++        .await;
++        let clock = Arc::new(std::sync::atomic::AtomicI64::new(1735689600000));
++        let credentials = Arc::new(AdvancingCredentials {
++            clock: clock.clone(),
++            expired,
++        });
++        let connection =
++            BedrockConnection::new(scope(), reference("account"), credentials, options(&server))
++                .unwrap()
++                .with_clock(Arc::new(AdvancingClock(clock)));
++        let request = request(&connection, MODEL);
++        let model = BedrockModel::new(connection);
++        let result =
++            collect_model_response(&request, model.generate(&request, &context(&request))).await;
++        let calls = server.requests.lock().unwrap();
++        if expired {
++            assert_eq!(result.unwrap_err().kind, ModelFailureKind::Authentication);
++            assert!(calls.is_empty());
++        } else {
++            assert_eq!(result.unwrap().text, "42");
++            assert!(
++                calls[0]
++                    .headers
++                    .to_ascii_lowercase()
++                    .contains("x-amz-date: 20250101t000010z")
++            );
++        }
++    }
++}
++struct PendingCredentials(tokio::sync::Notify);
++impl BedrockCredentialProvider for PendingCredentials {
++    fn credential<'a>(
++        &'a self,
++        _: &'a BedrockCredentialContext<'a>,
++    ) -> PortFuture<'a, BedrockCredential> {
++        Box::pin(async move {
++            self.0.notify_one();
++            std::future::pending().await
++        })
++    }
++}
++#[tokio::test]
++async fn credential_lookup_obeys_cancellation_and_deadline_before_http() {
++    for cancel in [true, false] {
++        let server = Server::new(vec![]).await;
++        let credentials = Arc::new(PendingCredentials(tokio::sync::Notify::new()));
++        let connection = BedrockConnection::new(
++            scope(),
++            reference("account"),
++            credentials.clone(),
++            options(&server),
++        )
++        .unwrap();
++        let request = request(&connection, MODEL);
++        let model = BedrockModel::new(connection);
++        let mut context = context(&request);
++        context.deadline = tokio::time::Instant::now() + Duration::from_secs(1);
++        let result = async { model.generate(&request, &context).next().await.unwrap() };
++        let trigger = async {
++            credentials.0.notified().await;
++            if cancel {
++                context.cancellation.cancel();
++            }
++        };
++        let (result, _) = tokio::join!(result, trigger);
++        if cancel {
++            assert_eq!(result.unwrap_err().code, ErrorCode::Cancelled);
++        } else {
++            assert!(matches!(
++                result.unwrap(),
++                ModelEvent::ResponseError {
++                    kind: ModelFailureKind::Timeout,
++                    ..
++                }
++            ));
++        }
++        assert!(server.requests.lock().unwrap().is_empty());
++    }
++}
+diff --git a/crates/wickle-model-bedrock/tests/support/mod.rs b/crates/wickle-model-bedrock/tests/support/mod.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..338da13f2ee54d1acde5ca56472476081412aa7d
+--- /dev/null
++++ b/crates/wickle-model-bedrock/tests/support/mod.rs
+@@ -0,0 +1,127 @@
++use serde_json::{Value, json};
++use wickle::*;
++use wickle_model_bedrock::*;
++
++pub fn id(value: &str) -> Id {
++    Id::new(value).unwrap()
++}
++pub fn reference(value: &str) -> VersionedRef {
++    VersionedRef {
++        id: id(value),
++        version: id("1"),
++    }
++}
++pub fn scope() -> Scope {
++    Scope {
++        tenant_id: id("tenant"),
++        workspace_id: id("hidden-workspace"),
++        user_id: None,
++    }
++}
++pub const MODEL: &str = "anthropic.claude-opus-5";
++pub fn origin(server: &Server) -> String {
++    server.base.trim_end_matches("v1/").into()
++}
++pub struct FixedClock;
++impl Clock for FixedClock {
++    fn now(&self) -> Result<ClockReading, ContractError> {
++        Ok(ClockReading {
++            utc_ms: 1735689600000,
++            monotonic_ms: 0,
++        })
++    }
++    fn sleep_until<'a>(&'a self, _: u64) -> PortFuture<'a, ()> {
++        Box::pin(std::future::pending())
++    }
++}
++pub fn credentials() -> std::sync::Arc<dyn BedrockCredentialProvider> {
++    std::sync::Arc::new(BedrockCredential::Aws(AwsCredentials::new(
++        "AKIDEXAMPLE",
++        "test-secret",
++        Some("test-session".into()),
++        None,
++        "fixture",
++    )))
++}
++pub fn options(server: &Server) -> BedrockOptions {
++    let mut options = BedrockOptions::new("us-east-1", BedrockSelector::Foundation(MODEL.into()));
++    options.endpoint_url = Some(origin(server));
++    options.metadata_url = Some(origin(server));
++    options
++}
++pub fn connection(server: &Server) -> BedrockConnection {
++    BedrockConnection::new(
++        scope(),
++        reference("account"),
++        credentials(),
++        options(server),
++    )
++    .unwrap()
++    .with_clock(std::sync::Arc::new(FixedClock))
++}
++pub fn request(connection: &BedrockConnection, model: &str) -> ModelRequest {
++    let binding = connection.binding();
++    ModelRequest {
++        request_id: id("attempt"),
++        purpose: ModelPurpose::Agent,
++        route: ResolvedModelRoute {
++            binding: reference("primary"),
++            catalog_revision: id("catalog"),
++            routing_policy_revision: id("policy"),
++            requested_model: id(model),
++            model_id: id(model),
++            model_version: id("release"),
++            version_semantics: VersionSemantics::Pinned,
++            provider: binding.provider,
++            target: connection.target().clone(),
++            deployment_revision: None,
++            api_contract: connection.api_contract(),
++            adapter: binding.adapter,
++            capability_revision: id("capabilities"),
++            connection_ref: binding.connection_ref,
++        },
++        messages: vec![ModelMessage {
++            role: ModelRole::User,
++            content: vec![ModelContent::Text {
++                text: "Find the requested figures".into(),
++            }],
++        }],
++        tools: vec![],
++        output: ModelOutput::Text {},
++        max_output_tokens: 128.try_into().unwrap(),
++        options: JsonObject::from([("effort".into(), json!("medium"))]),
++        limits: ModelResponseLimits {
++            max_input_bytes: 32_768,
++            max_response_bytes: 32_768,
++            max_delta_bytes: 128,
++            max_events: 256,
++            max_tool_calls: 4,
++        },
++    }
++}
++pub fn context(request: &ModelRequest) -> ModelCallContext {
++    ModelCallContext {
++        attempt_id: request.request_id.clone(),
++        run_id: id("run"),
++        scope: scope(),
++        cancellation: Default::default(),
++        deadline: tokio::time::Instant::now() + std::time::Duration::from_secs(5),
++    }
++}
++pub fn events(model: &str, text: &str) -> Vec<Value> {
++    vec![
++        json!({"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":model,"content":[],"stop_reason":null,"usage":{"input_tokens":25,"output_tokens":1}}}),
++        json!({"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}),
++        json!({"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"signature-fixture"}}),
++        json!({"type":"content_block_stop","index":0}),
++        json!({"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}),
++        json!({"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":text}}),
++        json!({"type":"content_block_stop","index":1}),
++        json!({"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":15}}),
++        json!({"type":"message_stop"}),
++    ]
++}
++
++#[path = "../../../../tests/support/model_http.rs"]
++mod http;
++pub use http::*;
+diff --git a/docs/bedrock.md b/docs/bedrock.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..584d4b2e7c0c1eab9d409e685a543f3bf1b37f7a
+--- /dev/null
++++ b/docs/bedrock.md
+@@ -0,0 +1,50 @@
++# AWS Bedrock Claude adapter
++
++`wickle-model-bedrock` provides `ModelPort` and `ModelInspector` implementations. The Host supplies scope, credentials, region, the exact model/profile selector and the selected wire operation. The library reads no environment variables or AWS profiles.
++
++```rust,ignore
++use std::sync::Arc;
++use wickle_model_bedrock::{
++    BedrockConnection, BedrockModel, BedrockOptions, BedrockSelector,
++};
++
++let options = BedrockOptions::new(
++    "us-east-1", BedrockSelector::InferenceProfile(profile_id),
++);
++let connection = BedrockConnection::new(scope, connection_ref, credentials, options)?;
++let model = Arc::new(BedrockModel::new(connection.clone()));
++```
++
++Register `connection.binding()`, `connection.target()` and `connection.api_contract()` in the model catalog. Keep the underlying model release separate from the exact inference profile ID or ARN. Changing endpoint, operation, region or credential revision requires a matching route.
++
++## Wire operations and authentication
++
++| Endpoint | Operation | Response | SigV4 service |
++| --- | --- | --- | --- |
++| Runtime | `Messages` (default) | Anthropic SSE | `bedrock` |
++| Mantle | `Messages` | Anthropic SSE | `bedrock-mantle` |
++| Runtime | `InvokeStream` | AWS event stream | `bedrock` |
++
++Native Messages uses `/anthropic/v1/messages`, header `anthropic-version: 2023-06-01`, and the exact selector in `model`. InvokeStream uses the encoded selector in `/model/{selector}/invoke-with-response-stream` and body `anthropic_version: bedrock-2023-05-31`; it omits native `model` and `stream` fields. There is no automatic fallback between operations.
++
++Implement `BedrockCredentialProvider` to obtain or refresh AWS credentials through the Host's chosen credential chain. The callback receives scope, region, audience, cancellation and deadline. Return `BedrockCredential::Aws` for SigV4, including a session token and expiry when appropriate. Inference also accepts `BedrockCredential::Bearer`. Metadata inspection requires a separate IAM provider; an inference bearer token is not reused for control-plane calls. Static credential values implement the provider interface for simple Hosts and fixtures. Debug output excludes credential values.
++
++The adapter signs the final URL, headers and serialized payload. It refuses expired credentials and disables redirects and transport retries. Core attempt accounting and retry policy remain authoritative. Cancellation and deadlines stop credential lookup or the active HTTP stream.
++
++## Messages, tools and output
++
++The adapter reuses the [Anthropic Messages protocol](anthropic.md) for system instructions, ordinary tool calls/results, effort/thinking options and signed continuation blocks. Native service tools and unsupported options fail explicitly. AWS binary frames additionally undergo length, CRC, header, event-count and total-byte validation before Messages decoding. Incomplete or corrupt streams cannot complete an attempt.
++
++Register capabilities for the specific model, endpoint and operation. Mantle Messages rejects JSON-schema output; the adapter refuses that combination before HTTP. Runtime structured output still depends on the selected model and operation. A shared codec does not establish service capability or account availability.
++
++## Model and profile inspection
++
++`BedrockInspector` uses `GetFoundationModel` or `GetInferenceProfile`. `BedrockSnapshot` supplies explicit Host evidence linking a model ID to a release; an unknown release stays unverified. Metadata availability alone does not prove inference permission.
++
++Inference profiles are mutable even when their current foundation model has a known release. The inspector records model IDs and a profile revision fingerprint, detects mixed-model targets, and optionally checks `allowed_destination_regions`. This list restricts the destinations advertised by profile metadata; it does not attest where an individual inference executed. `region` is the request/signing origin. To enforce metadata observations, register the inspector with the router and apply its version policy.
++
++## Verification and setup
++
++Local HTTP fixtures cover signing, both stream protocols, malformed frames, cancellation, redirect refusal and model/profile drift. An independently extracted package consumer exercises native Messages. Account-specific inference, model access and destination behavior require separate live verification. See the [test environment guide](env/bedrock.md).
++
++Official contracts: [AWS Messages API](https://docs.aws.amazon.com/bedrock/latest/userguide/inference-messages-api.html), [structured output scope](https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-structured-outputs.html), [GetFoundationModel](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_GetFoundationModel.html), [GetInferenceProfile](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_GetInferenceProfile.html), [Anthropic Bedrock transport](https://github.com/anthropics/anthropic-sdk-python/blob/main/src/anthropic/lib/bedrock/_mantle.py).
+diff --git a/docs/env/bedrock.md b/docs/env/bedrock.md
+index 21b4f8a60bb3a3f5a5bc38da4da00fb028e099dd..c76601992d586008d7a1b2bcdb953b1a6a8b540d 100644
+--- a/docs/env/bedrock.md
++++ b/docs/env/bedrock.md
+@@ -2,7 +2,7 @@
+ 
+ [환경변수 안내](README.md) · [전체 예제](../../.env.example)
+ 
+-AWS 계정의 인증 정보, 호출을 시작할 리전, 해당 리전에서 사용할 Claude 모델을 준비합니다. Host가 AWS credential provider chain 또는 Bedrock bearer token을 준비하고 어댑터에 명시적으로 전달합니다. 라이브러리가 환경변수나 profile을 암묵적으로 읽는다는 뜻은 아닙니다. 아래는 설정 준비용이며 Wickle의 Bedrock 어댑터와 실제 연결 검사 runner는 아직 완성되지 않았습니다.
++AWS 계정의 인증 정보, 호출을 시작할 리전, 해당 리전에서 사용할 Claude 모델을 준비합니다. Host가 AWS credential provider chain 또는 Bedrock bearer token을 준비하고 어댑터에 명시적으로 전달합니다. 라이브러리가 환경변수나 profile을 암묵적으로 읽는다는 뜻은 아닙니다. Bedrock 어댑터는 명시적 설정으로 사용할 수 있습니다. 아래 환경변수는 테스트 Host의 설정 준비용이며, 실제 연결 검사 runner와 계정별 검증은 별도로 진행합니다.
+ 
+ ```dotenv
+ AWS_REGION=
+@@ -67,7 +67,7 @@ aws bedrock get-inference-profile \
+ 
+ `THINKING_MODE`와 `THINKING_BUDGET_TOKENS`는 각각 `thinking_mode`, `thinking_budget_tokens` 논리 옵션입니다. `adaptive`는 모드이고 effort 값이 아닙니다. 수동 thinking 예산을 지원하는 모델에서만 해당 토큰 설정을 사용합니다. [Adaptive thinking](https://platform.claude.com/docs/en/build-with-claude/adaptive-thinking), [수동 thinking](https://platform.claude.com/docs/en/build-with-claude/extended-thinking).
+ 
+-빈 옵션은 전송하지 않습니다. 선택한 모델·API의 schema에 없는 값이나 조합은 명시적으로 거부하며, 직접 Claude API 설정을 Bedrock 요청에 그대로 복사하거나 지원하지 않는 옵션을 조용히 무시하지 않습니다. 실제 wire 필드 매핑은 Bedrock 어댑터가 담당하며 SDK 연결은 아직 구현 전입니다.
++빈 옵션은 전송하지 않습니다. 선택한 모델·API의 schema에 없는 값이나 조합은 명시적으로 거부하며, 직접 Claude API 설정을 Bedrock 요청에 그대로 복사하거나 지원하지 않는 옵션을 조용히 무시하지 않습니다. 실제 wire 필드 매핑과 SigV4 서명은 Bedrock 어댑터가 담당합니다. AWS profile·role에서 인증 정보를 얻고 갱신하는 책임은 Host에 있습니다.
+ 
+ `MAX_OUTPUT_TOKENS=4096`은 응답 한 번의 출력 예산 예시입니다. 모델의 요건과 thinking·도구 호출을 포함한 작업량에 맞춰 조정합니다. 긴 tool loop에 충분한 예산을 보장하는 값은 아닙니다.
+ 
+diff --git a/scripts/check-package.py b/scripts/check-package.py
+index 4cde34d08d8279845454de8b81364c32f1ed99a3..e5726fb7b7d2cd9c2158dd5d660d0eb0cbaa1497 100644
+--- a/scripts/check-package.py
++++ b/scripts/check-package.py
+@@ -43,7 +43,8 @@ def main():
+     responses = next(p for p in workspace["packages"] if p["name"] == "wickle-model-responses")
+     azure = next(p for p in workspace["packages"] if p["name"] == "wickle-model-azure-openai")
+     anthropic = next(p for p in workspace["packages"] if p["name"] == "wickle-model-anthropic")
+-    libraries = [core, catalog, sqlite, adapters, responses, openai, azure, anthropic]
++    bedrock = next(p for p in workspace["packages"] if p["name"] == "wickle-model-bedrock")
++    libraries = [core, catalog, sqlite, adapters, responses, openai, azure, anthropic, bedrock]
+     versions = {d["name"]: d["req"] for d in core["dependencies"] if d["kind"] is None}
+     for dep in core["dependencies"]:
+         if dep["kind"] != "dev":
+@@ -79,7 +80,7 @@ def main():
+             shutil.copyfile(manifest, destination / "Cargo.toml")
+             shutil.copytree(manifest.parent / "src", destination / "src")
+         package_paths = {core["name"]: base / package_name}
+-        for package in [catalog, sqlite, adapters, responses, openai, azure, anthropic]:
++        for package in libraries[1:]:
+             patches = [argument for name, path in package_paths.items()
+                        for argument in ["--config", f'patch.crates-io.{name}.path={json.dumps(str(path))}']]
+             subprocess.run(
+@@ -142,7 +143,7 @@ def main():
+         for example in examples:
+             subprocess.run(["cargo", "run", "--locked", "--offline", "--bin", example.stem],
+                            cwd=consumer, env=env, check=True)
+-    print("Independent package consumers: passed (core, model catalog, SQLite store, adapter runtime, Responses codec, OpenAI, Azure and Anthropic adapters)", flush=True)
++    print("Independent package consumers: passed (core, model catalog, SQLite store, adapter runtime, Responses codec, OpenAI, Azure, Anthropic and Bedrock adapters)", flush=True)
+ 
+ 
+ if __name__ == "__main__":
+diff --git a/tests/support/bedrock_consumer.rs b/tests/support/bedrock_consumer.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..a778aad0c473646b22ec0e0e14ad7a4c9ca576ea
+--- /dev/null
++++ b/tests/support/bedrock_consumer.rs
+@@ -0,0 +1,174 @@
++// Real loopback HTTP/SSE against the extracted Bedrock adapter package; no provider call.
++use serde_json::json;
++use std::time::Duration;
++use tokio::{
++    io::{AsyncReadExt, AsyncWriteExt},
++    net::TcpListener,
++};
++use wickle::*;
++use wickle_model_bedrock::*;
++fn id(value: &str) -> Id {
++    Id::new(value).expect("example identifier")
++}
++fn reference(value: &str) -> VersionedRef {
++    VersionedRef {
++        id: id(value),
++        version: id("1"),
++    }
++}
++#[tokio::main(flavor = "current_thread")]
++async fn main() -> Result<(), Box<dyn std::error::Error>> {
++    let listener = TcpListener::bind("127.0.0.1:0").await?;
++    let base = format!("http://{}/", listener.local_addr()?);
++    let server = tokio::spawn(async move {
++        let (mut socket, _) = listener.accept().await.unwrap();
++        let mut bytes = vec![];
++        let (header_end, length) = loop {
++            let mut chunk = [0; 4096];
++            let size = socket.read(&mut chunk).await.unwrap();
++            assert!(size > 0);
++            bytes.extend_from_slice(&chunk[..size]);
++            assert!(bytes.len() < 65536);
++            if let Some(end) = bytes.windows(4).position(|s| s == b"\r\n\r\n") {
++                let headers = std::str::from_utf8(&bytes[..end])
++                    .unwrap()
++                    .to_ascii_lowercase();
++                let length = headers
++                    .lines()
++                    .find_map(|s| s.strip_prefix("content-length:"))
++                    .unwrap()
++                    .trim()
++                    .parse::<usize>()
++                    .unwrap();
++                break (end + 4, length);
++            }
++        };
++        while bytes.len() < header_end + length {
++            let mut chunk = [0; 4096];
++            let size = socket.read(&mut chunk).await.unwrap();
++            assert!(size > 0);
++            bytes.extend_from_slice(&chunk[..size]);
++        }
++        let headers = std::str::from_utf8(&bytes[..header_end])
++            .unwrap()
++            .to_ascii_lowercase();
++        assert!(headers.starts_with("post /anthropic/v1/messages "));
++        assert!(headers.contains("authorization: bearer fixture-key"));
++        assert!(headers.contains("anthropic-version: 2023-06-01"));
++        let body =
++            parse_json(std::str::from_utf8(&bytes[header_end..header_end + length]).unwrap())
++                .unwrap();
++        assert_eq!(body["model"], "fixture-model");
++        assert_eq!(body["stream"], true);
++        assert!(body.get("fallbacks").is_none());
++        assert_eq!(body["output_config"]["effort"], "medium");
++        assert_eq!(body["output_config"]["format"]["type"], "json_schema");
++        assert!(!body.to_string().contains("private-workspace"));
++        assert!(!body.to_string().contains("fixture-key"));
++        let events = vec![
++            json!({"type":"message_start","message":{"id":"message","type":"message","role":"assistant","model":"fixture-model","content":[],"usage":{"input_tokens":12,"output_tokens":1}}}),
++            json!({"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}),
++            json!({"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"signed-fixture"}}),
++            json!({"type":"content_block_stop","index":0}),
++            json!({"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}),
++            json!({"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"{\"answer\":42}"}}),
++            json!({"type":"content_block_stop","index":1}),
++            json!({"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}),
++            json!({"type":"message_stop"}),
++        ];
++        let wire: String = events
++            .into_iter()
++            .map(|value| format!("data: {value}\n\n"))
++            .collect();
++        socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",wire.len()).as_bytes()).await.unwrap();
++        for chunk in wire.as_bytes().chunks(5) {
++            socket.write_all(chunk).await.unwrap();
++            tokio::task::yield_now().await;
++        }
++        socket.shutdown().await.unwrap();
++    });
++    let scope = Scope {
++        tenant_id: id("tenant"),
++        workspace_id: id("private-workspace"),
++        user_id: None,
++    };
++    let mut options = BedrockOptions::new("us-east-1", BedrockSelector::Foundation("fixture-model".into()));
++    options.endpoint_url = Some(base);
++    let connection = BedrockConnection::new(
++        scope.clone(), reference("account"),
++        std::sync::Arc::new(BedrockCredential::Bearer("fixture-key".into())), options,
++    )?;
++    let binding = connection.binding();
++    let model = BedrockModel::new(connection.clone());
++    let request = ModelRequest {
++        request_id: id("attempt"),
++        purpose: ModelPurpose::Agent,
++        route: ResolvedModelRoute {
++            binding: reference("model"),
++            catalog_revision: id("catalog"),
++            routing_policy_revision: id("policy"),
++            requested_model: id("fixture-model"),
++            model_id: id("fixture-model"),
++            model_version: id("release"),
++            version_semantics: VersionSemantics::Unverified,
++            provider: binding.provider,
++            target: connection.target().clone(),
++            deployment_revision: None,
++            api_contract: connection.api_contract(),
++            adapter: binding.adapter,
++            capability_revision: id("caps"),
++            connection_ref: binding.connection_ref,
++        },
++        messages: vec![ModelMessage {
++            role: ModelRole::User,
++            content: vec![ModelContent::Text {
++                text: "Return the fixture answer.".into(),
++            }],
++        }],
++        tools: vec![],
++        output: ModelOutput::JsonSchema {
++            schema: json!({"type":"object","properties":{"answer":{"type":"integer"}},"required":["answer"],"additionalProperties":false}),
++        },
++        max_output_tokens: 128.try_into()?,
++        options: JsonObject::from([("effort".into(), json!("medium"))]),
++        limits: ModelResponseLimits {
++            max_input_bytes: 32768,
++            max_response_bytes: 32768,
++            max_delta_bytes: 128,
++            max_events: 64,
++            max_tool_calls: 0,
++        },
++    };
++    let context = ModelCallContext {
++        attempt_id: request.request_id.clone(),
++        run_id: id("run"),
++        scope,
++        cancellation: Default::default(),
++        deadline: tokio::time::Instant::now() + Duration::from_secs(10),
++    };
++    let response = collect_model_response(&request, model.generate(&request, &context)).await?;
++    assert_eq!(parse_json(&response.text)?, json!({"answer":42}));
++    assert_eq!(response.finish, ModelFinish::Stop);
++    assert_eq!(
++        response.metadata.reported_model_id,
++        Some(id("fixture-model"))
++    );
++    assert!(response.metadata.reported_model_version.is_none());
++    assert_eq!(
++        response
++            .metadata
++            .usage
++            .as_ref()
++            .and_then(|u| u.output_tokens),
++        Some(5)
++    );
++    assert_eq!(
++        response.continuation[0].data()["blocks"][0]["signature"],
++        "signed-fixture"
++    );
++    server.await?;
++    println!(
++        "Bedrock consumer: extracted adapter performs one HTTP/SSE request, uses explicit bearer authentication, preserves native output options, signed thinking and cumulative usage, decodes JSON and reported usage, and excludes Host context from the wire (local fixture, no provider network)"
++    );
++    Ok(())
++}

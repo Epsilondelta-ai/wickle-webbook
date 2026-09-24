@@ -1,0 +1,4718 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index aec59439a4402d90dad35b122e1918bcfff173e9..c1001c831c5a0ea7083973b954a9ac526f24edc9 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -9,7 +9,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "5a15f179cd60c4584b8a8c596927aadc462e27f2ca70c04e0071964a73ba7a75"
+ dependencies = [
+  "cfg-if",
+- "getrandom",
++ "getrandom 0.3.4",
+  "once_cell",
+  "serde",
+  "version_check",
+@@ -31,12 +31,53 @@ version = "0.2.21"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
+ 
++[[package]]
++name = "atomic-waker"
++version = "1.1.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
++
+ [[package]]
+ name = "autocfg"
+ version = "1.5.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
+ 
++[[package]]
++name = "aws-lc-rs"
++version = "1.18.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "b281d307588d634de920874890732659e2e7672f72b5e10e81badc1a8a83621e"
++dependencies = [
++ "aws-lc-sys",
++ "zeroize",
++]
++
++[[package]]
++name = "aws-lc-sys"
++version = "0.45.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "9bff6c3b54fad79a2e60b8102caf565819711497c1f5f092f49508e2f5c31b27"
++dependencies = [
++ "cc",
++ "cmake",
++ "dunce",
++ "fs_extra",
++ "pkg-config",
++]
++
++[[package]]
++name = "base64"
++version = "0.22.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
++
++[[package]]
++name = "base64"
++version = "0.23.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
++
+ [[package]]
+ name = "bit-set"
+ version = "0.8.0"
+@@ -98,6 +139,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "005ec2760ca554fae18df7a11195552ec576cd665632a881bc011d5bb2fd4d80"
+ dependencies = [
+  "find-msvc-tools",
++ "jobserver",
++ "libc",
+  "shlex",
+ ]
+ 
+@@ -107,6 +150,58 @@ version = "1.0.4"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
+ 
++[[package]]
++name = "cfg_aliases"
++version = "0.2.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "f079e83a288787bcd14a6aea84cee5c87a67c5a3e660c30f557a3d24761b3527"
++
++[[package]]
++name = "chacha20"
++version = "0.10.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "65c35e4b699c7e15ccbe7ee35c005e4fc0a278d22238a2857e6ce2dadeda1b06"
++dependencies = [
++ "cfg-if",
++ "cpufeatures",
++ "rand_core",
++]
++
++[[package]]
++name = "cmake"
++version = "0.1.58"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "c0f78a02292a74a88ac736019ab962ece0bc380e3f977bf72e376c5d78ff0678"
++dependencies = [
++ "cc",
++]
++
++[[package]]
++name = "combine"
++version = "4.6.8"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "cfc320937d09e6de266b31b9afb480f197d7a861be86be7cb2ea7e5d1bfffc5e"
++dependencies = [
++ "bytes",
++ "memchr",
++]
++
++[[package]]
++name = "core-foundation"
++version = "0.10.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "b2a6cd9ae233e7f62ba4e9353e81a88df7fc8a5987b8d445b4d90c879bd156f6"
++dependencies = [
++ "core-foundation-sys",
++ "libc",
++]
++
++[[package]]
++name = "core-foundation-sys"
++version = "0.8.7"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
++
+ [[package]]
+ name = "cpufeatures"
+ version = "0.3.1"
+@@ -141,6 +236,23 @@ dependencies = [
+  "crypto-common",
+ ]
+ 
++[[package]]
++name = "displaydoc"
++version = "0.2.7"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "c6232dd377dcc64799954cbd3a9bb882e9cdc1308ccd87b1c098f1fb2eaf82a8"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "syn 3.0.5",
++]
++
++[[package]]
++name = "dunce"
++version = "1.0.5"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
++
+ [[package]]
+ name = "email_address"
+ version = "0.2.9"
+@@ -202,6 +314,15 @@ version = "0.2.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
+ 
++[[package]]
++name = "form_urlencoded"
++version = "1.2.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
++dependencies = [
++ "percent-encoding",
++]
++
+ [[package]]
+ name = "fraction"
+ version = "0.17.0"
+@@ -212,6 +333,21 @@ dependencies = [
+  "num-bigint",
+ ]
+ 
++[[package]]
++name = "fs_extra"
++version = "1.3.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "42703706b716c37f96a77aea830392ad231f44c9e9a67872fa5548707e11b11c"
++
++[[package]]
++name = "futures-channel"
++version = "0.3.34"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "b1f9e3d69d39e4862ffed03ed071a76f9a13ba1d9109d355b0f0aa6b15e393c4"
++dependencies = [
++ "futures-core",
++]
++
+ [[package]]
+ name = "futures-core"
+ version = "0.3.34"
+@@ -254,6 +390,19 @@ dependencies = [
+  "slab",
+ ]
+ 
++[[package]]
++name = "getrandom"
++version = "0.2.17"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ff2abc00be7fca6ebc474524697ae276ad847ad0a6b3faa4bcb027e9a4614ad0"
++dependencies = [
++ "cfg-if",
++ "js-sys",
++ "libc",
++ "wasi",
++ "wasm-bindgen",
++]
++
+ [[package]]
+ name = "getrandom"
+ version = "0.3.4"
+@@ -263,11 +412,25 @@ dependencies = [
+  "cfg-if",
+  "js-sys",
+  "libc",
+- "r-efi",
++ "r-efi 5.3.0",
+  "wasip2",
+  "wasm-bindgen",
+ ]
+ 
++[[package]]
++name = "getrandom"
++version = "0.4.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "300e883d756b2e4ec94e02791f39b04b522276138852cfc41d9fb7e904106099"
++dependencies = [
++ "cfg-if",
++ "js-sys",
++ "libc",
++ "r-efi 6.0.0",
++ "rand_core",
++ "wasm-bindgen",
++]
++
+ [[package]]
+ name = "hashbrown"
+ version = "0.17.1"
+@@ -285,6 +448,45 @@ version = "0.5.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
+ 
++[[package]]
++name = "http"
++version = "1.5.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "918d3568bebf352712bc2ef3d46a8bcf1a75b373be6539de198e9105cbbf9ce0"
++dependencies = [
++ "bytes",
++ "itoa",
++]
++
++[[package]]
++name = "http-body"
++version = "1.1.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ca2a8f2913ee65f60facd6a5905613afaa448497a0230cc41ce022d93290bc2c"
++dependencies = [
++ "bytes",
++ "http",
++]
++
++[[package]]
++name = "http-body-util"
++version = "0.1.5"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "23169fe34a5fbcdd3f3862e78fb9b6fccd5f02a6dc6f732547005d45631ce71c"
++dependencies = [
++ "bytes",
++ "futures-core",
++ "http",
++ "http-body",
++ "pin-project-lite",
++]
++
++[[package]]
++name = "httparse"
++version = "1.10.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "6dbf3de79e51f3d586ab4cb9d5c3e2c14aa28ed23d180cf89b4df0454a69cc87"
++
+ [[package]]
+ name = "hybrid-array"
+ version = "0.4.15"
+@@ -294,6 +496,166 @@ dependencies = [
+  "typenum",
+ ]
+ 
++[[package]]
++name = "hyper"
++version = "1.11.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "27b501faa50e7a26c3d3560ca625132f4078a17771f4810baf70475ae48cbe43"
++dependencies = [
++ "atomic-waker",
++ "bytes",
++ "futures-channel",
++ "futures-core",
++ "http",
++ "http-body",
++ "httparse",
++ "itoa",
++ "pin-project-lite",
++ "smallvec",
++ "tokio",
++ "want",
++]
++
++[[package]]
++name = "hyper-rustls"
++version = "0.27.9"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "33ca68d021ef39cf6463ab54c1d0f5daf03377b70561305bb89a8f83aab66e0f"
++dependencies = [
++ "http",
++ "hyper",
++ "hyper-util",
++ "rustls",
++ "tokio",
++ "tokio-rustls",
++ "tower-service",
++]
++
++[[package]]
++name = "hyper-util"
++version = "0.1.20"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "96547c2556ec9d12fb1578c4eaf448b04993e7fb79cbaad930a656880a6bdfa0"
++dependencies = [
++ "base64 0.22.1",
++ "bytes",
++ "futures-channel",
++ "futures-util",
++ "http",
++ "http-body",
++ "hyper",
++ "ipnet",
++ "libc",
++ "percent-encoding",
++ "pin-project-lite",
++ "socket2",
++ "tokio",
++ "tower-service",
++ "tracing",
++]
++
++[[package]]
++name = "icu_collections"
++version = "2.1.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "4c6b649701667bbe825c3b7e6388cb521c23d88644678e83c0c4d0a621a34b43"
++dependencies = [
++ "displaydoc",
++ "potential_utf",
++ "yoke",
++ "zerofrom",
++ "zerovec",
++]
++
++[[package]]
++name = "icu_locale_core"
++version = "2.1.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "edba7861004dd3714265b4db54a3c390e880ab658fec5f7db895fae2046b5bb6"
++dependencies = [
++ "displaydoc",
++ "litemap",
++ "tinystr",
++ "writeable",
++ "zerovec",
++]
++
++[[package]]
++name = "icu_normalizer"
++version = "2.1.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "5f6c8828b67bf8908d82127b2054ea1b4427ff0230ee9141c54251934ab1b599"
++dependencies = [
++ "icu_collections",
++ "icu_normalizer_data",
++ "icu_properties",
++ "icu_provider",
++ "smallvec",
++ "zerovec",
++]
++
++[[package]]
++name = "icu_normalizer_data"
++version = "2.1.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7aedcccd01fc5fe81e6b489c15b247b8b0690feb23304303a9e560f37efc560a"
++
++[[package]]
++name = "icu_properties"
++version = "2.1.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "020bfc02fe870ec3a66d93e677ccca0562506e5872c650f893269e08615d74ec"
++dependencies = [
++ "icu_collections",
++ "icu_locale_core",
++ "icu_properties_data",
++ "icu_provider",
++ "zerotrie",
++ "zerovec",
++]
++
++[[package]]
++name = "icu_properties_data"
++version = "2.1.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "616c294cf8d725c6afcd8f55abc17c56464ef6211f9ed59cccffe534129c77af"
++
++[[package]]
++name = "icu_provider"
++version = "2.1.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "85962cf0ce02e1e0a629cc34e7ca3e373ce20dda4c4d7294bbd0bf1fdb59e614"
++dependencies = [
++ "displaydoc",
++ "icu_locale_core",
++ "writeable",
++ "yoke",
++ "zerofrom",
++ "zerotrie",
++ "zerovec",
++]
++
++[[package]]
++name = "idna"
++version = "1.1.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "3b0875f23caa03898994f6ddc501886a45c7d3d62d04d2d90788d47be1b1e4de"
++dependencies = [
++ "idna_adapter",
++ "smallvec",
++ "utf8_iter",
++]
++
++[[package]]
++name = "idna_adapter"
++version = "1.2.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "3acae9609540aa318d1bc588455225fb2085b9ed0c4f6bd0d9d5bcd86f1a0344"
++dependencies = [
++ "icu_normalizer",
++ "icu_properties",
++]
++
+ [[package]]
+ name = "indexmap"
+ version = "2.14.2"
+@@ -304,12 +666,77 @@ dependencies = [
+  "hashbrown",
+ ]
+ 
++[[package]]
++name = "ipnet"
++version = "2.12.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "791930b43c0d5973160d90a8f3894509f2b273430f5c5c73b668636d0287c5c0"
++
+ [[package]]
+ name = "itoa"
+ version = "1.0.18"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
+ 
++[[package]]
++name = "jni"
++version = "0.22.4"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "5efd9a482cf3a427f00d6b35f14332adc7902ce91efb778580e180ff90fa3498"
++dependencies = [
++ "cfg-if",
++ "combine",
++ "jni-macros",
++ "jni-sys",
++ "log",
++ "simd_cesu8",
++ "thiserror",
++ "walkdir",
++ "windows-link",
++]
++
++[[package]]
++name = "jni-macros"
++version = "0.22.4"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "a00109accc170f0bdb141fed3e393c565b6f5e072365c3bd58f5b062591560a3"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "rustc_version",
++ "simd_cesu8",
++ "syn 2.0.119",
++]
++
++[[package]]
++name = "jni-sys"
++version = "0.4.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "c6377a88cb3910bee9b0fa88d4f42e1d2da8e79915598f65fb0c7ee14c878af2"
++dependencies = [
++ "jni-sys-macros",
++]
++
++[[package]]
++name = "jni-sys-macros"
++version = "0.4.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "38c0b942f458fe50cdac086d2f946512305e5631e720728f2a61aabcd47a6264"
++dependencies = [
++ "quote",
++ "syn 2.0.119",
++]
++
++[[package]]
++name = "jobserver"
++version = "0.1.35"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "1c00acbd29eabad4a2392fa0e921c874934dbbf4194312ad20f04a0ed67a3cb3"
++dependencies = [
++ "getrandom 0.4.3",
++ "libc",
++]
++
+ [[package]]
+ name = "js-sys"
+ version = "0.3.105"
+@@ -317,6 +744,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "ce57d20d1ea864ce2ac172ab472d409214f4fd359f0b2a2775abdf522e2af99e"
+ dependencies = [
+  "cfg-if",
++ "futures-util",
+  "wasm-bindgen",
+ ]
+ 
+@@ -332,7 +760,7 @@ dependencies = [
+  "email_address",
+  "fancy-regex",
+  "fraction",
+- "getrandom",
++ "getrandom 0.3.4",
+  "itoa",
+  "jsonschema-regex",
+  "jsonschema-value",
+@@ -366,7 +794,7 @@ dependencies = [
+  "ahash",
+  "bytecount",
+  "fraction",
+- "getrandom",
++ "getrandom 0.3.4",
+  "num-cmp",
+  "num-traits",
+  "serde_json",
+@@ -390,6 +818,12 @@ dependencies = [
+  "vcpkg",
+ ]
+ 
++[[package]]
++name = "litemap"
++version = "0.8.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "47d9d19d1d6efa0109d2f65ff4c85cddd50bd572e5a00127ab10987290bcefae"
++
+ [[package]]
+ name = "lock_api"
+ version = "0.4.14"
+@@ -399,6 +833,18 @@ dependencies = [
+  "scopeguard",
+ ]
+ 
++[[package]]
++name = "log"
++version = "0.4.34"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
++
++[[package]]
++name = "lru-slab"
++version = "0.1.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
++
+ [[package]]
+ name = "memchr"
+ version = "2.8.3"
+@@ -411,6 +857,17 @@ version = "0.3.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "c2a86d3146ed3995b5913c414f6664344b9617457320782e64f0bb44afd49d74"
+ 
++[[package]]
++name = "mio"
++version = "1.2.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "4b18443e9c262bfe8fa82f51666e2642c53393f7e5c27b3e1aeab922cff5b9d8"
++dependencies = [
++ "libc",
++ "wasi",
++ "windows-sys 0.61.2",
++]
++
+ [[package]]
+ name = "num"
+ version = "0.4.3"
+@@ -495,6 +952,12 @@ version = "1.21.4"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
+ 
++[[package]]
++name = "openssl-probe"
++version = "0.2.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
++
+ [[package]]
+ name = "outref"
+ version = "0.5.2"
+@@ -542,6 +1005,15 @@ version = "0.3.34"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
+ 
++[[package]]
++name = "potential_utf"
++version = "0.1.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "d83eb9bc6d8e5cf568e7a1101d60ee05e81ed50ea106026f3d18deeb046d7661"
++dependencies = [
++ "zerovec",
++]
++
+ [[package]]
+ name = "proc-macro2"
+ version = "1.0.107"
+@@ -551,6 +1023,63 @@ dependencies = [
+  "unicode-ident",
+ ]
+ 
++[[package]]
++name = "quinn"
++version = "0.11.11"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "0c1a41e437b6bbd489372cd4971de128e85c855f56c57f283d20ff016cf7c0a8"
++dependencies = [
++ "bytes",
++ "cfg_aliases",
++ "pin-project-lite",
++ "quinn-proto",
++ "quinn-udp",
++ "rustc-hash",
++ "rustls",
++ "socket2",
++ "thiserror",
++ "tokio",
++ "tracing",
++ "web-time",
++]
++
++[[package]]
++name = "quinn-proto"
++version = "0.11.17"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "04759210543be93709136e28212294a659ef5001836ff4eab4d663e4529bba83"
++dependencies = [
++ "aws-lc-rs",
++ "bytes",
++ "getrandom 0.4.3",
++ "lru-slab",
++ "rand",
++ "rand_pcg",
++ "ring",
++ "rustc-hash",
++ "rustls",
++ "rustls-pki-types",
++ "slab",
++ "thiserror",
++ "tinyvec",
++ "tracing",
++ "web-time",
++]
++
++[[package]]
++name = "quinn-udp"
++version = "0.5.15"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "35a133f956daabe89a61a685c2649f13d82d5aa4bd5d12d1277e1072a21c0694"
++dependencies = [
++ "cfg_aliases",
++ "libc",
++ "once_cell",
++ "socket2",
++ "tracing",
++ "windows-sys 0.61.2",
++]
++
+ [[package]]
+ name = "quote"
+ version = "1.0.47"
+@@ -566,6 +1095,38 @@ version = "5.3.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
+ 
++[[package]]
++name = "r-efi"
++version = "6.0.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
++
++[[package]]
++name = "rand"
++version = "0.10.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "c7f5fa3a058cd35567ef9bfa5e75732bee0f9e4c55fa90477bef2dfcdbc4be80"
++dependencies = [
++ "chacha20",
++ "getrandom 0.4.3",
++ "rand_core",
++]
++
++[[package]]
++name = "rand_core"
++version = "0.10.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "63b8176103e19a2643978565ca18b50549f6101881c443590420e4dc998a3c69"
++
++[[package]]
++name = "rand_pcg"
++version = "0.10.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "caa0f4137e1c0a72f4c651489402276c8e8e1cf081f3b0ba156d2cbeef09e86a"
++dependencies = [
++ "rand_core",
++]
++
+ [[package]]
+ name = "redox_syscall"
+ version = "0.5.18"
+@@ -603,7 +1164,7 @@ checksum = "a3b4a92fac7e28c27de3ad26df2ecb9e652f227b258e845af034052e5b22c96c"
+ dependencies = [
+  "ahash",
+  "fluent-uri",
+- "getrandom",
++ "getrandom 0.3.4",
+  "hashbrown",
+  "itoa",
+  "micromap",
+@@ -641,6 +1202,55 @@ version = "0.8.11"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
+ 
++[[package]]
++name = "reqwest"
++version = "0.13.5"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "16a1cfa75cc186dd73d5818e510e042e40927bccc9c236b061cea97e1eb08029"
++dependencies = [
++ "base64 0.23.1",
++ "bytes",
++ "futures-core",
++ "http",
++ "http-body",
++ "http-body-util",
++ "hyper",
++ "hyper-rustls",
++ "hyper-util",
++ "js-sys",
++ "log",
++ "percent-encoding",
++ "pin-project-lite",
++ "quinn",
++ "rustls",
++ "rustls-pki-types",
++ "rustls-platform-verifier",
++ "sync_wrapper",
++ "tokio",
++ "tokio-rustls",
++ "tower",
++ "tower-http",
++ "tower-service",
++ "url",
++ "wasm-bindgen",
++ "wasm-bindgen-futures",
++ "web-sys",
++]
++
++[[package]]
++name = "ring"
++version = "0.17.14"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "a4689e6c2294d81e88dc6261c768b63bc4fcdb852be6d1352498b114f61383b7"
++dependencies = [
++ "cc",
++ "cfg-if",
++ "getrandom 0.2.17",
++ "libc",
++ "untrusted",
++ "windows-sys 0.52.0",
++]
++
+ [[package]]
+ name = "rusqlite"
+ version = "0.40.2"
+@@ -654,18 +1264,155 @@ dependencies = [
+  "smallvec",
+ ]
+ 
++[[package]]
++name = "rustc-hash"
++version = "2.1.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "6b1e7f9a428571be2dc5bc0505c13fb6bf936822b894ec87abf8a08a4e51742d"
++
++[[package]]
++name = "rustc_version"
++version = "0.4.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92"
++dependencies = [
++ "semver",
++]
++
++[[package]]
++name = "rustls"
++version = "0.23.44"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "6725596c3f2c3a0aef021139e145d4eafe314a6623e4680ca83852b2c67ab2ba"
++dependencies = [
++ "aws-lc-rs",
++ "once_cell",
++ "rustls-pki-types",
++ "rustls-webpki",
++ "subtle",
++ "zeroize",
++]
++
++[[package]]
++name = "rustls-native-certs"
++version = "0.8.4"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "dab5152771c58876a2146916e53e35057e1a4dfa2b9df0f0305b07f611fdea4d"
++dependencies = [
++ "openssl-probe",
++ "rustls-pki-types",
++ "schannel",
++ "security-framework",
++]
++
++[[package]]
++name = "rustls-pki-types"
++version = "1.15.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "2f4925028c7eb5d1fcdaf196971378ed9d2c1c4efc7dc5d011256f76c99c0a96"
++dependencies = [
++ "web-time",
++ "zeroize",
++]
++
++[[package]]
++name = "rustls-platform-verifier"
++version = "0.7.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "26d1e2536ce4f35f4846aa13bff16bd0ff40157cdb14cc056c7b14ba41233ba0"
++dependencies = [
++ "core-foundation",
++ "core-foundation-sys",
++ "jni",
++ "log",
++ "once_cell",
++ "rustls",
++ "rustls-native-certs",
++ "rustls-platform-verifier-android",
++ "rustls-webpki",
++ "security-framework",
++ "security-framework-sys",
++ "webpki-root-certs",
++ "windows-sys 0.61.2",
++]
++
++[[package]]
++name = "rustls-platform-verifier-android"
++version = "0.1.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "f87165f0995f63a9fbeea62b64d10b4d9d8e78ec6d7d51fb2125fda7bb36788f"
++
++[[package]]
++name = "rustls-webpki"
++version = "0.103.15"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2"
++dependencies = [
++ "aws-lc-rs",
++ "ring",
++ "rustls-pki-types",
++ "untrusted",
++]
++
+ [[package]]
+ name = "rustversion"
+ version = "1.0.23"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
+ 
++[[package]]
++name = "same-file"
++version = "1.0.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
++dependencies = [
++ "winapi-util",
++]
++
++[[package]]
++name = "schannel"
++version = "0.1.29"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "91c1b7e4904c873ef0710c1f407dde2e6287de2bebc1bbbf7d430bb7cbffd939"
++dependencies = [
++ "windows-sys 0.61.2",
++]
++
+ [[package]]
+ name = "scopeguard"
+ version = "1.2.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
+ 
++[[package]]
++name = "security-framework"
++version = "3.7.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "b7f4bc775c73d9a02cde8bf7b2ec4c9d12743edf609006c7facc23998404cd1d"
++dependencies = [
++ "bitflags",
++ "core-foundation",
++ "core-foundation-sys",
++ "libc",
++ "security-framework-sys",
++]
++
++[[package]]
++name = "security-framework-sys"
++version = "2.17.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "6ce2691df843ecc5d231c0b14ece2acc3efb62c0a398c7e1d875f3983ce020e3"
++dependencies = [
++ "core-foundation-sys",
++ "libc",
++]
++
++[[package]]
++name = "semver"
++version = "1.0.28"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
++
+ [[package]]
+ name = "serde"
+ version = "1.0.229"
+@@ -727,6 +1474,22 @@ version = "2.0.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
+ 
++[[package]]
++name = "simd_cesu8"
++version = "1.2.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "11031e251abf8611c80f460e19dbdeb54a66db918e49c65a7065b46ac7aec520"
++dependencies = [
++ "rustc_version",
++ "simdutf8",
++]
++
++[[package]]
++name = "simdutf8"
++version = "0.1.5"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
++
+ [[package]]
+ name = "slab"
+ version = "0.4.12"
+@@ -739,6 +1502,22 @@ version = "1.16.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "ba467056f1b547ed52077911161fc86985becbc60e8e1857c8a144dab0def891"
+ 
++[[package]]
++name = "socket2"
++version = "0.6.5"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
++dependencies = [
++ "libc",
++ "windows-sys 0.61.2",
++]
++
++[[package]]
++name = "stable_deref_trait"
++version = "1.2.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
++
+ [[package]]
+ name = "strum"
+ version = "0.28.0"
+@@ -760,6 +1539,12 @@ dependencies = [
+  "syn 2.0.119",
+ ]
+ 
++[[package]]
++name = "subtle"
++version = "2.6.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
++
+ [[package]]
+ name = "syn"
+ version = "2.0.119"
+@@ -782,6 +1567,26 @@ dependencies = [
+  "unicode-ident",
+ ]
+ 
++[[package]]
++name = "sync_wrapper"
++version = "1.0.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "0bf256ce5efdfa370213c1dabab5935a12e49f2c58d15e9eac2870d3b4f27263"
++dependencies = [
++ "futures-core",
++]
++
++[[package]]
++name = "synstructure"
++version = "0.13.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "728a70f3dbaf5bab7f0c4b1ac8d7ae5ea60a4b5549c8a5914361c99147a709d2"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "syn 2.0.119",
++]
++
+ [[package]]
+ name = "thiserror"
+ version = "2.0.20"
+@@ -802,14 +1607,44 @@ dependencies = [
+  "syn 3.0.5",
+ ]
+ 
++[[package]]
++name = "tinystr"
++version = "0.8.4"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "b1e27c91459209c2986af3dcf603a5a74a4368754ce37414f59acc971167f643"
++dependencies = [
++ "displaydoc",
++ "zerovec",
++]
++
++[[package]]
++name = "tinyvec"
++version = "1.13.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "4cf0ded5c4e56918d8f8a339e1bb67d038d3bc6d144ac407904015ba2e4cde9b"
++dependencies = [
++ "tinyvec_macros",
++]
++
++[[package]]
++name = "tinyvec_macros"
++version = "0.1.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
++
+ [[package]]
+ name = "tokio"
+ version = "1.53.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "202caea871b69668250d242070849eb495be178ed697a3e98aebce5bc81a0bed"
+ dependencies = [
++ "bytes",
++ "libc",
++ "mio",
+  "pin-project-lite",
++ "socket2",
+  "tokio-macros",
++ "windows-sys 0.61.2",
+ ]
+ 
+ [[package]]
+@@ -823,6 +1658,16 @@ dependencies = [
+  "syn 3.0.5",
+ ]
+ 
++[[package]]
++name = "tokio-rustls"
++version = "0.26.5"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "b0c85f2c3ef0b1cd58b36682f4b17aaa995f0e5db534d85692b4903abce21f67"
++dependencies = [
++ "rustls",
++ "tokio",
++]
++
+ [[package]]
+ name = "tokio-util"
+ version = "0.7.19"
+@@ -837,6 +1682,76 @@ dependencies = [
+  "tokio",
+ ]
+ 
++[[package]]
++name = "tower"
++version = "0.5.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ebe5ef63511595f1344e2d5cfa636d973292adc0eec1f0ad45fae9f0851ab1d4"
++dependencies = [
++ "futures-core",
++ "futures-util",
++ "pin-project-lite",
++ "sync_wrapper",
++ "tokio",
++ "tower-layer",
++ "tower-service",
++]
++
++[[package]]
++name = "tower-http"
++version = "0.6.11"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "4cfcf7e2740e6fc6d4d688b4ef00650406bb94adf4731e43c096c3a19fe40840"
++dependencies = [
++ "bitflags",
++ "bytes",
++ "futures-util",
++ "http",
++ "http-body",
++ "pin-project-lite",
++ "tower",
++ "tower-layer",
++ "tower-service",
++ "url",
++]
++
++[[package]]
++name = "tower-layer"
++version = "0.3.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "121c2a6cda46980bb0fcd1647ffaf6cd3fc79a013de288782836f6df9c48780e"
++
++[[package]]
++name = "tower-service"
++version = "0.3.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "8df9b6e13f2d32c91b9bd719c00d1958837bc7dec474d94952798cc8e69eeec3"
++
++[[package]]
++name = "tracing"
++version = "0.1.44"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "63e71662fa4b2a2c3a26f570f037eb95bb1f85397f3cd8076caed2f026a6d100"
++dependencies = [
++ "pin-project-lite",
++ "tracing-core",
++]
++
++[[package]]
++name = "tracing-core"
++version = "0.1.36"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "db97caf9d906fbde555dd62fa95ddba9eecfd14cb388e4f491a66d74cd5fb79a"
++dependencies = [
++ "once_cell",
++]
++
++[[package]]
++name = "try-lock"
++version = "0.2.5"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
++
+ [[package]]
+ name = "typenum"
+ version = "1.20.1"
+@@ -855,6 +1770,30 @@ version = "1.0.24"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
+ 
++[[package]]
++name = "untrusted"
++version = "0.9.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
++
++[[package]]
++name = "url"
++version = "2.5.8"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ff67a8a4397373c3ef660812acab3268222035010ab8680ec4215f38ba3d0eed"
++dependencies = [
++ "form_urlencoded",
++ "idna",
++ "percent-encoding",
++ "serde",
++]
++
++[[package]]
++name = "utf8_iter"
++version = "1.0.4"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "b6c140620e7ffbb22c2dee59cafe6084a59b5ffc27a8859a5f0d494b5d52b6be"
++
+ [[package]]
+ name = "uuid-simd"
+ version = "0.8.0"
+@@ -883,6 +1822,31 @@ version = "0.8.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "5c3082ca00d5a5ef149bb8b555a72ae84c9c59f7250f013ac822ac2e49b19c64"
+ 
++[[package]]
++name = "walkdir"
++version = "2.5.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "29790946404f91d9c5d06f9874efddea1dc06c5efe94541a7d6863108e3a5e4b"
++dependencies = [
++ "same-file",
++ "winapi-util",
++]
++
++[[package]]
++name = "want"
++version = "0.3.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "bfa7760aed19e106de2c7c0b581b509f2f25d3dacaf737cb82ac61bc6d760b0e"
++dependencies = [
++ "try-lock",
++]
++
++[[package]]
++name = "wasi"
++version = "0.11.1+wasi-snapshot-preview1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b"
++
+ [[package]]
+ name = "wasip2"
+ version = "1.0.1+wasi-0.2.4"
+@@ -905,6 +1869,16 @@ dependencies = [
+  "wasm-bindgen-shared",
+ ]
+ 
++[[package]]
++name = "wasm-bindgen-futures"
++version = "0.4.78"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "6ef4c5d3d2cdf5c54f4231181768f5510842e350db025faf1f7163b1030ed928"
++dependencies = [
++ "js-sys",
++ "wasm-bindgen",
++]
++
+ [[package]]
+ name = "wasm-bindgen-macro"
+ version = "0.2.128"
+@@ -937,12 +1911,41 @@ dependencies = [
+  "unicode-ident",
+ ]
+ 
++[[package]]
++name = "web-sys"
++version = "0.3.105"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "9fbddc4a036f00ec4f18c83445bd3115cb306a91da554919a099d9222fe4a7f8"
++dependencies = [
++ "js-sys",
++ "wasm-bindgen",
++]
++
++[[package]]
++name = "web-time"
++version = "1.1.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
++dependencies = [
++ "js-sys",
++ "wasm-bindgen",
++]
++
++[[package]]
++name = "webpki-root-certs"
++version = "1.0.9"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "b96554aa2acc8ccdb7e1c9a58a7a68dd5d13bccc69cd124cb09406db612a1c9b"
++dependencies = [
++ "rustls-pki-types",
++]
++
+ [[package]]
+ name = "wickle"
+ version = "0.1.0"
+ dependencies = [
+  "futures-util",
+- "getrandom",
++ "getrandom 0.3.4",
+  "jsonschema",
+  "serde",
+  "serde_json",
+@@ -965,6 +1968,18 @@ dependencies = [
+  "wickle-state-sqlite",
+ ]
+ 
++[[package]]
++name = "wickle-model-openai"
++version = "0.1.0"
++dependencies = [
++ "futures-util",
++ "reqwest",
++ "serde_json",
++ "tokio",
++ "tokio-util",
++ "wickle",
++]
++
+ [[package]]
+ name = "wickle-model-router"
+ version = "0.1.0"
+@@ -989,18 +2004,138 @@ dependencies = [
+  "wickle",
+ ]
+ 
++[[package]]
++name = "winapi-util"
++version = "0.1.11"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
++dependencies = [
++ "windows-sys 0.61.2",
++]
++
+ [[package]]
+ name = "windows-link"
+ version = "0.2.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
+ 
++[[package]]
++name = "windows-sys"
++version = "0.52.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "282be5f36a8ce781fad8c8ae18fa3f9beff57ec1b52cb3de0789201425d9a33d"
++dependencies = [
++ "windows-targets",
++]
++
++[[package]]
++name = "windows-sys"
++version = "0.61.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc"
++dependencies = [
++ "windows-link",
++]
++
++[[package]]
++name = "windows-targets"
++version = "0.52.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "9b724f72796e036ab90c1021d4780d4d3d648aca59e491e6b98e725b84e99973"
++dependencies = [
++ "windows_aarch64_gnullvm",
++ "windows_aarch64_msvc",
++ "windows_i686_gnu",
++ "windows_i686_gnullvm",
++ "windows_i686_msvc",
++ "windows_x86_64_gnu",
++ "windows_x86_64_gnullvm",
++ "windows_x86_64_msvc",
++]
++
++[[package]]
++name = "windows_aarch64_gnullvm"
++version = "0.52.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "32a4622180e7a0ec044bb555404c800bc9fd9ec262ec147edd5989ccd0c02cd3"
++
++[[package]]
++name = "windows_aarch64_msvc"
++version = "0.52.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "09ec2a7bb152e2252b53fa7803150007879548bc709c039df7627cabbd05d469"
++
++[[package]]
++name = "windows_i686_gnu"
++version = "0.52.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "8e9b5ad5ab802e97eb8e295ac6720e509ee4c243f69d781394014ebfe8bbfa0b"
++
++[[package]]
++name = "windows_i686_gnullvm"
++version = "0.52.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "0eee52d38c090b3caa76c563b86c3a4bd71ef1a819287c19d586d7334ae8ed66"
++
++[[package]]
++name = "windows_i686_msvc"
++version = "0.52.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "240948bc05c5e7c6dabba28bf89d89ffce3e303022809e73deaefe4f6ec56c66"
++
++[[package]]
++name = "windows_x86_64_gnu"
++version = "0.52.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "147a5c80aabfbf0c7d901cb5895d1de30ef2907eb21fbbab29ca94c5b08b1a78"
++
++[[package]]
++name = "windows_x86_64_gnullvm"
++version = "0.52.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "24d5b23dc417412679681396f2b49f3de8c1473deb516bd34410872eff51ed0d"
++
++[[package]]
++name = "windows_x86_64_msvc"
++version = "0.52.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
++
+ [[package]]
+ name = "wit-bindgen"
+ version = "0.46.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
+ 
++[[package]]
++name = "writeable"
++version = "0.6.4"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
++
++[[package]]
++name = "yoke"
++version = "0.8.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "709fe23a0424b6a435d82152b1bd3fdfb0833487d5fa90d05d42762a9891fef5"
++dependencies = [
++ "stable_deref_trait",
++ "yoke-derive",
++ "zerofrom",
++]
++
++[[package]]
++name = "yoke-derive"
++version = "0.8.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "de844c262c8848816172cef550288e7dc6c7b7814b4ee56b3e1553f275f1858e"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "syn 2.0.119",
++ "synstructure",
++]
++
+ [[package]]
+ name = "zerocopy"
+ version = "0.8.57"
+@@ -1021,6 +2156,66 @@ dependencies = [
+  "syn 2.0.119",
+ ]
+ 
++[[package]]
++name = "zerofrom"
++version = "0.1.8"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "0ec05a11813ea801ff6d75110ad09cd0824ddba17dfe17128ea0d5f68e6c5272"
++dependencies = [
++ "zerofrom-derive",
++]
++
++[[package]]
++name = "zerofrom-derive"
++version = "0.1.7"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "11532158c46691caf0f2593ea8358fed6bbf68a0315e80aae9bd41fbade684a1"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "syn 2.0.119",
++ "synstructure",
++]
++
++[[package]]
++name = "zeroize"
++version = "1.9.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "e13c156562582aa81c60cb29407084cdb54c4164760106ab78e6c5b0858cf64e"
++
++[[package]]
++name = "zerotrie"
++version = "0.2.5"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "4ea269c3bd32f0a32c321907a2ae912ba6f4649bb0fc764a15627e99a7095a3f"
++dependencies = [
++ "displaydoc",
++ "yoke",
++ "zerofrom",
++]
++
++[[package]]
++name = "zerovec"
++version = "0.11.8"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "bb0464e17806c1d976d5cba29399c7f08e516e279e2ba493f63123b5fca67dd8"
++dependencies = [
++ "yoke",
++ "zerofrom",
++ "zerovec-derive",
++]
++
++[[package]]
++name = "zerovec-derive"
++version = "0.11.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "34df6fc39dbd26ddc9c10e6a2984476e13acce22e64e4487636ef494369225da"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "syn 3.0.5",
++]
++
+ [[package]]
+ name = "zmij"
+ version = "1.0.23"
+diff --git a/Cargo.toml b/Cargo.toml
+index c653c28e48c590511f8428d502b5b727289c467b..2d0bf5c7817628e5dd9621978a13eaf7dc3a45c5 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -1,5 +1,5 @@
+ [workspace]
+-members = ["crates/wickle", "crates/wickle-model-router", "crates/wickle-state-sqlite", "crates/wickle-adapter-runtime"]
++members = ["crates/wickle", "crates/wickle-model-router", "crates/wickle-state-sqlite", "crates/wickle-adapter-runtime", "crates/wickle-model-openai"]
+ default-members = ["crates/wickle"]
+ resolver = "3"
+ 
+@@ -14,6 +14,7 @@ getrandom = { version = "=0.3.4", default-features = false }
+ futures-util = { version = "=0.3.34", default-features = false, features = ["std", "async-await"] }
+ jsonschema = { version = "=0.56.0", default-features = false }
+ rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
++reqwest = { version = "=0.13.5", default-features = false, features = ["rustls"] }
+ serde = { version = "=1.0.229", features = ["derive"] }
+ serde_json = "=1.0.151"
+ sha2 = { version = "=0.11.0", default-features = false }
+diff --git a/README.de.md b/README.de.md
+index 2bbac6e783dde71f32cd25b36c08471c0ec44e19..a875dada23cc17a7f239bc48c1a4adffbed52fae 100644
+--- a/README.de.md
++++ b/README.de.md
+@@ -21,3 +21,5 @@ Schreibgeschützte [Kontextquellen](docs/context-sources.md) unterstützen Abruf
+ Die [Kontextauswahl und -komprimierung](docs/context-compaction.md) bewahrt den ursprünglichen Gesprächsverlauf und verwendet begrenzte Vorschauen sowie geprüfte Zusammenfassungen. Modellbasierte Komprimierung nutzt dasselbe Run-Budget.
+ 
+ Die [Ausgabeprüfung](docs/verification.md) unterstützt JSON-Schemas, versionierte Kriterien, begrenzte Überarbeitungen und die Genehmigung eines festgelegten Kandidaten. Modellbasierte Prüfungen nutzen dasselbe Run-Budget.
++
++Der [OpenAI-Responses-Adapter](docs/openai.md) unterstützt begrenzte HTTP/SSE-Generierung, Funktionsaufrufe, strukturierte Ausgaben und Modellversionsprüfungen mit von der Anwendung bereitgestellten Zugangsdaten.
+diff --git a/README.es.md b/README.es.md
+index d2eb3e6257ab8ec10e50d5383eba39613bd0c222..cc302e425efd8a8fdf3d8db53d9c16ac51c873fa 100644
+--- a/README.es.md
++++ b/README.es.md
+@@ -21,3 +21,5 @@ Las [fuentes de contexto](docs/context-sources.md) de solo lectura permiten cons
+ La [selección y compresión de contexto](docs/context-compaction.md) conserva la conversación original y aplica vistas previas limitadas y resúmenes validados. La compresión con modelos utiliza el mismo presupuesto del Run.
+ 
+ La [verificación de resultados](docs/verification.md) admite esquemas JSON, criterios con versión fija, revisiones limitadas y aprobación de un candidato fijo. Las revisiones mediante modelos comparten el presupuesto del Run.
++
++El [adaptador OpenAI Responses](docs/openai.md) ofrece generación HTTP/SSE con límites, llamadas a funciones, salida estructurada y comprobación de versiones, con credenciales proporcionadas por la aplicación.
+diff --git a/README.fr.md b/README.fr.md
+index ff861df754d2ad2eaac9aaa9ce78c4bfe73d82de..bfae16618c32da7a640146a91d0617e96e58a9d2 100644
+--- a/README.fr.md
++++ b/README.fr.md
+@@ -21,3 +21,5 @@ Les [sources de contexte](docs/context-sources.md) en lecture seule permettent l
+ La [sélection et compression du contexte](docs/context-compaction.md) conserve la conversation originale et applique des aperçus limités et des résumés validés. La compression par modèle utilise le même budget du Run.
+ 
+ La [vérification des résultats](docs/verification.md) prend en charge les schémas JSON, les critères versionnés, les révisions limitées et l’approbation d’un candidat figé. Les vérifications par modèle partagent le budget du Run.
++
++L’[adaptateur OpenAI Responses](docs/openai.md) propose la génération HTTP/SSE avec limites, les appels de fonctions, les sorties structurées et la vérification des versions, avec les identifiants fournis par l’application.
+diff --git a/README.ja.md b/README.ja.md
+index e4d56fb4c20a6deb2a920de82abc3c75acd4833f..33c2da009d25ad6dba1339665133f707f9317864 100644
+--- a/README.ja.md
++++ b/README.ja.md
+@@ -21,3 +21,5 @@ Agent Profile でエージェントの振る舞いを設定し、アダプター
+ [コンテキストの選択・圧縮](docs/context-compaction.md) は元の会話を保持し、制限付きプレビューと検証済みの要約を適用します。モデルによる圧縮も同じ Run の予算を使用します。
+ 
+ [出力検証](docs/verification.md)は JSON Schema、バージョンを固定した評価基準、上限付きの修正、固定された候補の承認に対応します。モデルによる検証も同じ Run 予算を使います。
++
++[OpenAI Responses アダプター](docs/openai.md)は、アプリケーションが渡す認証情報を使い、制限付き HTTP/SSE 生成、関数呼び出し、構造化出力、モデルバージョンの確認に対応します。
+diff --git a/README.ko.md b/README.ko.md
+index 1a58f2ac0afcefa2efb7f26f807678eac84ee240..21d61dbaab2873eedc20007204acf65ed6b331d7 100644
+--- a/README.ko.md
++++ b/README.ko.md
+@@ -21,3 +21,5 @@ Agent Profile로 에이전트의 동작을 구성하고, 어댑터를 통해 다
+ [문맥 선택·압축](docs/context-compaction.md)은 원본 대화를 보존하면서 제한된 preview와 검증된 요약을 적용합니다. 모델 기반 압축도 같은 Run 예산을 사용합니다.
+ 
+ [출력 검증](docs/verification.md)은 JSON 스키마, 버전이 고정된 검증 기준, 한도 내 보완과 고정된 후보의 승인을 지원합니다. 모델 기반 검증도 같은 Run 예산을 사용합니다.
++
++[OpenAI Responses 어댑터](docs/openai.md)는 애플리케이션이 제공한 인증 정보로 제한된 HTTP/SSE 생성, 함수 호출, 구조화 출력, 모델 버전 확인을 지원합니다.
+diff --git a/README.md b/README.md
+index 90b67e42562214502fe82462c1eb99bd284cf21f..5318c5f217952ae968d417be9efb100a54c3d18a 100644
+--- a/README.md
++++ b/README.md
+@@ -21,3 +21,5 @@ Read-only [context sources](docs/context-sources.md) support Run and model-step
+ [Context rewriting](docs/context-compaction.md) preserves the original conversation while applying bounded previews and validated summaries. Model-based compression shares the Run budget.
+ 
+ [Output verification](docs/verification.md) supports JSON schemas, versioned criteria, bounded repair, and approval of a fixed candidate. Model-based reviews share the Run budget.
++
++The [OpenAI Responses adapter](docs/openai.md) provides bounded HTTP/SSE generation, function calling, structured output, and explicit model-version inspection with application-supplied credentials.
+diff --git a/README.ru.md b/README.ru.md
+index 308e383cd68ac7dd85176ed31d6ef31bfb04ce01..1f81b1fcbd6af5894c987bfea4e7e163172c31f3 100644
+--- a/README.ru.md
++++ b/README.ru.md
+@@ -21,3 +21,5 @@ Wickle — движок агентов, который EpsilonDelta разраб
+ [Выбор и сжатие контекста](docs/context-compaction.md) сохраняет исходный диалог и использует ограниченные предпросмотры и проверенные сводки. Сжатие с помощью модели расходует общий бюджет Run.
+ 
+ [Проверка результатов](docs/verification.md) поддерживает схемы JSON, версионированные критерии, ограниченные доработки и одобрение зафиксированного кандидата. Проверки с помощью модели используют общий бюджет Run.
++
++[Адаптер OpenAI Responses](docs/openai.md) поддерживает HTTP/SSE-генерацию с ограничениями, вызовы функций, структурированный вывод и проверку версий моделей с учётными данными приложения.
+diff --git a/README.zh-CN.md b/README.zh-CN.md
+index 1d57f2439cf8107dd9e5c5f88009f0fd7b036875..458cd329c099e3426eac33fe659a573653dcead9 100644
+--- a/README.zh-CN.md
++++ b/README.zh-CN.md
+@@ -21,3 +21,5 @@ Wickle 是 EpsilonDelta 正在使用 Rust 开发的智能体引擎，旨在以
+ [上下文选择与压缩](docs/context-compaction.md) 保留原始对话，并应用有大小限制的预览和经过验证的摘要。模型压缩也使用同一 Run 的预算。
+ 
+ [输出验证](docs/verification.md)支持 JSON Schema、固定版本的验证标准、限定次数的修正和固定候选结果的审批。模型验证也使用同一 Run 预算。
++
++[OpenAI Responses 适配器](docs/openai.md)使用应用程序提供的凭据，支持有界 HTTP/SSE 生成、函数调用、结构化输出和明确的模型版本检查。
+diff --git a/crates/wickle-model-openai/Cargo.toml b/crates/wickle-model-openai/Cargo.toml
+new file mode 100644
+index 0000000000000000000000000000000000000000..cb4c8b735d56d35b9cc8f2aa99174dc28b816742
+--- /dev/null
++++ b/crates/wickle-model-openai/Cargo.toml
+@@ -0,0 +1,23 @@
++[package]
++name = "wickle-model-openai"
++version.workspace = true
++edition.workspace = true
++rust-version.workspace = true
++repository.workspace = true
++description = "OpenAI Responses model and metadata adapters for Wickle"
++publish = false
++include = ["Cargo.toml", "src/**"]
++
++[dependencies]
++wickle = { path = "../wickle", version = "=0.1.0" }
++reqwest.workspace = true
++serde_json.workspace = true
++futures-util.workspace = true
++tokio.workspace = true
++tokio-util.workspace = true
++
++[dev-dependencies]
++tokio = { workspace = true, features = ["net", "io-util", "rt-multi-thread", "test-util"] }
++
++[lints]
++workspace = true
+diff --git a/crates/wickle-model-openai/src/codec.rs b/crates/wickle-model-openai/src/codec.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..d770d46e52f5e3f342a9421ee3f274d285cae972
+--- /dev/null
++++ b/crates/wickle-model-openai/src/codec.rs
+@@ -0,0 +1,414 @@
++use serde_json::{Value, json};
++use wickle::*;
++
++pub(crate) const REPLAY_KIND: &str = "wickle.openai.responses.v1";
++fn failure(code: ErrorCode) -> ContractError {
++    crate::error(code, "codec")
++}
++
++pub(crate) fn encode_request(request: &ModelRequest) -> Result<Value, ContractError> {
++    request.validate()?;
++    if request.options.keys().any(|key| {
++        !["reasoning_effort", "temperature", "top_p", "verbosity"].contains(&key.as_str())
++    }) {
++        return Err(failure(ErrorCode::ModelOptionUnsupported));
++    }
++    let mut input = Vec::new();
++    for message in &request.messages {
++        let opaque: Vec<_> = message
++            .content
++            .iter()
++            .filter_map(|content| match content {
++                ModelContent::Opaque { continuation } => Some(continuation),
++                _ => None,
++            })
++            .collect();
++        if !opaque.is_empty() {
++            if opaque.len() != 1 || message.role != ModelRole::Assistant {
++                return Err(failure(ErrorCode::ModelContextIncompatible));
++            }
++            let replay = opaque[0].data();
++            let object = replay
++                .as_object()
++                .ok_or_else(|| failure(ErrorCode::ModelContextIncompatible))?;
++            if object.len() != 2 || object.get("kind") != Some(&json!(REPLAY_KIND)) {
++                return Err(failure(ErrorCode::ModelContextIncompatible));
++            }
++            let items = replay
++                .get("items")
++                .and_then(Value::as_array)
++                .ok_or_else(|| failure(ErrorCode::ModelContextIncompatible))?;
++            let decoded = inspect_output_items(items)?;
++            let mut text = String::new();
++            let mut calls = Vec::new();
++            for content in &message.content {
++                match content {
++                    ModelContent::Text { text: value } => text.push_str(value),
++                    ModelContent::ToolCall {
++                        provider_call_id,
++                        name,
++                        arguments,
++                    } => calls.push((provider_call_id.as_str(), name.as_str(), arguments)),
++                    ModelContent::Opaque { .. } => {}
++                    _ => return Err(failure(ErrorCode::ModelContextIncompatible)),
++                }
++            }
++            if text != decoded.text || calls.len() != decoded.calls.len() {
++                return Err(failure(ErrorCode::ModelContextIncompatible));
++            }
++            for ((call_id, name, arguments), original) in calls.iter().zip(&decoded.calls) {
++                if *call_id != original.call_id
++                    || *name != original.name
++                    || serde_json::to_value(arguments)
++                        .map_err(|_| failure(ErrorCode::InvalidContract))?
++                        != parse_json(&original.arguments)?
++                {
++                    return Err(failure(ErrorCode::ModelContextIncompatible));
++                }
++            }
++            // Replay the provider items once, in their original order. Do not also
++            // append their normalized text and calls, which would duplicate them.
++            input.extend(items.iter().cloned());
++            continue;
++        }
++        let role = match message.role {
++            ModelRole::System => "system",
++            ModelRole::User => "user",
++            ModelRole::Assistant => "assistant",
++            ModelRole::Tool => "tool",
++        };
++        let mut parts = Vec::new();
++        for content in &message.content {
++            if message.role == ModelRole::Tool
++                && !matches!(content, ModelContent::ToolResult { .. })
++            {
++                return Err(failure(ErrorCode::ModelContextIncompatible));
++            }
++            match content {
++                ModelContent::Text { text } => parts.push(text.clone()),
++                ModelContent::Json { value } => {
++                    parts.push(
++                        serde_json::to_string(value)
++                            .map_err(|_| failure(ErrorCode::InvalidContract))?,
++                    );
++                }
++                ModelContent::ToolCall {
++                    provider_call_id,
++                    name,
++                    arguments,
++                } => {
++                    append_text(&mut input, role, &mut parts);
++                    input.push(json!({"type":"function_call","call_id":provider_call_id,"name":name,"arguments":serde_json::to_string(arguments).map_err(|_| failure(ErrorCode::InvalidContract))?}));
++                }
++                ModelContent::ToolResult {
++                    provider_call_id,
++                    content,
++                } => {
++                    append_text(&mut input, role, &mut parts);
++                    input.push(json!({"type":"function_call_output","call_id":provider_call_id,"output":serde_json::to_string(content).map_err(|_| failure(ErrorCode::InvalidContract))?}));
++                }
++                ModelContent::Opaque { .. } => unreachable!("opaque handled before normalization"),
++            }
++        }
++        append_text(&mut input, role, &mut parts);
++    }
++    let tools: Vec<_> = request.tools.iter().map(|tool| json!({"type":"function","name":tool.name,"description":tool.description,"parameters":tool.model_input_schema,"strict":false})).collect();
++    let mut payload = json!({"model":request.route.model_id,"input":input,"max_output_tokens":request.max_output_tokens.get(),"store":false,"stream":true,"truncation":"disabled","include":["reasoning.encrypted_content"]});
++    if !tools.is_empty() {
++        payload["tools"] = json!(tools);
++        payload["parallel_tool_calls"] = json!(false);
++        payload["tool_choice"] = json!("auto");
++    }
++    if let Some(effort) = request.options.get("reasoning_effort") {
++        let effort = effort
++            .as_str()
++            .filter(|effort| {
++                ["none", "minimal", "low", "medium", "high", "xhigh", "max"].contains(effort)
++            })
++            .ok_or_else(|| failure(ErrorCode::ModelOptionUnsupported))?;
++        payload["reasoning"] = json!({"effort":effort});
++    }
++    for (key, maximum) in [("temperature", 2.0), ("top_p", 1.0)] {
++        if let Some(value) = request.options.get(key) {
++            if !value
++                .as_f64()
++                .is_some_and(|number| number.is_finite() && number >= 0.0 && number <= maximum)
++            {
++                return Err(failure(ErrorCode::ModelOptionUnsupported));
++            }
++            payload[key] = value.clone();
++        }
++    }
++    if let ModelOutput::JsonSchema { schema } = &request.output {
++        validate_output_schema(schema)?;
++        payload["text"] = json!({"format":{"type":"json_schema","name":"agent_output","strict":true,"schema":schema}});
++    }
++    if let Some(value) = request.options.get("verbosity") {
++        if !matches!(value.as_str(), Some("low" | "medium" | "high")) {
++            return Err(failure(ErrorCode::ModelOptionUnsupported));
++        }
++        if payload.get("text").is_none() {
++            payload["text"] = json!({});
++        }
++        payload["text"]["verbosity"] = value.clone();
++    }
++    Ok(payload)
++}
++
++fn append_text(input: &mut Vec<Value>, role: &str, parts: &mut Vec<String>) {
++    if !parts.is_empty() {
++        input.push(json!({"role":role,"content":parts.join("\n")}));
++        parts.clear();
++    }
++}
++
++pub(crate) struct OutputCall {
++    pub index: u32,
++    pub call_id: String,
++    pub name: String,
++    pub arguments: String,
++}
++pub(crate) struct OutputItems {
++    pub text: String,
++    pub calls: Vec<OutputCall>,
++    pub refused: bool,
++}
++pub(crate) fn inspect_output_items(items: &[Value]) -> Result<OutputItems, ContractError> {
++    let mut output = OutputItems {
++        text: String::new(),
++        calls: vec![],
++        refused: false,
++    };
++    let mut call_ids = std::collections::BTreeSet::new();
++    for (index, item) in items.iter().enumerate() {
++        let object = item
++            .as_object()
++            .ok_or_else(|| failure(ErrorCode::InvalidContract))?;
++        if object
++            .get("id")
++            .is_some_and(|id| id.as_str().is_none_or(str::is_empty))
++            || object
++                .get("status")
++                .is_some_and(|status| status != "completed")
++        {
++            return Err(failure(ErrorCode::InvalidContract));
++        }
++        let allowed: &[&str] = match item.get("type").and_then(Value::as_str) {
++            Some("reasoning") => {
++                let summary = item
++                    .get("summary")
++                    .and_then(Value::as_array)
++                    .ok_or_else(|| failure(ErrorCode::InvalidContract))?;
++                if item
++                    .get("encrypted_content")
++                    .and_then(Value::as_str)
++                    .is_none_or(str::is_empty)
++                    || summary.iter().any(|part| {
++                        part.get("type") != Some(&json!("summary_text"))
++                            || part.get("text").and_then(Value::as_str).is_none()
++                    })
++                {
++                    return Err(failure(ErrorCode::ModelContextIncompatible));
++                }
++                if let Some(content) = item.get("content") {
++                    let content = content
++                        .as_array()
++                        .ok_or_else(|| failure(ErrorCode::InvalidContract))?;
++                    if content.iter().any(|part| {
++                        part.get("type") != Some(&json!("reasoning_text"))
++                            || part.get("text").and_then(Value::as_str).is_none()
++                            || part.as_object().is_none_or(|part| {
++                                part.keys()
++                                    .any(|key| !matches!(key.as_str(), "type" | "text"))
++                            })
++                    }) {
++                        return Err(failure(ErrorCode::InvalidContract));
++                    }
++                }
++                // Preserve reasoning content inside route-bound opaque replay only.
++                &[
++                    "type",
++                    "id",
++                    "status",
++                    "summary",
++                    "encrypted_content",
++                    "content",
++                ]
++            }
++            Some("message") if item.get("role") == Some(&json!("assistant")) => {
++                if item.get("phase").is_some_and(|phase| {
++                    !phase.is_null()
++                        && !matches!(phase.as_str(), Some("commentary" | "final_answer"))
++                }) {
++                    return Err(failure(ErrorCode::InvalidContract));
++                }
++                for part in item
++                    .get("content")
++                    .and_then(Value::as_array)
++                    .ok_or_else(|| failure(ErrorCode::InvalidContract))?
++                {
++                    let text = match part.get("type").and_then(Value::as_str) {
++                        Some("output_text") => part.get("text").and_then(Value::as_str),
++                        Some("refusal") => {
++                            output.refused = true;
++                            part.get("refusal").and_then(Value::as_str)
++                        }
++                        _ => return Err(failure(ErrorCode::InvalidContract)),
++                    }
++                    .ok_or_else(|| failure(ErrorCode::InvalidContract))?;
++                    output.text.push_str(text);
++                }
++                &["type", "id", "status", "role", "content", "phase"]
++            }
++            Some("function_call") => {
++                let call_id = item
++                    .get("call_id")
++                    .and_then(Value::as_str)
++                    .ok_or_else(|| failure(ErrorCode::InvalidContract))?;
++                let name = item
++                    .get("name")
++                    .and_then(Value::as_str)
++                    .ok_or_else(|| failure(ErrorCode::InvalidContract))?;
++                let arguments = item
++                    .get("arguments")
++                    .and_then(Value::as_str)
++                    .ok_or_else(|| failure(ErrorCode::InvalidContract))?;
++                if call_id.is_empty()
++                    || call_id.len() > 256
++                    || call_id.chars().any(|c| c.is_whitespace() || c.is_control())
++                    || name.is_empty()
++                    || name.len() > 64
++                    || !name
++                        .bytes()
++                        .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
++                    || !call_ids.insert(call_id)
++                    || !parse_json(arguments)?.is_object()
++                {
++                    return Err(failure(ErrorCode::InvalidContract));
++                }
++                output.calls.push(OutputCall {
++                    index: index
++                        .try_into()
++                        .map_err(|_| failure(ErrorCode::InvalidContract))?,
++                    call_id: call_id.into(),
++                    name: name.into(),
++                    arguments: arguments.into(),
++                });
++                &["type", "id", "status", "call_id", "name", "arguments"]
++            }
++            _ => return Err(failure(ErrorCode::CapabilityUnsupported)),
++        };
++        if object.keys().any(|key| !allowed.contains(&key.as_str())) {
++            return Err(failure(ErrorCode::CapabilityUnsupported));
++        }
++    }
++    if output.refused && !output.calls.is_empty() {
++        return Err(failure(ErrorCode::InvalidContract));
++    }
++    Ok(output)
++}
++
++pub(crate) fn fragments(text: &str, maximum: usize) -> Result<Vec<String>, ContractError> {
++    let mut remaining = text;
++    let mut chunks = Vec::new();
++    while !remaining.is_empty() {
++        let mut boundary = maximum.min(remaining.len());
++        while boundary > 0 && !remaining.is_char_boundary(boundary) {
++            boundary -= 1;
++        }
++        if boundary == 0 {
++            return Err(failure(ErrorCode::InvalidContract));
++        }
++        chunks.push(remaining[..boundary].into());
++        remaining = &remaining[boundary..];
++    }
++    Ok(chunks)
++}
++
++fn validate_output_schema(schema: &Value) -> Result<(), ContractError> {
++    if schema.get("type") != Some(&json!("object")) || schema.get("anyOf").is_some() {
++        return Err(failure(ErrorCode::ModelCapabilityUnsupported));
++    }
++    fn node(schema: &Value, depth: usize) -> Result<(), ContractError> {
++        let object = schema
++            .as_object()
++            .ok_or_else(|| failure(ErrorCode::ModelCapabilityUnsupported))?;
++        if depth > 10
++            || [
++                "allOf",
++                "oneOf",
++                "not",
++                "dependentRequired",
++                "dependentSchemas",
++                "if",
++                "then",
++                "else",
++                "patternProperties",
++                "propertyNames",
++                "unevaluatedProperties",
++                "prefixItems",
++                "contains",
++                "uniqueItems",
++            ]
++            .iter()
++            .any(|key| object.contains_key(*key))
++        {
++            return Err(failure(ErrorCode::ModelCapabilityUnsupported));
++        }
++        if schema
++            .get("$ref")
++            .is_some_and(|value| value.as_str().is_none_or(|value| !value.starts_with('#')))
++        {
++            return Err(failure(ErrorCode::ModelCapabilityUnsupported));
++        }
++        let is_object = schema.get("type").is_some_and(|kind| {
++            kind == "object"
++                || kind
++                    .as_array()
++                    .is_some_and(|types| types.iter().any(|kind| kind == "object"))
++        });
++        if is_object {
++            let properties = schema
++                .get("properties")
++                .and_then(Value::as_object)
++                .ok_or_else(|| failure(ErrorCode::ModelCapabilityUnsupported))?;
++            let required = schema
++                .get("required")
++                .and_then(Value::as_array)
++                .ok_or_else(|| failure(ErrorCode::ModelCapabilityUnsupported))?;
++            let names: std::collections::BTreeSet<_> =
++                required.iter().filter_map(Value::as_str).collect();
++            if schema.get("additionalProperties") != Some(&json!(false))
++                || required.len() != names.len()
++                || names.len() != properties.len()
++                || properties.keys().any(|key| !names.contains(key.as_str()))
++            {
++                return Err(failure(ErrorCode::ModelCapabilityUnsupported));
++            }
++        }
++        for key in ["properties", "$defs"] {
++            if let Some(values) = object.get(key) {
++                for child in values
++                    .as_object()
++                    .ok_or_else(|| failure(ErrorCode::ModelCapabilityUnsupported))?
++                    .values()
++                {
++                    node(child, depth + 1)?;
++                }
++            }
++        }
++        if let Some(items) = object.get("items") {
++            node(items, depth + 1)?;
++        }
++        if let Some(items) = object.get("anyOf") {
++            for child in items
++                .as_array()
++                .ok_or_else(|| failure(ErrorCode::ModelCapabilityUnsupported))?
++            {
++                node(child, depth + 1)?;
++            }
++        }
++        Ok(())
++    }
++    node(schema, 0)
++}
+diff --git a/crates/wickle-model-openai/src/connection.rs b/crates/wickle-model-openai/src/connection.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..39a3c821c65f3925e64dd0674c20e66f6cb6e840
+--- /dev/null
++++ b/crates/wickle-model-openai/src/connection.rs
+@@ -0,0 +1,201 @@
++use std::{fmt, sync::Arc, time::Duration};
++
++use reqwest::{
++    Client, Url,
++    header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue},
++};
++use serde_json::json;
++use wickle::*;
++
++use crate::error;
++
++/// Explicit transport settings. The library does not read environment files.
++#[derive(Debug, Clone)]
++pub struct OpenAiOptions {
++    /// API base directory, normally `https://api.openai.com/v1/`.
++    pub base_url: String,
++    /// Optional OpenAI organization header, also included in route identity.
++    pub organization_id: Option<String>,
++    /// Optional OpenAI project header, also included in route identity.
++    pub project_id: Option<String>,
++    /// Finite time allowed to establish a connection.
++    pub connect_timeout: Duration,
++    /// Upper bound for any request; the core's deadline may be shorter.
++    pub request_timeout: Duration,
++    /// Maximum raw SSE/JSON response bytes, including protocol envelopes.
++    pub max_transport_bytes: usize,
++    /// Maximum buffered bytes in a normalized SSE event, including its JSON envelope.
++    pub max_event_bytes: usize,
++    /// Maximum SSE data frames, including provider metadata and progress events.
++    pub max_protocol_events: usize,
++}
++
++impl Default for OpenAiOptions {
++    fn default() -> Self {
++        Self {
++            base_url: "https://api.openai.com/v1/".into(),
++            organization_id: None,
++            project_id: None,
++            connect_timeout: Duration::from_secs(10),
++            request_timeout: Duration::from_secs(120),
++            max_transport_bytes: 8 * 1024 * 1024,
++            max_event_bytes: 1024 * 1024,
++            max_protocol_events: 16_384,
++        }
++    }
++}
++
++/// A scope-bound HTTP connection with an explicit credential revision.
++#[derive(Clone)]
++pub struct OpenAiConnection(pub(crate) Arc<Connection>);
++
++pub(crate) struct Connection {
++    pub client: Client,
++    pub base: Url,
++    pub scope: Scope,
++    pub binding: ModelPortBinding,
++    pub target: JsonObject,
++    pub options: OpenAiOptions,
++}
++
++impl fmt::Debug for OpenAiConnection {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_struct("OpenAiConnection")
++            .field("binding", &self.0.binding)
++            .finish_non_exhaustive()
++    }
++}
++
++impl OpenAiConnection {
++    /// Create a client without a network call. Never log the supplied API key.
++    /// HTTPS is required except for explicitly configured loopback test servers.
++    pub fn new(
++        scope: Scope,
++        connection_ref: VersionedRef,
++        api_key: &str,
++        mut options: OpenAiOptions,
++    ) -> Result<Self, ContractError> {
++        if api_key.is_empty()
++            || api_key.chars().any(char::is_whitespace)
++            || options.connect_timeout.is_zero()
++            || options.request_timeout.is_zero()
++            || options.max_transport_bytes == 0
++            || options.max_event_bytes == 0
++            || options.max_protocol_events == 0
++            || options.max_event_bytes > options.max_transport_bytes
++        {
++            return Err(error(ErrorCode::InvalidConfiguration, "connection"));
++        }
++        let mut base = Url::parse(&options.base_url)
++            .map_err(|_| error(ErrorCode::InvalidConfiguration, "base_url"))?;
++        let loopback = base.host_str().is_some_and(|host| {
++            let address = host
++                .strip_prefix('[')
++                .and_then(|value| value.strip_suffix(']'))
++                .unwrap_or(host);
++            host == "localhost"
++                || address
++                    .parse::<std::net::IpAddr>()
++                    .is_ok_and(|ip| ip.is_loopback())
++        });
++        if !(base.scheme() == "https" || (base.scheme() == "http" && loopback))
++            || base.host_str().is_none()
++            || !base.username().is_empty()
++            || base.password().is_some()
++            || base.query().is_some()
++            || base.fragment().is_some()
++        {
++            return Err(error(ErrorCode::InvalidConfiguration, "base_url"));
++        }
++        if !base.path().ends_with('/') {
++            base.set_path(&format!("{}/", base.path()));
++        }
++        options.base_url = base.as_str().into();
++        let mut headers = HeaderMap::new();
++        let mut authorization = HeaderValue::from_str(&format!("Bearer {api_key}"))
++            .map_err(|_| error(ErrorCode::InvalidConfiguration, "credential"))?;
++        authorization.set_sensitive(true);
++        headers.insert(AUTHORIZATION, authorization);
++        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
++        let mut target = JsonObject::from([("base_url".into(), json!(base.as_str()))]);
++        for (value, header, field) in [
++            (
++                &options.organization_id,
++                "openai-organization",
++                "organization_id",
++            ),
++            (&options.project_id, "openai-project", "project_id"),
++        ] {
++            if let Some(value) = value {
++                if value.is_empty() {
++                    return Err(error(ErrorCode::InvalidConfiguration, field));
++                }
++                headers.insert(
++                    header,
++                    HeaderValue::from_str(value)
++                        .map_err(|_| error(ErrorCode::InvalidConfiguration, field))?,
++                );
++                target.insert(field.into(), json!(value));
++            }
++        }
++        let client = Client::builder()
++            .default_headers(headers)
++            .redirect(reqwest::redirect::Policy::none())
++            .retry(reqwest::retry::never())
++            .connect_timeout(options.connect_timeout)
++            .timeout(options.request_timeout)
++            .build()
++            .map_err(|_| error(ErrorCode::ComponentUnavailable, "client"))?;
++        Ok(Self(Arc::new(Connection {
++            client,
++            base,
++            scope,
++            target,
++            options,
++            binding: ModelPortBinding {
++                provider: Id::new("openai")?,
++                adapter: VersionedRef {
++                    id: Id::new("wickle-model-openai")?,
++                    version: Id::new(env!("CARGO_PKG_VERSION"))?,
++                },
++                connection_ref,
++            },
++        })))
++    }
++    /// Exact actual adapter and connection identities for catalog registration.
++    pub fn binding(&self) -> ModelPortBinding {
++        self.0.binding.clone()
++    }
++    /// Canonical endpoint/project identity required in the selected route.
++    pub fn target(&self) -> &JsonObject {
++        &self.0.target
++    }
++    /// Owner namespace for this connection.
++    pub fn scope(&self) -> &Scope {
++        &self.0.scope
++    }
++    /// The one supported API operation and protocol generation.
++    pub fn api_contract() -> ApiContract {
++        ApiContract {
++            operation: Id::new("responses").expect("static identifier"),
++            version: Id::new("v1").expect("static identifier"),
++        }
++    }
++    pub(crate) fn validate(
++        &self,
++        route: &ResolvedModelRoute,
++        scope: &Scope,
++    ) -> Result<(), ContractError> {
++        if scope != &self.0.scope {
++            return Err(error(ErrorCode::AccessDenied, "scope"));
++        }
++        if !self.0.binding.matches_route(route)
++            || route.target != self.0.target
++            || route.api_contract != Self::api_contract()
++            || route.deployment_revision.is_some()
++        {
++            return Err(error(ErrorCode::ModelBindingInvalid, "route"));
++        }
++        Ok(())
++    }
++}
+diff --git a/crates/wickle-model-openai/src/inspection.rs b/crates/wickle-model-openai/src/inspection.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..53834f5c50a55d95c1072c028d23651189f2eb53
+--- /dev/null
++++ b/crates/wickle-model-openai/src/inspection.rs
+@@ -0,0 +1,143 @@
++use crate::{OpenAiConnection, error};
++use serde_json::Value;
++use std::{collections::BTreeMap, sync::Arc};
++use wickle::*;
++
++/// A provider-documented immutable model release, registered by the Host.
++/// API availability alone, a date in a name, or a requested version is not proof.
++#[derive(Debug, Clone)]
++pub struct OpenAiSnapshot {
++    /// Exact provider model identifier in the cited snapshot metadata.
++    pub model_id: Id,
++    /// Release identity established by that metadata.
++    pub model_version: Id,
++    /// Host-owned reference to the documentation or metadata establishing immutability.
++    pub evidence_ref: Id,
++}
++
++/// Current account availability combined with explicit immutable-release evidence.
++/// Unregistered model identifiers retain unknown release and unverified semantics.
++#[derive(Clone)]
++pub struct OpenAiInspector {
++    connection: OpenAiConnection,
++    snapshots: Arc<BTreeMap<Id, OpenAiSnapshot>>,
++}
++impl OpenAiInspector {
++    /// Build an inspector without a network call. Duplicate identifiers are rejected.
++    pub fn new(
++        connection: OpenAiConnection,
++        snapshots: Vec<OpenAiSnapshot>,
++    ) -> Result<Self, ContractError> {
++        let mut known = BTreeMap::new();
++        for snapshot in snapshots {
++            if known.insert(snapshot.model_id.clone(), snapshot).is_some() {
++                return Err(error(ErrorCode::InvalidConfiguration, "snapshots"));
++            }
++        }
++        Ok(Self {
++            connection,
++            snapshots: Arc::new(known),
++        })
++    }
++}
++impl ModelRouteInspector for OpenAiInspector {
++    fn inspect<'a>(
++        &'a self,
++        route: &'a ResolvedModelRoute,
++        context: &'a ModelInspectionContext,
++    ) -> PortFuture<'a, ModelRouteObservation> {
++        Box::pin(async move {
++            self.connection.validate(route, &context.scope)?;
++            let mut url = self
++                .connection
++                .0
++                .base
++                .join("models/")
++                .map_err(|_| error(ErrorCode::InvalidConfiguration, "models_url"))?;
++            url.path_segments_mut()
++                .map_err(|_| error(ErrorCode::InvalidConfiguration, "models_url"))?
++                .pop_if_empty()
++                .push(route.model_id.as_str());
++            let operation = async {
++                let mut response = self
++                    .connection
++                    .0
++                    .client
++                    .get(url)
++                    .send()
++                    .await
++                    .map_err(|_| error(ErrorCode::ModelInspectionUnavailable, "models_request"))?;
++                if response.status().as_u16() == 404 {
++                    return Ok(ModelRouteObservation {
++                        route_digest: route.digest(),
++                        availability: ModelRouteAvailability::Unavailable,
++                        model_id: None,
++                        model_version: None,
++                        deployment_revision: None,
++                        version_semantics: VersionSemantics::Unverified,
++                        evidence_ref: Id::new("openai.models.retrieve")?,
++                    });
++                }
++                if !response.status().is_success() {
++                    return Err(error(
++                        ErrorCode::ModelInspectionUnavailable,
++                        "models_status",
++                    ));
++                }
++                let mut bytes = vec![];
++                while let Some(chunk) = response
++                    .chunk()
++                    .await
++                    .map_err(|_| error(ErrorCode::ModelInspectionUnavailable, "models_body"))?
++                {
++                    if bytes.len().saturating_add(chunk.len())
++                        > 65_536.min(self.connection.0.options.max_transport_bytes)
++                    {
++                        return Err(error(ErrorCode::ModelInspectionUnavailable, "models_limit"));
++                    }
++                    bytes.extend_from_slice(&chunk);
++                }
++                let body =
++                    parse_json(std::str::from_utf8(&bytes).map_err(|_| {
++                        error(ErrorCode::ModelInspectionUnavailable, "models_json")
++                    })?)
++                    .map_err(|_| error(ErrorCode::ModelInspectionUnavailable, "models_json"))?;
++                if body.get("object").and_then(Value::as_str) != Some("model") {
++                    return Err(error(
++                        ErrorCode::ModelInspectionUnavailable,
++                        "models_object",
++                    ));
++                }
++                let model_id = body
++                    .get("id")
++                    .and_then(Value::as_str)
++                    .ok_or_else(|| error(ErrorCode::ModelInspectionUnavailable, "models_id"))?;
++                if model_id != route.model_id.as_str() {
++                    return Err(error(ErrorCode::ModelVersionDrift, "models_id"));
++                }
++                let snapshot = self.snapshots.get(&route.model_id);
++                Ok(ModelRouteObservation {
++                    route_digest: route.digest(),
++                    availability: ModelRouteAvailability::Available,
++                    model_id: Some(Id::new(model_id)?),
++                    model_version: snapshot.map(|value| value.model_version.clone()),
++                    deployment_revision: None,
++                    version_semantics: if snapshot.is_some() {
++                        VersionSemantics::Pinned
++                    } else {
++                        VersionSemantics::Unverified
++                    },
++                    evidence_ref: snapshot.map_or_else(
++                        || Id::new("openai.models.retrieve"),
++                        |value| Ok(value.evidence_ref.clone()),
++                    )?,
++                })
++            };
++            tokio::select! { biased;
++                _ = context.cancellation.cancelled() => Err(error(ErrorCode::Cancelled, "inspection")),
++                _ = tokio::time::sleep_until(context.deadline) => Err(error(ErrorCode::DeadlineExceeded, "inspection")),
++                result = operation => result,
++            }
++        })
++    }
++}
+diff --git a/crates/wickle-model-openai/src/lib.rs b/crates/wickle-model-openai/src/lib.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..b027d46db0c72e076f9f1d3e43b5621d1ba0b8e7
+--- /dev/null
++++ b/crates/wickle-model-openai/src/lib.rs
+@@ -0,0 +1,23 @@
++//! OpenAI Responses over bounded HTTP/SSE, with Host-supplied credentials.
++//!
++//! A model stream represents exactly one POST. SDK retries, redirects, native
++//! provider tools, conversation storage, and automatic truncation are disabled.
++
++#![forbid(unsafe_code)]
++
++mod codec;
++mod connection;
++mod inspection;
++mod model;
++mod response;
++mod sse;
++
++pub use connection::{OpenAiConnection, OpenAiOptions};
++pub use inspection::{OpenAiInspector, OpenAiSnapshot};
++pub use model::OpenAiModel;
++
++use wickle::{ContractError, ErrorCode};
++
++fn error(code: ErrorCode, location: &str) -> ContractError {
++    ContractError::new(code, format!("openai.{location}"))
++}
+diff --git a/crates/wickle-model-openai/src/model.rs b/crates/wickle-model-openai/src/model.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..17ddbda48a6e63bdfe2381b7386f82287b6a6f60
+--- /dev/null
++++ b/crates/wickle-model-openai/src/model.rs
+@@ -0,0 +1,261 @@
++use crate::{OpenAiConnection, codec, error, response, sse};
++use futures_util::stream;
++use reqwest::Response;
++use serde_json::Value;
++use std::collections::VecDeque;
++use wickle::*;
++
++/// One OpenAI Responses POST per invocation, streamed into Wickle model events.
++/// The adapter does not retry, run Tool handlers, or load environment variables.
++#[derive(Debug, Clone)]
++pub struct OpenAiModel {
++    connection: OpenAiConnection,
++}
++impl OpenAiModel {
++    /// Bind an already configured connection without making a network request.
++    pub fn new(connection: OpenAiConnection) -> Self {
++        Self { connection }
++    }
++}
++impl ModelPort for OpenAiModel {
++    fn binding(&self) -> ModelPortBinding {
++        self.connection.binding()
++    }
++    fn generate<'a>(
++        &'a self,
++        request: &'a ModelRequest,
++        context: &'a ModelCallContext,
++    ) -> PortStream<'a, ModelEvent> {
++        let state = State {
++            connection: &self.connection,
++            request,
++            context,
++            response: None,
++            decoder: response::Decoder::new(request, None),
++            framing: sse::Decoder::new(
++                self.connection.0.options.max_transport_bytes,
++                self.connection.0.options.max_event_bytes,
++                self.connection.0.options.max_protocol_events,
++            ),
++            queue: VecDeque::new(),
++            started: false,
++            finished: false,
++        };
++        Box::pin(stream::unfold(state, |mut state| async move {
++            loop {
++                if !state.finished && state.context.cancellation.is_cancelled() {
++                    state.queue.clear();
++                    state.fail(error(ErrorCode::Cancelled, "stream"));
++                }
++                if !state.finished && tokio::time::Instant::now() >= state.context.deadline {
++                    state.queue.clear();
++                    state.fail(error(ErrorCode::DeadlineExceeded, "stream"));
++                }
++                if let Some(event) = state.queue.pop_front() {
++                    return Some((event, state));
++                }
++                if state.finished {
++                    return None;
++                }
++                if !state.started {
++                    state.started = true;
++                    if let Err(failure) = state.start().await {
++                        state.fail(failure);
++                    }
++                    continue;
++                }
++                let result = {
++                    let response = state
++                        .response
++                        .as_mut()
++                        .expect("started response or finished state");
++                    tokio::select! { biased;
++                        _ = state.context.cancellation.cancelled() => Err(error(ErrorCode::Cancelled, "stream")),
++                        _ = tokio::time::sleep_until(state.context.deadline) => Err(error(ErrorCode::DeadlineExceeded, "stream")),
++                        chunk = response.chunk() => chunk.map_err(transport_error),
++                    }
++                };
++                match result {
++                    Ok(Some(bytes)) => match state.framing.push(&bytes) {
++                        Ok(events) => {
++                            for event in events {
++                                match state.decoder.event(event) {
++                                    Ok(events) => state.queue.extend(events.into_iter().map(Ok)),
++                                    Err(error) => {
++                                        state.fail(error);
++                                        break;
++                                    }
++                                }
++                            }
++                        }
++                        Err(error) => state.fail(error),
++                    },
++                    Ok(None) => match state.framing.finish().and_then(|_| state.decoder.finish()) {
++                        Ok(event) => {
++                            state.queue.push_back(Ok(event));
++                            state.finished = true;
++                            state.response = None;
++                        }
++                        Err(error) => state.fail(error),
++                    },
++                    Err(error) => state.fail(error),
++                }
++            }
++        }))
++    }
++}
++struct State<'a> {
++    connection: &'a OpenAiConnection,
++    request: &'a ModelRequest,
++    context: &'a ModelCallContext,
++    response: Option<Response>,
++    decoder: response::Decoder<'a>,
++    framing: sse::Decoder,
++    queue: VecDeque<Result<ModelEvent, ContractError>>,
++    started: bool,
++    finished: bool,
++}
++impl State<'_> {
++    async fn start(&mut self) -> Result<(), ContractError> {
++        self.connection
++            .validate(&self.request.route, &self.context.scope)?;
++        if self.context.attempt_id != self.request.request_id {
++            return Err(error(ErrorCode::RequestConflict, "attempt"));
++        }
++        self.request.validate()?;
++        let value = codec::encode_request(self.request)?;
++        let body =
++            serde_json::to_vec(&value).map_err(|_| error(ErrorCode::InvalidJson, "request"))?;
++        if body.len() > self.request.limits.max_input_bytes {
++            return Err(error(ErrorCode::ModelCapabilityUnsupported, "request_size"));
++        }
++        let url = self
++            .connection
++            .0
++            .base
++            .join("responses")
++            .map_err(|_| error(ErrorCode::InvalidConfiguration, "responses_url"))?;
++        let operation = self
++            .connection
++            .0
++            .client
++            .post(url)
++            .header("accept", "text/event-stream")
++            .header("accept-encoding", "identity")
++            .body(body)
++            .send();
++        let mut response = tokio::select! { biased;
++            _ = self.context.cancellation.cancelled() => return Err(error(ErrorCode::Cancelled, "request")),
++            _ = tokio::time::sleep_until(self.context.deadline) => return Err(error(ErrorCode::DeadlineExceeded, "request")),
++            result = operation => result.map_err(transport_error)?,
++        };
++        self.decoder.metadata.provider_request_id = response
++            .headers()
++            .get("x-request-id")
++            .map(|value| {
++                value
++                    .to_str()
++                    .map_err(|_| error(ErrorCode::InvalidContract, "request_id"))
++                    .and_then(Id::new)
++            })
++            .transpose()?;
++        if !response.status().is_success() {
++            let status = response.status().as_u16();
++            let mut kind = match status {
++                401 | 403 => ModelFailureKind::Authentication,
++                404 => ModelFailureKind::Unavailable,
++                408 | 504 => ModelFailureKind::Timeout,
++                429 => ModelFailureKind::RateLimited,
++                500..=599 => ModelFailureKind::Transport,
++                _ => ModelFailureKind::Unsupported,
++            };
++            if status == 400 {
++                let mut bytes = vec![];
++                loop {
++                    let chunk = tokio::select! { biased;
++                        _ = self.context.cancellation.cancelled() => return Err(error(ErrorCode::Cancelled, "error_body")),
++                        _ = tokio::time::sleep_until(self.context.deadline) => return Err(error(ErrorCode::DeadlineExceeded, "error_body")),
++                        chunk = response.chunk() => chunk.map_err(transport_error)?,
++                    };
++                    let Some(chunk) = chunk else {
++                        break;
++                    };
++                    if bytes.len().saturating_add(chunk.len())
++                        > 65_536.min(self.connection.0.options.max_transport_bytes)
++                    {
++                        break;
++                    }
++                    bytes.extend_from_slice(&chunk);
++                }
++                if let Ok(value) = std::str::from_utf8(&bytes)
++                    .map_err(|_| ())
++                    .and_then(|text| parse_json(text).map_err(|_| ()))
++                {
++                    if value.pointer("/error/code").and_then(Value::as_str)
++                        == Some("context_length_exceeded")
++                    {
++                        kind = ModelFailureKind::ContextOverflow;
++                    }
++                }
++            }
++            self.queue.push_back(Ok(ModelEvent::ResponseError {
++                kind,
++                metadata: self.decoder.metadata.clone(),
++            }));
++            self.finished = true;
++            return Ok(());
++        }
++        let content_type = response
++            .headers()
++            .get("content-type")
++            .and_then(|value| value.to_str().ok())
++            .and_then(|value| value.split(';').next())
++            .map(str::trim);
++        if !content_type.is_some_and(|value| value.eq_ignore_ascii_case("text/event-stream")) {
++            return Err(error(ErrorCode::InvalidContract, "content_type"));
++        }
++        if response
++            .content_length()
++            .is_some_and(|bytes| bytes > self.connection.0.options.max_transport_bytes as u64)
++        {
++            return Err(error(ErrorCode::InvalidContract, "response_size"));
++        }
++        self.response = Some(response);
++        Ok(())
++    }
++    fn fail(&mut self, failure: ContractError) {
++        self.finished = true;
++        self.response = None;
++        if matches!(
++            failure.code,
++            ErrorCode::Cancelled | ErrorCode::AccessDenied | ErrorCode::RequestConflict
++        ) {
++            self.queue.push_back(Err(failure));
++            return;
++        }
++        let kind = match failure.code {
++            ErrorCode::DeadlineExceeded => ModelFailureKind::Timeout,
++            ErrorCode::ModelUnavailable => ModelFailureKind::Transport,
++            ErrorCode::ModelOptionUnsupported
++            | ErrorCode::ModelCapabilityUnsupported
++            | ErrorCode::CapabilityUnsupported
++            | ErrorCode::ModelBindingInvalid
++            | ErrorCode::InvalidConfiguration => ModelFailureKind::Unsupported,
++            _ => ModelFailureKind::Protocol,
++        };
++        self.queue.push_back(Ok(ModelEvent::ResponseError {
++            kind,
++            metadata: self.decoder.metadata.clone(),
++        }));
++    }
++}
++fn transport_error(error_value: reqwest::Error) -> ContractError {
++    error(
++        if error_value.is_timeout() {
++            ErrorCode::DeadlineExceeded
++        } else {
++            ErrorCode::ModelUnavailable
++        },
++        "transport",
++    )
++}
+diff --git a/crates/wickle-model-openai/src/response.rs b/crates/wickle-model-openai/src/response.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..2db86cc7f5aaa4486f07c0a90be4249c0f1fba3d
+--- /dev/null
++++ b/crates/wickle-model-openai/src/response.rs
+@@ -0,0 +1,487 @@
++use crate::{codec, error, sse};
++use serde_json::{Value, json};
++use std::collections::BTreeMap;
++use wickle::*;
++
++struct Call {
++    id: String,
++    name: String,
++    arguments: String,
++}
++pub(crate) struct Decoder<'a> {
++    request: &'a ModelRequest,
++    pub metadata: ModelResponseMetadata,
++    response_id: Option<String>,
++    sequence: Option<u64>,
++    items: BTreeMap<u32, (String, String)>,
++    calls: BTreeMap<u32, Call>,
++    parts: BTreeMap<(u32, u32), (String, String)>,
++    text: String,
++    refused: bool,
++    bytes: usize,
++    emitted: usize,
++    terminal: Option<ModelEvent>,
++    done: bool,
++}
++impl<'a> Decoder<'a> {
++    pub fn new(request: &'a ModelRequest, request_id: Option<Id>) -> Self {
++        Self {
++            request,
++            metadata: ModelResponseMetadata {
++                provider_request_id: request_id,
++                ..Default::default()
++            },
++            response_id: None,
++            sequence: None,
++            items: BTreeMap::new(),
++            calls: BTreeMap::new(),
++            parts: BTreeMap::new(),
++            text: String::new(),
++            refused: false,
++            bytes: 0,
++            emitted: 0,
++            terminal: None,
++            done: false,
++        }
++    }
++    pub fn event(&mut self, event: sse::Event) -> Result<Vec<ModelEvent>, ContractError> {
++        if event.data == "[DONE]" {
++            if self.terminal.is_none() || self.done {
++                return Err(invalid());
++            }
++            self.done = true;
++            return Ok(vec![]);
++        }
++        if self.terminal.is_some() || self.done {
++            return Err(invalid());
++        }
++        let value = parse_json(&event.data).map_err(|_| invalid())?;
++        let kind = string(&value, "type")?;
++        if event
++            .name
++            .as_ref()
++            .is_some_and(|name| !name.is_empty() && name != "message" && name != kind)
++        {
++            return Err(invalid());
++        }
++        if let Some(number) = value.get("sequence_number") {
++            let number = number.as_u64().ok_or_else(invalid)?;
++            if self.sequence.is_some_and(|previous| number <= previous) {
++                return Err(invalid());
++            }
++            self.sequence = Some(number);
++        }
++        if let Some(id) = value.get("response_id") {
++            self.identify(id.as_str().ok_or_else(invalid)?)?;
++        }
++        let mut output = vec![];
++        match kind {
++            "response.created" | "response.in_progress" => {
++                let response = value.get("response").ok_or_else(invalid)?;
++                self.identify(string(response, "id")?)?;
++                self.read_metadata(response)?;
++            }
++            "response.output_item.added" => {
++                let index = index(&value, "output_index")?;
++                let item = value.get("item").ok_or_else(invalid)?;
++                let item_id = string(item, "id")?;
++                let item_type = string(item, "type")?;
++                if !matches!(item_type, "message" | "reasoning" | "function_call") {
++                    return Err(error(ErrorCode::CapabilityUnsupported, "output_item"));
++                }
++                if self.items.values().any(|(_, id)| id == item_id)
++                    || self
++                        .items
++                        .insert(index, (item_type.into(), item_id.into()))
++                        .is_some()
++                {
++                    return Err(invalid());
++                }
++                if item_type == "function_call" {
++                    let call_id = string(item, "call_id")?;
++                    let name = string(item, "name")?;
++                    if self.calls.len() >= self.request.limits.max_tool_calls
++                        || self.calls.values().any(|call| call.id == call_id)
++                    {
++                        return Err(invalid());
++                    }
++                    let arguments = string_allow_empty(item, "arguments")?;
++                    self.charge(
++                        call_id
++                            .len()
++                            .saturating_add(name.len())
++                            .saturating_add(arguments.len()),
++                    )?;
++                    self.calls.insert(
++                        index,
++                        Call {
++                            id: call_id.into(),
++                            name: name.into(),
++                            arguments: arguments.into(),
++                        },
++                    );
++                    let pieces = self.fragments(arguments)?;
++                    for (position, delta) in pieces.into_iter().enumerate() {
++                        output.push(ModelEvent::ToolArgumentsDelta {
++                            index,
++                            provider_call_id: (position == 0).then(|| call_id.into()),
++                            name: (position == 0).then(|| name.into()),
++                            delta,
++                        });
++                    }
++                }
++            }
++            "response.function_call_arguments.delta" => {
++                let index = self.item(&value, "function_call")?;
++                let delta = string_allow_empty(&value, "delta")?;
++                self.charge(delta.len())?;
++                self.calls
++                    .get_mut(&index)
++                    .ok_or_else(invalid)?
++                    .arguments
++                    .push_str(delta);
++                for delta in self.fragments(delta)? {
++                    output.push(ModelEvent::ToolArgumentsDelta {
++                        index,
++                        provider_call_id: None,
++                        name: None,
++                        delta,
++                    });
++                }
++            }
++            "response.function_call_arguments.done" => {
++                let index = self.item(&value, "function_call")?;
++                let call = self.calls.get(&index).ok_or_else(invalid)?;
++                if call.arguments != string_allow_empty(&value, "arguments")?
++                    || value
++                        .get("name")
++                        .is_some_and(|name| name.as_str() != Some(call.name.as_str()))
++                {
++                    return Err(invalid());
++                }
++            }
++            "response.output_text.delta" | "response.refusal.delta" => {
++                self.refused |= kind == "response.refusal.delta";
++                let index = self.item(&value, "message")?;
++                let part = index_value(&value, "content_index")?;
++                let delta = string_allow_empty(&value, "delta")?;
++                self.charge(delta.len())?;
++                let part_kind = if kind == "response.refusal.delta" {
++                    "refusal"
++                } else {
++                    "output_text"
++                };
++                let accumulated = self
++                    .parts
++                    .entry((index, part))
++                    .or_insert_with(|| (part_kind.into(), String::new()));
++                if accumulated.0 != part_kind {
++                    return Err(invalid());
++                }
++                accumulated.1.push_str(delta);
++                self.text.push_str(delta);
++                for text in self.fragments(delta)? {
++                    output.push(ModelEvent::TextDelta { text });
++                }
++            }
++            "response.output_text.done" | "response.refusal.done" => {
++                self.refused |= kind == "response.refusal.done";
++                let index = self.item(&value, "message")?;
++                let part = index_value(&value, "content_index")?;
++                let key = if kind == "response.refusal.done" {
++                    "refusal"
++                } else {
++                    "text"
++                };
++                let part_kind = if key == "refusal" {
++                    "refusal"
++                } else {
++                    "output_text"
++                };
++                let accumulated = self
++                    .parts
++                    .entry((index, part))
++                    .or_insert_with(|| (part_kind.into(), String::new()));
++                if accumulated.0 != part_kind || accumulated.1 != string_allow_empty(&value, key)? {
++                    return Err(invalid());
++                }
++            }
++            "response.output_item.done" => {
++                let index = index(&value, "output_index")?;
++                let item = value.get("item").ok_or_else(invalid)?;
++                let identity = self.items.get(&index).ok_or_else(invalid)?;
++                if identity.0 != string(item, "type")? || identity.1 != string(item, "id")? {
++                    return Err(invalid());
++                }
++                if identity.0 == "message" {
++                    self.check_message(index, item)?;
++                }
++                if identity.0 == "function_call" {
++                    let call = self.calls.get(&index).ok_or_else(invalid)?;
++                    if call.id != string(item, "call_id")?
++                        || call.name != string(item, "name")?
++                        || call.arguments != string_allow_empty(item, "arguments")?
++                    {
++                        return Err(invalid());
++                    }
++                }
++            }
++            "response.completed" | "response.incomplete" | "response.failed" => {
++                let response = value.get("response").ok_or_else(invalid)?;
++                self.identify(string(response, "id")?)?;
++                self.read_metadata(response)?;
++                let expected = kind.strip_prefix("response.").expect("matched prefix");
++                if string(response, "status")? != expected {
++                    return Err(invalid());
++                }
++                self.terminal = Some(match expected {
++                    "completed" => {
++                        let items = response
++                            .get("output")
++                            .and_then(Value::as_array)
++                            .ok_or_else(invalid)?;
++                        let decoded = codec::inspect_output_items(items)?;
++                        if decoded.refused != self.refused
++                            || decoded.text != self.text
++                            || decoded.calls.len() != self.calls.len()
++                            || items.len() != self.items.len()
++                        {
++                            return Err(invalid());
++                        }
++                        for (position, item) in items.iter().enumerate() {
++                            let key = u32::try_from(position).map_err(|_| invalid())?;
++                            let identity = self.items.get(&key).ok_or_else(invalid)?;
++                            if identity.0 != string(item, "type")?
++                                || identity.1 != string(item, "id")?
++                            {
++                                return Err(invalid());
++                            }
++                        }
++                        for (position, item) in items.iter().enumerate() {
++                            if item["type"] == "message" {
++                                self.check_message(
++                                    u32::try_from(position).map_err(|_| invalid())?,
++                                    item,
++                                )?;
++                            }
++                        }
++                        for call in &decoded.calls {
++                            let prior = self.calls.get(&call.index).ok_or_else(invalid)?;
++                            if call.call_id != prior.id
++                                || call.name != prior.name
++                                || call.arguments != prior.arguments
++                            {
++                                return Err(invalid());
++                            }
++                        }
++                        let continuation = if items.is_empty() {
++                            vec![]
++                        } else {
++                            let data = json!({"kind":codec::REPLAY_KIND,"items":items});
++                            self.charge(serde_json::to_vec(&data).map_err(|_| invalid())?.len())?;
++                            vec![OpaqueContinuation::new(&self.request.route, data)]
++                        };
++                        ModelEvent::ResponseCompleted {
++                            finish: if decoded.refused {
++                                ModelFinish::Refusal
++                            } else if !decoded.calls.is_empty() {
++                                ModelFinish::ToolCalls
++                            } else {
++                                ModelFinish::Stop
++                            },
++                            metadata: self.metadata.clone(),
++                            continuation,
++                        }
++                    }
++                    "incomplete" => ModelEvent::ResponseCompleted {
++                        finish: match response
++                            .pointer("/incomplete_details/reason")
++                            .and_then(Value::as_str)
++                        {
++                            Some("max_output_tokens") => ModelFinish::Length,
++                            Some("content_filter") => ModelFinish::Refusal,
++                            _ => return Err(invalid()),
++                        },
++                        metadata: self.metadata.clone(),
++                        continuation: vec![],
++                    },
++                    _ => ModelEvent::ResponseError {
++                        kind: failure_kind(response.pointer("/error/code").and_then(Value::as_str)),
++                        metadata: self.metadata.clone(),
++                    },
++                });
++            }
++            "error" => {
++                self.terminal = Some(ModelEvent::ResponseError {
++                    kind: failure_kind(value.get("code").and_then(Value::as_str)),
++                    metadata: self.metadata.clone(),
++                });
++            }
++            // Content boundaries, annotations, and reasoning progress are not
++            // user text or Tool instructions. Final output preserves their items.
++            "response.content_part.added"
++            | "response.content_part.done"
++            | "response.output_text.annotation.added"
++            | "response.reasoning_summary_part.added"
++            | "response.reasoning_summary_part.done"
++            | "response.reasoning_summary_text.delta"
++            | "response.reasoning_summary_text.done"
++            | "response.reasoning_text.delta"
++            | "response.reasoning_text.done" => {}
++            _ => return Err(error(ErrorCode::CapabilityUnsupported, "stream_event")),
++        }
++        self.emitted = self
++            .emitted
++            .checked_add(output.len())
++            .filter(|count| *count < self.request.limits.max_events)
++            .ok_or_else(invalid)?;
++        Ok(output)
++    }
++    pub fn finish(&mut self) -> Result<ModelEvent, ContractError> {
++        self.terminal.take().ok_or_else(invalid)
++    }
++    fn identify(&mut self, id: &str) -> Result<(), ContractError> {
++        if id.is_empty() || self.response_id.as_ref().is_some_and(|old| old != id) {
++            return Err(invalid());
++        }
++        self.response_id = Some(id.into());
++        Ok(())
++    }
++    fn item(&self, value: &Value, kind: &str) -> Result<u32, ContractError> {
++        let index = index(value, "output_index")?;
++        let (actual, id) = self.items.get(&index).ok_or_else(invalid)?;
++        if actual != kind || id != string(value, "item_id")? {
++            return Err(invalid());
++        }
++        Ok(index)
++    }
++    fn check_message(&self, output_index: u32, item: &Value) -> Result<(), ContractError> {
++        if string(item, "role")? != "assistant" {
++            return Err(invalid());
++        }
++        let content = item
++            .get("content")
++            .and_then(Value::as_array)
++            .ok_or_else(invalid)?;
++        for (position, part) in content.iter().enumerate() {
++            let content_index = u32::try_from(position).map_err(|_| invalid())?;
++            let kind = string(part, "type")?;
++            let key = match kind {
++                "output_text" => "text",
++                "refusal" => "refusal",
++                _ => return Err(invalid()),
++            };
++            let text = string_allow_empty(part, key)?;
++            match self.parts.get(&(output_index, content_index)) {
++                Some((prior_kind, prior_text)) if prior_kind == kind && prior_text == text => {}
++                None if text.is_empty() => {}
++                _ => return Err(invalid()),
++            }
++        }
++        if self
++            .parts
++            .keys()
++            .any(|(item, part)| *item == output_index && *part as usize >= content.len())
++        {
++            return Err(invalid());
++        }
++        Ok(())
++    }
++    fn charge(&mut self, bytes: usize) -> Result<(), ContractError> {
++        self.bytes = self
++            .bytes
++            .checked_add(bytes)
++            .filter(|count| *count <= self.request.limits.max_response_bytes)
++            .ok_or_else(invalid)?;
++        Ok(())
++    }
++    fn fragments(&self, text: &str) -> Result<Vec<String>, ContractError> {
++        let maximum = self.request.limits.max_delta_bytes;
++        let remaining = self
++            .request
++            .limits
++            .max_events
++            .saturating_sub(self.emitted + 1);
++        if maximum == 0 || text.len() / maximum > remaining {
++            return Err(invalid());
++        }
++        let pieces = if text.is_empty() {
++            vec![String::new()]
++        } else {
++            codec::fragments(text, maximum)?
++        };
++        if pieces.len() > remaining {
++            return Err(invalid());
++        }
++        Ok(pieces)
++    }
++    fn read_metadata(&mut self, response: &Value) -> Result<(), ContractError> {
++        if let Some(model) = response.get("model").filter(|value| !value.is_null()) {
++            let model = Id::new(model.as_str().ok_or_else(invalid)?).map_err(|_| invalid())?;
++            if self
++                .metadata
++                .reported_model_id
++                .as_ref()
++                .is_some_and(|old| old != &model)
++            {
++                return Err(invalid());
++            }
++            self.metadata.reported_model_id = Some(model);
++        }
++        if let Some(usage) = response.get("usage").filter(|value| !value.is_null()) {
++            if !usage.is_object() {
++                return Err(invalid());
++            }
++            let count = |name| -> Result<Option<u64>, ContractError> {
++                usage
++                    .get(name)
++                    .filter(|value| !value.is_null())
++                    .map(|value| value.as_u64().ok_or_else(invalid))
++                    .transpose()
++            };
++            self.metadata.usage = Some(ModelUsage {
++                measurement: UsageMeasurement::Reported,
++                input_tokens: count("input_tokens")?,
++                output_tokens: count("output_tokens")?,
++            });
++        }
++        Ok(())
++    }
++}
++fn string<'a>(value: &'a Value, key: &str) -> Result<&'a str, ContractError> {
++    string_allow_empty(value, key).and_then(|value| {
++        if value.is_empty() {
++            Err(invalid())
++        } else {
++            Ok(value)
++        }
++    })
++}
++fn string_allow_empty<'a>(value: &'a Value, key: &str) -> Result<&'a str, ContractError> {
++    value.get(key).and_then(Value::as_str).ok_or_else(invalid)
++}
++fn index(value: &Value, key: &str) -> Result<u32, ContractError> {
++    index_value(value, key)
++}
++fn index_value(value: &Value, key: &str) -> Result<u32, ContractError> {
++    value
++        .get(key)
++        .and_then(Value::as_u64)
++        .and_then(|value| value.try_into().ok())
++        .ok_or_else(invalid)
++}
++fn invalid() -> ContractError {
++    error(ErrorCode::InvalidContract, "response")
++}
++pub(crate) fn failure_kind(code: Option<&str>) -> ModelFailureKind {
++    match code {
++        Some("context_length_exceeded") => ModelFailureKind::ContextOverflow,
++        Some("rate_limit_exceeded" | "insufficient_quota") => ModelFailureKind::RateLimited,
++        Some("server_error") => ModelFailureKind::Transport,
++        Some("model_not_found") => ModelFailureKind::Unavailable,
++        Some("invalid_request_error" | "invalid_prompt" | "unsupported_parameter") => {
++            ModelFailureKind::Unsupported
++        }
++        _ => ModelFailureKind::Protocol,
++    }
++}
+diff --git a/crates/wickle-model-openai/src/sse.rs b/crates/wickle-model-openai/src/sse.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..5e76d9acb7a53407b8b99b572db3e82f00765a97
+--- /dev/null
++++ b/crates/wickle-model-openai/src/sse.rs
+@@ -0,0 +1,153 @@
++use crate::error;
++use wickle::{ContractError, ErrorCode};
++
++pub(crate) struct Event {
++    pub name: Option<String>,
++    pub data: String,
++}
++
++/// Incremental SSE framing; JSON and UTF-8 may be split across network chunks.
++pub(crate) struct Decoder {
++    line: Vec<u8>,
++    data: Vec<u8>,
++    name: Option<String>,
++    skip_lf: bool,
++    frame_bytes: usize,
++    bytes: usize,
++    frames: usize,
++    max_bytes: usize,
++    max_frame: usize,
++    max_frames: usize,
++}
++impl Decoder {
++    pub fn new(max_bytes: usize, max_frame: usize, max_frames: usize) -> Self {
++        Self {
++            line: vec![],
++            data: vec![],
++            name: None,
++            skip_lf: false,
++            frame_bytes: 0,
++            bytes: 0,
++            frames: 0,
++            max_bytes,
++            max_frame,
++            max_frames,
++        }
++    }
++    pub fn push(&mut self, bytes: &[u8]) -> Result<Vec<Event>, ContractError> {
++        self.bytes = self
++            .bytes
++            .checked_add(bytes.len())
++            .filter(|count| *count <= self.max_bytes)
++            .ok_or_else(limit)?;
++        let mut events = vec![];
++        for &byte in bytes {
++            if self.skip_lf {
++                self.skip_lf = false;
++                if byte == b'\n' {
++                    continue;
++                }
++            }
++            self.frame_bytes = self
++                .frame_bytes
++                .checked_add(1)
++                .filter(|count| *count <= self.max_frame)
++                .ok_or_else(limit)?;
++            match byte {
++                b'\r' => {
++                    self.line(&mut events)?;
++                    self.skip_lf = true;
++                }
++                b'\n' => self.line(&mut events)?,
++                byte => self.line.push(byte),
++            }
++        }
++        Ok(events)
++    }
++    fn line(&mut self, events: &mut Vec<Event>) -> Result<(), ContractError> {
++        if self.line.is_empty() {
++            self.frame_bytes = 0;
++            if !self.data.is_empty() {
++                self.frames = self
++                    .frames
++                    .checked_add(1)
++                    .filter(|count| *count <= self.max_frames)
++                    .ok_or_else(limit)?;
++                self.data.pop();
++                let data =
++                    String::from_utf8(std::mem::take(&mut self.data)).map_err(|_| invalid())?;
++                events.push(Event {
++                    name: self.name.take(),
++                    data,
++                });
++            } else {
++                self.name = None;
++            }
++            return Ok(());
++        }
++        let line = std::str::from_utf8(&self.line).map_err(|_| invalid())?;
++        let (field, mut value) = line.split_once(':').unwrap_or((line, ""));
++        if let Some(rest) = value.strip_prefix(' ') {
++            value = rest;
++        }
++        match field {
++            "data" => {
++                self.data.extend_from_slice(value.as_bytes());
++                self.data.push(b'\n');
++            }
++            "event" => {
++                self.name = Some(value.to_owned());
++            }
++            _ => {} // SSE comments, id, retry, and extension fields do not reconnect.
++        }
++        self.line.clear();
++        Ok(())
++    }
++    pub fn finish(&self) -> Result<(), ContractError> {
++        if !self.line.is_empty() || !self.data.is_empty() || self.name.is_some() {
++            return Err(invalid());
++        }
++        Ok(())
++    }
++}
++fn invalid() -> ContractError {
++    error(ErrorCode::InvalidContract, "sse")
++}
++fn limit() -> ContractError {
++    error(ErrorCode::ContextBudgetExceeded, "sse_limit")
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    #[test]
++    fn byte_split_utf8_and_all_line_endings_preserve_event_data() {
++        for ending in ["\n", "\r\n", "\r"] {
++            let body = format!(
++                ": heartbeat{ending}event: response.created{ending}data: {{\"text\":{ending}data: \"안녕\"}}{ending}{ending}"
++            );
++            let mut decoder = Decoder::new(4096, 1024, 2);
++            let mut events = vec![];
++            for byte in body.as_bytes() {
++                events.extend(decoder.push(&[*byte]).unwrap());
++            }
++            decoder.finish().unwrap();
++            assert_eq!(events.len(), 1);
++            assert_eq!(events[0].name.as_deref(), Some("response.created"));
++            assert_eq!(events[0].data, "{\"text\":\n\"안녕\"}");
++        }
++    }
++    #[test]
++    fn incomplete_frames_and_normalized_event_bounds_never_dispatch_a_partial_record() {
++        let mut decoder = Decoder::new(1024, 128, 1);
++        assert!(decoder.push(b"data: {\"x\":1}\n").unwrap().is_empty());
++        assert!(decoder.finish().is_err());
++        let mut decoder = Decoder::new(1024, 8, 2);
++        assert!(decoder.push(b"data: too large\n\n").is_err());
++        let mut decoder = Decoder::new(1024, 128, 1);
++        assert_eq!(decoder.push(b"data: first\n\n").unwrap().len(), 1);
++        assert!(decoder.push(b"data: second\n\n").is_err());
++        let mut decoder = Decoder::new(4, 128, 2);
++        assert!(decoder.push(b"12345").is_err());
++    }
++}
+diff --git a/crates/wickle-model-openai/tests/responses.rs b/crates/wickle-model-openai/tests/responses.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..b0d86436329318b70855a38f1b2e44cb6355c41e
+--- /dev/null
++++ b/crates/wickle-model-openai/tests/responses.rs
+@@ -0,0 +1,585 @@
++//! Real HTTP/SSE boundaries, scoped credentials, version evidence, and lossless replay.
++#[allow(dead_code)]
++mod support;
++use futures_util::StreamExt;
++use serde_json::{Value, json};
++use support::*;
++use wickle::*;
++use wickle_model_openai::*;
++
++#[tokio::test]
++async fn streaming_versions_options_and_reported_usage_do_not_leak_host_context() {
++    let server = Server::new(vec![
++        Reply::sse(&events("model-first", "안녕")),
++        Reply::sse(&events("model-second", "second")),
++    ])
++    .await;
++    let connection = connection(&server);
++    let model = OpenAiModel::new(connection.clone());
++    for (name, effort, text) in [
++        ("model-first", "low", "안녕"),
++        ("model-second", "high", "second"),
++    ] {
++        let mut request = request(&connection, name);
++        request.route.model_version = id(name);
++        request
++            .options
++            .insert("reasoning_effort".into(), json!(effort));
++        let context = context(&request);
++        let result = collect_model_response(&request, model.generate(&request, &context))
++            .await
++            .unwrap();
++        assert_eq!(result.text, text);
++        assert_eq!(result.finish, ModelFinish::Stop);
++        assert_eq!(result.metadata.reported_model_id, Some(id(name)));
++        assert!(result.metadata.reported_model_version.is_none());
++        assert_eq!(
++            result.metadata.usage,
++            Some(ModelUsage {
++                measurement: UsageMeasurement::Reported,
++                input_tokens: Some(11),
++                output_tokens: Some(7)
++            })
++        );
++    }
++    let requests = server.requests.lock().unwrap();
++    assert_eq!(requests.len(), 2);
++    for (index, effort) in ["low", "high"].into_iter().enumerate() {
++        assert_eq!(requests[index].path, "/v1/responses");
++        assert_eq!(requests[index].method, "POST");
++        assert_eq!(requests[index].body["reasoning"]["effort"], effort);
++        assert_eq!(requests[index].body["stream"], true);
++        assert_eq!(requests[index].body["store"], false);
++        assert_eq!(requests[index].body["truncation"], "disabled");
++        let encoded = requests[index].body.to_string();
++        assert!(!encoded.contains("hidden-workspace"));
++        assert!(!encoded.contains("fixture-key-not-a-secret"));
++        assert!(
++            requests[index]
++                .headers
++                .to_ascii_lowercase()
++                .contains("authorization: bearer fixture-key-not-a-secret")
++        );
++    }
++    assert!(!format!("{connection:?} {model:?}").contains("fixture-key-not-a-secret"));
++}
++
++#[tokio::test]
++async fn structured_output_preserves_schema_and_rejects_unsupported_contracts_before_http() {
++    let schema = json!({"type":"object","properties":{"answer":{"type":"integer"}},"required":["answer"],"additionalProperties":false});
++    let server = Server::new(vec![Reply::sse(&events("model", r#"{"answer":42}"#))]).await;
++    let connection = connection(&server);
++    let model = OpenAiModel::new(connection.clone());
++    let mut request = request(&connection, "model");
++    request.output = ModelOutput::JsonSchema {
++        schema: schema.clone(),
++    };
++    request.options.insert("verbosity".into(), json!("low"));
++    let result = collect_model_response(&request, model.generate(&request, &context(&request)))
++        .await
++        .unwrap();
++    assert_eq!(parse_json(&result.text).unwrap(), json!({"answer":42}));
++    let body = server.requests.lock().unwrap()[0].body.clone();
++    assert_eq!(body["text"]["format"]["schema"], schema);
++    assert_eq!(body["text"]["format"]["strict"], true);
++    assert_eq!(body["text"]["verbosity"], "low");
++    request.output = ModelOutput::JsonSchema {
++        schema: json!({"type":"object","properties":{"optional":{"type":"string"}},"additionalProperties":false}),
++    };
++    let failure = collect_model_response(&request, model.generate(&request, &context(&request)))
++        .await
++        .unwrap_err();
++    assert_eq!(failure.kind, ModelFailureKind::Unsupported);
++    assert_eq!(server.requests.lock().unwrap().len(), 1);
++}
++
++fn function_events() -> Vec<Value> {
++    let reasoning = json!({"id":"rs_1","type":"reasoning","summary":[],"encrypted_content":"ciphertext-fixture"});
++    let call = json!({"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":"{\"query\":\"figures\"}","status":"completed"});
++    vec![
++        json!({"type":"response.created","response":{"id":"resp_1","model":"model","status":"in_progress"}}),
++        json!({"type":"response.output_item.added","output_index":0,"item":{"id":"rs_1","type":"reasoning","summary":[]}}),
++        json!({"type":"response.output_item.done","output_index":0,"item":reasoning}),
++        json!({"type":"response.output_item.added","output_index":1,"item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":""}}),
++        json!({"type":"response.function_call_arguments.delta","output_index":1,"item_id":"fc_1","delta":"{\"query\":"}),
++        json!({"type":"response.function_call_arguments.delta","output_index":1,"item_id":"fc_1","delta":"\"figures\"}"}),
++        json!({"type":"response.function_call_arguments.done","output_index":1,"item_id":"fc_1","arguments":"{\"query\":\"figures\"}"}),
++        json!({"type":"response.output_item.done","output_index":1,"item":call}),
++        json!({"type":"response.completed","response":{"id":"resp_1","model":"model","status":"completed","output":[reasoning,call]}}),
++    ]
++}
++fn with_tool(request: &mut ModelRequest) {
++    request.tools = vec![ModelTool {
++        name: id("lookup"),
++        description: "Read figures".into(),
++        model_input_schema: json!({"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"}},"required":["query"],"additionalProperties":false}),
++    }];
++}
++#[tokio::test]
++async fn function_fragments_and_full_reasoning_replay_preserve_original_order_once() {
++    let server = Server::new(vec![
++        Reply::sse(&function_events()),
++        Reply::sse(&events("model", "received result")),
++    ])
++    .await;
++    let connection = connection(&server);
++    let model = OpenAiModel::new(connection.clone());
++    let mut request = request(&connection, "model");
++    with_tool(&mut request);
++    let first = collect_model_response(&request, model.generate(&request, &context(&request)))
++        .await
++        .unwrap();
++    assert_eq!(first.finish, ModelFinish::ToolCalls);
++    assert_eq!(first.tool_calls.len(), 1);
++    assert!(first.metadata.usage.is_none());
++    assert_eq!(first.continuation.len(), 1);
++    request.messages.push(ModelMessage {
++        role: ModelRole::Assistant,
++        content: vec![
++            ModelContent::ToolCall {
++                provider_call_id: id("call_1"),
++                name: id("lookup"),
++                arguments: JsonObject::from([("query".into(), json!("figures"))]),
++            },
++            ModelContent::Opaque {
++                continuation: first.continuation[0].clone(),
++            },
++        ],
++    });
++    request.messages.push(ModelMessage {
++        role: ModelRole::Tool,
++        content: vec![ModelContent::ToolResult {
++            provider_call_id: id("call_1"),
++            content: json!({"result":73}),
++        }],
++    });
++    request.request_id = id("second-attempt");
++    let result = collect_model_response(&request, model.generate(&request, &context(&request)))
++        .await
++        .unwrap();
++    assert_eq!(result.text, "received result");
++    {
++        let calls = server.requests.lock().unwrap();
++        assert_eq!(calls.len(), 2);
++        let input = calls[1].body["input"].as_array().unwrap();
++        assert_eq!(
++            input
++                .iter()
++                .filter(|item| item["type"] == "function_call")
++                .count(),
++            1
++        );
++        assert_eq!(input[1]["type"], "reasoning");
++        assert_eq!(input[1]["encrypted_content"], "ciphertext-fixture");
++        assert_eq!(input[2]["call_id"], "call_1");
++        assert_eq!(input[3]["type"], "function_call_output");
++        assert_eq!(
++            parse_json(input[3]["output"].as_str().unwrap()).unwrap(),
++            json!({"result":73})
++        );
++        assert_eq!(calls[0].body["tools"][0]["strict"], false);
++        assert_eq!(
++            calls[0].body["tools"][0]["parameters"]["required"],
++            json!(["query"])
++        );
++    }
++    if let ModelContent::ToolCall { arguments, .. } = &mut request.messages[1].content[0] {
++        arguments.insert("query".into(), json!("changed"));
++    }
++    assert!(
++        collect_model_response(&request, model.generate(&request, &context(&request)))
++            .await
++            .is_err()
++    );
++    assert_eq!(server.requests.lock().unwrap().len(), 2);
++}
++
++#[tokio::test]
++async fn truncated_conflicting_and_length_limited_streams_never_return_executable_calls() {
++    for mode in ["truncated", "conflict", "length", "duplicate-terminal"] {
++        let mut data = function_events();
++        match mode {
++            "truncated" => {
++                data.truncate(5);
++            }
++            "conflict" => {
++                data[5]["item_id"] = json!("another-item");
++            }
++            "length" => {
++                data.truncate(5);
++                data.push(json!({"type":"response.incomplete","response":{"id":"resp_1","model":"model","status":"incomplete","output":[],"incomplete_details":{"reason":"max_output_tokens"}}}));
++            }
++            _ => {
++                data.push(data.last().unwrap().clone());
++            }
++        }
++        let server = Server::new(vec![Reply::sse(&data)]).await;
++        let connection = connection(&server);
++        let model = OpenAiModel::new(connection.clone());
++        let mut request = request(&connection, "model");
++        with_tool(&mut request);
++        let result =
++            collect_model_response(&request, model.generate(&request, &context(&request))).await;
++        assert!(result.is_err(), "{mode} must not yield a complete call");
++        assert_eq!(server.requests.lock().unwrap().len(), 1);
++    }
++}
++
++#[tokio::test]
++async fn unknown_options_wrong_scope_and_wrong_target_never_reach_the_server() {
++    let server = Server::new(vec![]).await;
++    let connection = connection(&server);
++    let model = OpenAiModel::new(connection.clone());
++    for field in [
++        "store",
++        "input",
++        "tools",
++        "background",
++        "previous_response_id",
++    ] {
++        let mut request = request(&connection, "model");
++        request.options.insert(field.into(), json!(true));
++        let failure =
++            collect_model_response(&request, model.generate(&request, &context(&request)))
++                .await
++                .unwrap_err();
++        assert_eq!(failure.kind, ModelFailureKind::Unsupported);
++    }
++    let mut request = request(&connection, "model");
++    let mut caller = context(&request);
++    caller.scope.workspace_id = id("other");
++    assert_eq!(
++        model
++            .generate(&request, &caller)
++            .next()
++            .await
++            .unwrap()
++            .unwrap_err()
++            .code,
++        ErrorCode::AccessDenied
++    );
++    caller = context(&request);
++    request
++        .route
++        .target
++        .insert("project_id".into(), json!("different"));
++    assert!(
++        collect_model_response(&request, model.generate(&request, &caller))
++            .await
++            .is_err()
++    );
++    assert!(server.requests.lock().unwrap().is_empty());
++}
++
++#[tokio::test]
++async fn provider_errors_and_redirects_are_not_retried_or_exposed_as_text() {
++    for (status, expected) in [
++        (401, ModelFailureKind::Authentication),
++        (404, ModelFailureKind::Unavailable),
++        (429, ModelFailureKind::RateLimited),
++        (503, ModelFailureKind::Transport),
++        (302, ModelFailureKind::Unsupported),
++    ] {
++        let redirect = Server::new(vec![Reply::sse(&events("model", "unexpected redirect"))]).await;
++        let mut reply = Reply::json(
++            status,
++            json!({"error":{"message":"private diagnostic","code":"fixture"}}),
++        );
++        if status == 302 {
++            reply
++                .headers
++                .push(("location", format!("{}responses", redirect.base)));
++        }
++        let server = Server::new(vec![
++            reply,
++            Reply::sse(&events("model", "unexpected retry")),
++        ])
++        .await;
++        let connection = connection(&server);
++        let model = OpenAiModel::new(connection.clone());
++        let request = request(&connection, "model");
++        let failure =
++            collect_model_response(&request, model.generate(&request, &context(&request)))
++                .await
++                .unwrap_err();
++        assert_eq!(failure.kind, expected);
++        assert!(failure.partial_text().is_empty());
++        assert_eq!(server.requests.lock().unwrap().len(), 1);
++        assert!(redirect.requests.lock().unwrap().is_empty());
++    }
++}
++
++#[tokio::test]
++async fn cancellation_and_deadline_drop_an_unfinished_stream() {
++    for cancel in [true, false] {
++        let mut reply = Reply::sse(&events("model", "partial")[..3]);
++        reply.stall = true;
++        let server = Server::new(vec![reply]).await;
++        let connection = connection(&server);
++        let model = OpenAiModel::new(connection.clone());
++        let request = request(&connection, "model");
++        let mut caller = context(&request);
++        if !cancel {
++            caller.deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(100);
++        }
++        let mut stream = model.generate(&request, &caller);
++        assert!(matches!(
++            stream.next().await.unwrap().unwrap(),
++            ModelEvent::TextDelta { .. }
++        ));
++        if cancel {
++            caller.cancellation.cancel();
++        }
++        let next = tokio::time::timeout(std::time::Duration::from_secs(1), stream.next())
++            .await
++            .unwrap()
++            .unwrap();
++        if cancel {
++            assert_eq!(next.unwrap_err().code, ErrorCode::Cancelled);
++        } else {
++            assert!(matches!(
++                next.unwrap(),
++                ModelEvent::ResponseError {
++                    kind: ModelFailureKind::Timeout,
++                    ..
++                }
++            ));
++        }
++        assert!(stream.next().await.is_none());
++        tokio::time::timeout(std::time::Duration::from_secs(1), server.closed.notified())
++            .await
++            .unwrap();
++        assert_eq!(server.requests.lock().unwrap().len(), 1);
++    }
++}
++
++#[tokio::test]
++async fn model_inspection_uses_registered_snapshot_facts_not_requested_versions_or_name_patterns() {
++    let server = Server::new(vec![
++        Reply::json(200, json!({"id":"model-2026-01-01","object":"model"})),
++        Reply::json(200, json!({"id":"model-2026-01-01","object":"model"})),
++    ])
++    .await;
++    let connection = connection(&server);
++    let request = request(&connection, "model-2026-01-01");
++    let context = ModelInspectionContext {
++        scope: scope(),
++        principal_ref: id("user"),
++        capability_grant_ref: id("grant"),
++        cancellation: Default::default(),
++        deadline: tokio::time::Instant::now() + std::time::Duration::from_secs(3),
++    };
++    let unknown = OpenAiInspector::new(connection.clone(), vec![])
++        .unwrap()
++        .inspect(&request.route, &context)
++        .await
++        .unwrap();
++    assert!(unknown.model_version.is_none());
++    assert_eq!(unknown.version_semantics, VersionSemantics::Unverified);
++    assert!(
++        unknown
++            .validate(&request.route, VersionPolicy::RequirePinned)
++            .is_err()
++    );
++    let known = OpenAiInspector::new(
++        connection,
++        vec![OpenAiSnapshot {
++            model_id: id("model-2026-01-01"),
++            model_version: id("actual-release"),
++            evidence_ref: id("documented-snapshot"),
++        }],
++    )
++    .unwrap()
++    .inspect(&request.route, &context)
++    .await
++    .unwrap();
++    assert_eq!(known.model_version, Some(id("actual-release")));
++    assert_eq!(known.version_semantics, VersionSemantics::Pinned);
++    assert_eq!(
++        known
++            .validate(&request.route, VersionPolicy::RequirePinned)
++            .unwrap_err()
++            .code,
++        ErrorCode::ModelVersionDrift
++    );
++    let calls = server.requests.lock().unwrap();
++    assert!(
++        calls
++            .iter()
++            .all(|call| call.method == "GET" && call.path == "/v1/models/model-2026-01-01")
++    );
++}
++
++#[tokio::test]
++async fn refusal_cannot_be_relabelled_as_success_by_a_conflicting_terminal() {
++    for valid in [false, true] {
++        let mut data = events("model", "Unable to help");
++        data[2]["type"] = json!("response.refusal.delta");
++        data[3]["type"] = json!("response.refusal.done");
++        data[3].as_object_mut().unwrap().remove("text");
++        data[3]["refusal"] = json!("Unable to help");
++        if valid {
++            let part = json!({"type":"refusal","refusal":"Unable to help"});
++            data[4]["item"]["content"] = json!([part]);
++            data[5]["response"]["output"][0]["content"] = json!([part]);
++        }
++        let server = Server::new(vec![Reply::sse(&data)]).await;
++        let connection = connection(&server);
++        let model = OpenAiModel::new(connection.clone());
++        let request = request(&connection, "model");
++        let result =
++            collect_model_response(&request, model.generate(&request, &context(&request))).await;
++        if valid {
++            assert_eq!(result.unwrap().finish, ModelFinish::Refusal);
++        } else {
++            assert!(result.is_err());
++        }
++    }
++}
++
++#[tokio::test]
++async fn interleaved_function_deltas_keep_independent_identity_and_arguments() {
++    let mut data = vec![
++        json!({"type":"response.created","response":{"id":"resp_1","model":"model","status":"in_progress"}}),
++    ];
++    let calls:Vec<_>=["one","two"].into_iter().enumerate().map(|(index,query)|json!({"id":format!("fc_{index}"),"type":"function_call","call_id":format!("call_{index}"),"name":"lookup","arguments":format!("{{\"query\":\"{query}\"}}"),"status":"completed"})).collect();
++    for (index, call) in calls.iter().enumerate() {
++        let mut item = call.clone();
++        item["arguments"] = json!("");
++        item.as_object_mut().unwrap().remove("status");
++        data.push(json!({"type":"response.output_item.added","output_index":index,"item":item}));
++    }
++    for (index, delta) in [
++        (0, "{\"query\":"),
++        (1, "{\"query\":"),
++        (1, "\"two\"}"),
++        (0, "\"one\"}"),
++    ] {
++        data.push(json!({"type":"response.function_call_arguments.delta","output_index":index,"item_id":format!("fc_{index}"),"delta":delta}));
++    }
++    for (index, call) in calls.iter().enumerate() {
++        data.push(json!({"type":"response.function_call_arguments.done","output_index":index,"item_id":format!("fc_{index}"),"arguments":call["arguments"]}));
++        data.push(json!({"type":"response.output_item.done","output_index":index,"item":call}));
++    }
++    data.push(json!({"type":"response.completed","response":{"id":"resp_1","model":"model","status":"completed","output":calls}}));
++    let server = Server::new(vec![Reply::sse(&data)]).await;
++    let connection = connection(&server);
++    let model = OpenAiModel::new(connection.clone());
++    let mut request = request(&connection, "model");
++    with_tool(&mut request);
++    let result = collect_model_response(&request, model.generate(&request, &context(&request)))
++        .await
++        .unwrap();
++    assert_eq!(result.tool_calls.len(), 2);
++    assert_eq!(result.tool_calls[0].model_inputs["query"], "one");
++    assert_eq!(result.tool_calls[1].model_inputs["query"], "two");
++    assert_ne!(
++        result.tool_calls[0].provider_call_id,
++        result.tool_calls[1].provider_call_id
++    );
++}
++
++#[tokio::test]
++async fn stream_and_payload_limits_reject_oversized_or_reassigned_data_without_a_success() {
++    for case in ["raw", "payload", "events", "identity", "sequence", "usage"] {
++        let mut data = events("model", "candidate");
++        if case == "identity" {
++            data[5]["response"]["id"] = json!("other-response");
++        }
++        if case == "usage" {
++            data[5]["response"]["usage"]["output_tokens"] = json!("7");
++        }
++        let mut reply = Reply::sse(&data);
++        if case == "sequence" {
++            let text = String::from_utf8(reply.body).unwrap();
++            reply.body = text
++                .replacen("\"sequence_number\":2", "\"sequence_number\":1", 1)
++                .into_bytes();
++        }
++        let server = Server::new(vec![reply]).await;
++        let connection = if case == "raw" {
++            OpenAiConnection::new(
++                scope(),
++                reference("account"),
++                "fixture-key-not-a-secret",
++                OpenAiOptions {
++                    base_url: server.base.clone(),
++                    max_transport_bytes: 64,
++                    max_event_bytes: 64,
++                    ..Default::default()
++                },
++            )
++            .unwrap()
++        } else {
++            connection(&server)
++        };
++        let model = OpenAiModel::new(connection.clone());
++        let mut request = request(&connection, "model");
++        if case == "payload" {
++            request.limits.max_response_bytes = 4;
++        }
++        if case == "events" {
++            request.limits.max_events = 1;
++        }
++        assert!(
++            collect_model_response(&request, model.generate(&request, &context(&request)))
++                .await
++                .is_err(),
++            "{case}"
++        );
++    }
++}
++
++#[tokio::test]
++async fn protocol_metadata_does_not_consume_the_normalized_model_event_allowance() {
++    let server = Server::new(vec![Reply::sse(&events("model", "one delta"))]).await;
++    let connection = connection(&server);
++    let model = OpenAiModel::new(connection.clone());
++    let mut request = request(&connection, "model");
++    request.limits.max_events = 2;
++    let result = collect_model_response(&request, model.generate(&request, &context(&request)))
++        .await
++        .unwrap();
++    assert_eq!(result.text, "one delta");
++}
++
++#[tokio::test]
++async fn final_content_cannot_move_between_messages_or_parts() {
++    for mode in ["valid", "message", "part", "kind"] {
++        let mut data = events("model", "A");
++        data.truncate(4);
++        let mut first = text_item("A");
++        first["phase"] = json!("commentary");
++        let mut second = text_item("B");
++        second["id"] = json!("msg_2");
++        second["phase"] = json!("final_answer");
++        data.push(json!({"type":"response.output_item.added","output_index":1,"item":{"id":"msg_2","type":"message","role":"assistant","content":[]}}));
++        data.push(json!({"type":"response.output_text.delta","output_index":1,"item_id":"msg_2","content_index":0,"delta":"B"}));
++        match mode {
++            "message" => {
++                first["content"][0]["text"] = json!("AB");
++                second["content"] = json!([]);
++            }
++            "part" => {
++                first["content"] =
++                    json!([{"type":"output_text","text":""},{"type":"output_text","text":"A"}]);
++            }
++            "kind" => {
++                first["content"] = json!([{"type":"refusal","refusal":"A"}]);
++            }
++            _ => {}
++        }
++        data.push(json!({"type":"response.completed","response":{"id":"resp_1","model":"model","status":"completed","output":[first,second]}}));
++        let server = Server::new(vec![Reply::sse(&data)]).await;
++        let connection = connection(&server);
++        let model = OpenAiModel::new(connection.clone());
++        let request = request(&connection, "model");
++        let result =
++            collect_model_response(&request, model.generate(&request, &context(&request))).await;
++        if mode == "valid" {
++            assert_eq!(result.unwrap().text, "AB");
++        } else {
++            assert!(result.is_err(), "accepted {mode} reassignment");
++        }
++    }
++}
+diff --git a/crates/wickle-model-openai/tests/support/mod.rs b/crates/wickle-model-openai/tests/support/mod.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..4be64596964d965f9317c98d728abf357f16748b
+--- /dev/null
++++ b/crates/wickle-model-openai/tests/support/mod.rs
+@@ -0,0 +1,266 @@
++use serde_json::{Value, json};
++use std::sync::{Arc, Mutex};
++use tokio::{
++    io::{AsyncReadExt, AsyncWriteExt},
++    net::TcpListener,
++    sync::Notify,
++    task::JoinHandle,
++};
++use wickle::*;
++use wickle_model_openai::*;
++
++pub fn id(value: &str) -> Id {
++    Id::new(value).unwrap()
++}
++pub fn reference(value: &str) -> VersionedRef {
++    VersionedRef {
++        id: id(value),
++        version: id("1"),
++    }
++}
++pub fn scope() -> Scope {
++    Scope {
++        tenant_id: id("tenant"),
++        workspace_id: id("hidden-workspace"),
++        user_id: None,
++    }
++}
++pub fn connection(server: &Server) -> OpenAiConnection {
++    OpenAiConnection::new(
++        scope(),
++        reference("account"),
++        "fixture-key-not-a-secret",
++        OpenAiOptions {
++            base_url: server.base.clone(),
++            ..Default::default()
++        },
++    )
++    .unwrap()
++}
++pub fn request(connection: &OpenAiConnection, model: &str) -> ModelRequest {
++    let binding = connection.binding();
++    ModelRequest {
++        request_id: id("attempt"),
++        purpose: ModelPurpose::Agent,
++        route: ResolvedModelRoute {
++            binding: reference("primary"),
++            catalog_revision: id("catalog"),
++            routing_policy_revision: id("policy"),
++            requested_model: id(model),
++            model_id: id(model),
++            model_version: id("release"),
++            version_semantics: VersionSemantics::Pinned,
++            provider: binding.provider,
++            target: connection.target().clone(),
++            deployment_revision: None,
++            api_contract: OpenAiConnection::api_contract(),
++            adapter: binding.adapter,
++            capability_revision: id("capabilities"),
++            connection_ref: binding.connection_ref,
++        },
++        messages: vec![ModelMessage {
++            role: ModelRole::User,
++            content: vec![ModelContent::Text {
++                text: "Find the requested figures".into(),
++            }],
++        }],
++        tools: vec![],
++        output: ModelOutput::Text {},
++        max_output_tokens: 128.try_into().unwrap(),
++        options: JsonObject::from([("reasoning_effort".into(), json!("medium"))]),
++        limits: ModelResponseLimits {
++            max_input_bytes: 32_768,
++            max_response_bytes: 32_768,
++            max_delta_bytes: 128,
++            max_events: 256,
++            max_tool_calls: 4,
++        },
++    }
++}
++pub fn context(request: &ModelRequest) -> ModelCallContext {
++    ModelCallContext {
++        attempt_id: request.request_id.clone(),
++        run_id: id("run"),
++        scope: scope(),
++        cancellation: Default::default(),
++        deadline: tokio::time::Instant::now() + std::time::Duration::from_secs(5),
++    }
++}
++pub fn text_item(text: &str) -> Value {
++    json!({"id":"msg_1","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":text,"annotations":[]}]})
++}
++pub fn events(model: &str, text: &str) -> Vec<Value> {
++    let item = text_item(text);
++    vec![
++        json!({"type":"response.created","response":{"id":"resp_1","model":model,"status":"in_progress","usage":null}}),
++        json!({"type":"response.output_item.added","output_index":0,"item":{"id":"msg_1","type":"message","role":"assistant","status":"in_progress","content":[]}}),
++        json!({"type":"response.output_text.delta","output_index":0,"item_id":"msg_1","content_index":0,"delta":text}),
++        json!({"type":"response.output_text.done","output_index":0,"item_id":"msg_1","content_index":0,"text":text}),
++        json!({"type":"response.output_item.done","output_index":0,"item":item}),
++        json!({"type":"response.completed","response":{"id":"resp_1","model":model,"status":"completed","output":[item],"usage":{"input_tokens":11,"output_tokens":7}}}),
++    ]
++}
++pub fn wire(events: &[Value]) -> Vec<u8> {
++    let mut bytes = vec![];
++    for (index, value) in events.iter().enumerate() {
++        let mut value = value.clone();
++        value["sequence_number"] = json!(index);
++        bytes.extend_from_slice(
++            format!(
++                "event: {}\r\ndata: {}\r\n\r\n",
++                value["type"].as_str().unwrap(),
++                value
++            )
++            .as_bytes(),
++        );
++    }
++    bytes
++}
++pub struct Reply {
++    pub status: u16,
++    pub content_type: &'static str,
++    pub body: Vec<u8>,
++    pub headers: Vec<(&'static str, String)>,
++    pub stall: bool,
++    pub chunk: usize,
++}
++impl Reply {
++    pub fn sse(events: &[Value]) -> Self {
++        Self {
++            status: 200,
++            content_type: "text/event-stream",
++            body: wire(events),
++            headers: vec![("x-request-id", "req-fixture".into())],
++            stall: false,
++            chunk: 7,
++        }
++    }
++    pub fn json(status: u16, value: Value) -> Self {
++        Self {
++            status,
++            content_type: "application/json",
++            body: serde_json::to_vec(&value).unwrap(),
++            headers: vec![],
++            stall: false,
++            chunk: 4096,
++        }
++    }
++}
++#[derive(Debug)]
++pub struct Request {
++    pub method: String,
++    pub path: String,
++    pub headers: String,
++    pub body: Value,
++}
++pub struct Server {
++    pub base: String,
++    pub requests: Arc<Mutex<Vec<Request>>>,
++    pub entered: Arc<Notify>,
++    pub closed: Arc<Notify>,
++    task: JoinHandle<()>,
++}
++impl Server {
++    pub async fn new(replies: Vec<Reply>) -> Self {
++        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
++        let base = format!("http://{}/v1/", listener.local_addr().unwrap());
++        let requests = Arc::new(Mutex::new(vec![]));
++        let records = requests.clone();
++        let entered = Arc::new(Notify::new());
++        let signal = entered.clone();
++        let closed = Arc::new(Notify::new());
++        let ended = closed.clone();
++        let task = tokio::spawn(async move {
++            let mut replies = std::collections::VecDeque::from(replies);
++            loop {
++                let (mut socket, _) = listener.accept().await.unwrap();
++                let reply = replies.pop_front().unwrap_or_else(|| {
++                    Reply::json(500, json!({"error":{"code":"unexpected_request"}}))
++                });
++                let mut bytes = vec![];
++                let (header_end, length) = loop {
++                    let mut block = [0; 4096];
++                    let count = socket.read(&mut block).await.unwrap();
++                    assert!(count > 0);
++                    bytes.extend_from_slice(&block[..count]);
++                    assert!(bytes.len() <= 131_072);
++                    if let Some(index) = bytes.windows(4).position(|part| part == b"\r\n\r\n") {
++                        let headers = std::str::from_utf8(&bytes[..index])
++                            .unwrap()
++                            .to_ascii_lowercase();
++                        let length = headers
++                            .lines()
++                            .find_map(|line| line.strip_prefix("content-length:"))
++                            .map(|value| value.trim().parse::<usize>().unwrap())
++                            .unwrap_or(0);
++                        break (index + 4, length);
++                    }
++                };
++                while bytes.len() < header_end + length {
++                    let mut block = [0; 4096];
++                    let count = socket.read(&mut block).await.unwrap();
++                    assert!(count > 0);
++                    bytes.extend_from_slice(&block[..count]);
++                }
++                let headers = std::str::from_utf8(&bytes[..header_end])
++                    .unwrap()
++                    .to_owned();
++                let mut first = headers.lines().next().unwrap().split_whitespace();
++                records.lock().unwrap().push(Request {
++                    method: first.next().unwrap().into(),
++                    path: first.next().unwrap().into(),
++                    headers: headers.clone(),
++                    body: if length == 0 {
++                        Value::Null
++                    } else {
++                        parse_json(
++                            std::str::from_utf8(&bytes[header_end..header_end + length]).unwrap(),
++                        )
++                        .unwrap()
++                    },
++                });
++                signal.notify_one();
++                let extra: String = reply
++                    .headers
++                    .iter()
++                    .map(|(key, value)| format!("{key}: {value}\r\n"))
++                    .collect();
++                let header = format!(
++                    "HTTP/1.1 {} Response\r\nContent-Type: {}\r\nContent-Length: {}\r\n{}Connection: close\r\n\r\n",
++                    reply.status,
++                    reply.content_type,
++                    reply.body.len() + if reply.stall { 100 } else { 0 },
++                    extra
++                );
++                if socket.write_all(header.as_bytes()).await.is_err() {
++                    ended.notify_one();
++                    continue;
++                }
++                for chunk in reply.body.chunks(reply.chunk) {
++                    if socket.write_all(chunk).await.is_err() {
++                        break;
++                    }
++                    tokio::task::yield_now().await;
++                }
++                if reply.stall {
++                    let mut byte = [0];
++                    let _ = socket.read(&mut byte).await;
++                }
++                let _ = socket.shutdown().await;
++                ended.notify_one();
++            }
++        });
++        Self {
++            base,
++            requests,
++            entered,
++            closed,
++            task,
++        }
++    }
++}
++impl Drop for Server {
++    fn drop(&mut self) {
++        self.task.abort();
++    }
++}
+diff --git a/crates/wickle-state-sqlite/tests/agent_recovery.rs b/crates/wickle-state-sqlite/tests/agent_recovery.rs
+index 05b6920e1e1bf55b8560ab2d6a4cfea231d8a516..5d8348065a4fa092652085057e4254f7d89d1190 100644
+--- a/crates/wickle-state-sqlite/tests/agent_recovery.rs
++++ b/crates/wickle-state-sqlite/tests/agent_recovery.rs
+@@ -20,10 +20,34 @@ use support::*;
+ use wickle::*;
+ use wickle_state_sqlite::SqliteStateStore;
+ 
+-// These process fixtures deliberately use short initial leases; avoid testing
+-// scheduler contention between independent fixtures in the same binary.
++// Serialize process fixtures to keep resource contention outside these tests.
+ static PROCESS_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+ 
++// Fault-boundary tests advance cross-process time explicitly. Synchronous fsync
++// or scheduler stalls must not consume a one-second lease before the crash point.
++// Real-time heartbeat and expiry behavior is covered by the agent/store tests.
++struct ProcessClock {
++    utc_ms: i64,
++}
++impl ProcessClock {
++    fn new(replacement: bool) -> Self {
++        Self {
++            utc_ms: if replacement { 3000 } else { 1000 },
++        }
++    }
++}
++impl Clock for ProcessClock {
++    fn now(&self) -> Result<ClockReading, ContractError> {
++        Ok(ClockReading {
++            utc_ms: self.utc_ms,
++            monotonic_ms: 0,
++        })
++    }
++    fn sleep_until<'a>(&'a self, _: u64) -> PortFuture<'a, ()> {
++        Box::pin(std::future::pending())
++    }
++}
++
+ struct ProcessModel {
+     inner: Arc<dyn ModelPort>,
+     directory: std::path::PathBuf,
+@@ -83,8 +107,7 @@ fn a_replacement_process_recovers_an_interrupted_model_with_a_new_charged_attemp
+     ));
+     std::fs::create_dir(&directory).unwrap();
+     assert_eq!(worker(&directory, "interrupt").code(), Some(73));
+-    // The original process has exited without releasing its lease.
+-    std::thread::sleep(Duration::from_millis(1100));
++    // The replacement clock starts after the original lease's expiry.
+     assert!(worker(&directory, "recover").success());
+     let calls = std::fs::read_to_string(directory.join("calls")).unwrap();
+     let attempts: Vec<_> = calls.lines().collect();
+@@ -117,7 +140,7 @@ fn recovery_worker() {
+             let store = Arc::new(SqliteStateStore::open(directory.join("state.sqlite")).unwrap());
+             let mut bindings = fixture.bindings();
+             bindings.state = store.clone();
+-            bindings.clock = Arc::new(SystemClock::default());
++            bindings.clock = Arc::new(ProcessClock::new(!interrupt));
+             bindings.ids = Arc::new(RandomIdSource);
+             bindings.model_exchange = Arc::new(
+                 ModelExchange::new(
+@@ -147,6 +170,15 @@ fn recovery_worker() {
+                 before.snapshot.model_ledger[0].state,
+                 ModelAttemptState::Reserved {}
+             ));
++            // A new process cannot take ownership while the old lease is live.
++            assert_eq!(
++                store
++                    .acquire_lease(&scope(), &run_id, &id("too-early"), 1000, 1000)
++                    .await
++                    .unwrap_err()
++                    .code,
++                ErrorCode::LeaseBusy,
++            );
+             let source = before.snapshot.recovery_record(id("source")).unwrap();
+             let command = ResumeCommand {
+                 run_id: run_id.clone(),
+@@ -203,6 +235,11 @@ impl ToolExecutor for ProcessTool {
+     ) -> PortFuture<'a, ToolExecutionResult> {
+         Box::pin(async move {
+             append(&self.directory.join("tool-calls"), self.name);
++            if self.name == "before" && self.crash_on_write {
++                // Exceed the fixture lease in wall time, as a slow fsync can do.
++                // Explicit test time must still reach the intended write/crash.
++                std::thread::sleep(Duration::from_millis(1200));
++            }
+             if self.name != "target" {
+                 return self.inner.execute(args, context).await;
+             }
+@@ -275,7 +312,6 @@ fn an_applied_write_is_reconciled_after_process_exit_or_remains_unknown_without_
+             Some(74)
+         );
+         let effect = std::fs::read(directory.join("effect.json")).unwrap();
+-        std::thread::sleep(Duration::from_millis(1100));
+         assert!(worker(&directory, &format!("tool-{kind}-recover")).success());
+         assert_eq!(
+             std::fs::read(directory.join("effect.json")).unwrap(),
+@@ -326,11 +362,11 @@ fn run_tool_worker(directory: &Path, mode: &str) {
+                 }),
+                 _ => store.clone(),
+             };
+-            bindings.clock = Arc::new(SystemClock::new());
++            bindings.clock = Arc::new(ProcessClock::new(!interrupt));
+             bindings.ids = Arc::new(RandomIdSource);
+             if !interrupt {
+-                // The terminating worker uses the memory fixture's short lease;
+-                // its replacement exercises the library's normal durable-run settings.
++                // The replacement exercises normal durable-run settings after
++                // the explicit clock handoff expires the original short lease.
+                 let defaults = AgentSettings::default();
+                 bindings.settings.lease_ttl_ms = defaults.lease_ttl_ms;
+                 bindings.settings.heartbeat_interval_ms = defaults.heartbeat_interval_ms;
+@@ -386,8 +422,8 @@ fn run_tool_worker(directory: &Path, mode: &str) {
+             let agent = create_agent(fixture.profile.clone(), bindings).unwrap();
+             if interrupt {
+                 let handle = fixture.started(&agent).await;
+-                let _ = handle.outcome(&context()).await;
+-                panic!("write did not terminate process");
++                let outcome = handle.outcome(&context()).await;
++                panic!("write did not terminate process: {outcome:?}");
+             }
+             let run_id = id(&std::fs::read_to_string(directory.join("run")).unwrap());
+             let before = store.load(&scope(), &run_id).await.unwrap();
+@@ -469,7 +505,6 @@ fn durable_plan_binding_result_and_terminal_boundaries_resume_without_repeating_
+             },
+             "{boundary}"
+         );
+-        std::thread::sleep(Duration::from_millis(1100));
+         assert!(
+             worker(&directory, &format!("tool-boundary-{boundary}-recover")).success(),
+             "{boundary}"
+@@ -506,7 +541,6 @@ fn compression_revision_process_boundaries_restore_only_complete_context_without
+             worker(&directory, &format!("context-{boundary}-interrupt")).code(),
+             Some(76)
+         );
+-        std::thread::sleep(Duration::from_millis(1100));
+         assert!(worker(&directory, &format!("context-{boundary}-recover")).success());
+         assert_eq!(
+             std::fs::read_to_string(directory.join("reads")).unwrap(),
+diff --git a/crates/wickle-state-sqlite/tests/support/context_recovery.rs b/crates/wickle-state-sqlite/tests/support/context_recovery.rs
+index 26d57860da2e27c18b0386e1f2a77131ff82e281..c0f97646e02695dcd128337f88f3e148c2df4df2 100644
+--- a/crates/wickle-state-sqlite/tests/support/context_recovery.rs
++++ b/crates/wickle-state-sqlite/tests/support/context_recovery.rs
+@@ -105,7 +105,7 @@ pub fn run_worker(directory: &Path, mode: &str) {
+             } else {
+                 store.clone()
+             };
+-            bindings.clock = Arc::new(SystemClock::new());
++            bindings.clock = Arc::new(ProcessClock::new(!interrupt));
+             bindings.ids = Arc::new(RandomIdSource);
+             bindings.settings.projection_limits.max_bytes = 8000;
+             if !interrupt {
+diff --git a/docs/env/openai.md b/docs/env/openai.md
+index e60a3e0a19eaf550d4ea458e27dc72d86e13bada..e8e3973ac9e93c63cafd220092e238ac464862b9 100644
+--- a/docs/env/openai.md
++++ b/docs/env/openai.md
+@@ -33,4 +33,4 @@ Responses API의 실제 effort 필드는 `reasoning.effort`입니다. Wickle의
+ 
+ ID가 채워진 슬롯마다 독립 테스트를 실행하도록 준비합니다. 같은 ID와 서로 다른 effort를 넣어 비교할 수도 있습니다. 다른 계정·endpoint는 별도 `.env` 파일을 사용합니다.
+ 
+-이 설정은 live 테스트 전용이며 실제 어댑터와 test runner는 구현 중입니다. `.env` 저장만으로 호출이 실행되지 않고 코어 라이브러리는 파일을 읽지 않습니다. [공통 안내](README.md).
++.env 설정은 별도의 live 테스트 Host용입니다. 공개 어댑터의 설정·인증 주입 방식은 [OpenAI Responses 사용 안내](../openai.md)를 참고하세요. `.env` 저장만으로 호출이 실행되지 않고 코어 라이브러리는 파일을 읽지 않습니다. [공통 안내](README.md).
+diff --git a/docs/openai.md b/docs/openai.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..e1206fd6b59c4fdc1eda4411d42570cfea3a3414
+--- /dev/null
++++ b/docs/openai.md
+@@ -0,0 +1,82 @@
++# OpenAI Responses adapter
++
++`wickle-model-openai` implements `ModelPort` over the Responses API's HTTP/SSE
++transport. The HTTP client and credentials remain in this optional crate; the core
++has no OpenAI SDK or HTTP dependency.
++
++```rust,ignore
++use std::sync::Arc;
++use wickle_model_openai::{
++    OpenAiConnection, OpenAiInspector, OpenAiModel, OpenAiOptions, OpenAiSnapshot,
++};
++
++let connection = OpenAiConnection::new(
++    scope.clone(),
++    connection_ref,
++    &api_key, // Supplied by the application, not loaded by the library.
++    OpenAiOptions::default(),
++)?;
++let model = Arc::new(OpenAiModel::new(connection.clone()));
++let inspector = Arc::new(OpenAiInspector::new(connection.clone(), snapshots)?);
++let exchange = ModelExchange::new(model, policy)
++    .with_route_inspector(inspector, std::time::Duration::from_secs(10))?;
++```
++
++Register the exact `connection.binding()`, `connection.target()`, and
++`OpenAiConnection::api_contract()` in the model catalog. Organization and project
++headers, when configured, are part of the target identity. Each connection belongs
++to one explicit Wickle scope and credential revision.
++
++The supported operation is `responses`, API contract `v1`. Chat Completions,
++WebSocket, background responses, and provider-native tools are not enabled by this
++adapter. [Responses API](https://developers.openai.com/api/reference/resources/responses/methods/create).
++
++## Requests and streaming
++
++The codec supports text/JSON content, function calls and their results, strict
++JSON-schema output, and route-bound continuation replay. It maps these Host options
++explicitly: `reasoning_effort`, `temperature`, `top_p`, and `verbosity`. Model and
++binding option schemas must describe the options supported by each model release.
++Unrecognized options are rejected; options cannot replace the input, tools, model,
++conversation state, or authentication fields.
++
++Each invocation sends one POST. Redirects and SDK retries are disabled. The request
++uses `stream: true`, `store: false`, and `truncation: disabled`; Wickle owns the
++conversation and context limits. Function definitions use the original projected
++schema with `strict: false`, preserving optional model parameters. Structured
++output uses `strict: true` and rejects unsupported structural forms rather than
++rewriting the output contract. [Function calling](https://developers.openai.com/api/docs/guides/function-calling),
++[structured-output schemas](https://developers.openai.com/api/docs/guides/structured-outputs#supported-schemas).
++
++SSE framing handles split UTF-8, CR/LF boundaries, and multiline data. Function
++fragments retain their output index, item ID, and call ID. The complete response
++must agree with accumulated content before a completion is emitted. Incomplete,
++failed, conflicting, oversized, or truncated streams cannot become executable Tool
++plans. Cancellation and deadlines close unfinished streams. Transport byte/frame
++limits are separate from the normalized model-event limit.
++[Streaming responses](https://developers.openai.com/api/docs/guides/streaming-responses).
++
++Reasoning and assistant output items are preserved in an opaque continuation tied
++to the exact route. Replaying it checks the normalized text/calls, then sends the
++original items once and in order. This retains encrypted reasoning and message
++phase metadata without duplicating the visible assistant content.
++
++## Model versions and inspection
++
++Model identifiers come from the selected route, not a built-in model alias. Versions
++can coexist in the catalog. `OpenAiInspector` checks account availability using the
++models endpoint. Register `OpenAiSnapshot` entries only for immutable releases
++established by provider documentation or another trusted Host evidence source.
++The inspector never infers immutability from a date in a name or copies an arbitrary
++requested version into its observation.
++
++Without registered snapshot evidence, release information remains unknown and
++semantics are `Unverified`. A policy requiring pinned versions will reject that
++observation. Provider response metadata records the actual `model` and reported
++input/output token counts. Missing usage and separately unreported model versions
++remain absent.
++
++For example, the [GPT-6 Astra model page](https://developers.openai.com/api/docs/models/gpt-6-astra)
++identifies its current snapshot and supported reasoning efforts. An application can
++register that documented snapshot without adding a duplicate VERSION environment
++variable. Environment files belong only to the [live test Host](env/openai.md).
+diff --git a/scripts/check-package.py b/scripts/check-package.py
+index fd1592824691e34f9818180e4a49b1974bac8545..92c7ea0e1af588864c4b3dc10e80bca6de6e40d6 100644
+--- a/scripts/check-package.py
++++ b/scripts/check-package.py
+@@ -39,7 +39,8 @@ def main():
+     catalog = next(p for p in workspace["packages"] if p["name"] == "wickle-model-router")
+     sqlite = next(p for p in workspace["packages"] if p["name"] == "wickle-state-sqlite")
+     adapters = next(p for p in workspace["packages"] if p["name"] == "wickle-adapter-runtime")
+-    libraries = [core, catalog, sqlite, adapters]
++    openai = next(p for p in workspace["packages"] if p["name"] == "wickle-model-openai")
++    libraries = [core, catalog, sqlite, adapters, openai]
+     versions = {d["name"]: d["req"] for d in core["dependencies"] if d["kind"] is None}
+     for dep in core["dependencies"]:
+         if dep["kind"] != "dev":
+@@ -75,7 +76,7 @@ def main():
+             shutil.copyfile(manifest, destination / "Cargo.toml")
+             shutil.copytree(manifest.parent / "src", destination / "src")
+         package_paths = {core["name"]: base / package_name}
+-        for package in [catalog, sqlite, adapters]:
++        for package in [catalog, sqlite, adapters, openai]:
+             patches = [argument for name, path in package_paths.items()
+                        for argument in ["--config", f'patch.crates-io.{name}.path={json.dumps(str(path))}']]
+             subprocess.run(
+@@ -100,7 +101,7 @@ def main():
+             f'[dependencies]\n{library_dependencies}'
+             f'serde_json = "{versions["serde_json"]}"\n'
+             f'futures-util = {{ version = "{versions["futures-util"]}", default-features = false, features = ["std", "async-await"] }}\n'
+-            f'tokio = {{ version = "{versions["tokio"]}", features = ["rt", "macros"] }}\n'
++            f'tokio = {{ version = "{versions["tokio"]}", features = ["rt", "macros", "net", "io-util"] }}\n'
+             f'\n[patch.crates-io]\nwickle = {{ path = "../{package_name}" }}\n',
+             encoding="utf-8",
+         )
+@@ -133,7 +134,7 @@ def main():
+         for example in examples:
+             subprocess.run(["cargo", "run", "--locked", "--offline", "--bin", example.stem],
+                            cwd=consumer, env=env, check=True)
+-    print("Independent package consumers: passed (core, model catalog, SQLite store, adapter runtime)", flush=True)
++    print("Independent package consumers: passed (core, model catalog, SQLite store, adapter runtime, OpenAI adapter)", flush=True)
+ 
+ 
+ if __name__ == "__main__":
+diff --git a/tests/support/openai_consumer.rs b/tests/support/openai_consumer.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..06e34c4fce4540fda591cb4e36a7ec190dccb03b
+--- /dev/null
++++ b/tests/support/openai_consumer.rs
+@@ -0,0 +1,170 @@
++// Real loopback HTTP/SSE against the extracted OpenAI adapter package; no provider call.
++use serde_json::json;
++use std::time::Duration;
++use tokio::{
++    io::{AsyncReadExt, AsyncWriteExt},
++    net::TcpListener,
++};
++use wickle::*;
++use wickle_model_openai::*;
++fn id(value: &str) -> Id {
++    Id::new(value).expect("example identifier")
++}
++fn reference(value: &str) -> VersionedRef {
++    VersionedRef {
++        id: id(value),
++        version: id("1"),
++    }
++}
++#[tokio::main(flavor = "current_thread")]
++async fn main() -> Result<(), Box<dyn std::error::Error>> {
++    let listener = TcpListener::bind("127.0.0.1:0").await?;
++    let base = format!("http://{}/v1/", listener.local_addr()?);
++    let server = tokio::spawn(async move {
++        let (mut socket, _) = listener.accept().await.unwrap();
++        let mut bytes = vec![];
++        let (header_end, length) = loop {
++            let mut chunk = [0; 4096];
++            let size = socket.read(&mut chunk).await.unwrap();
++            assert!(size > 0);
++            bytes.extend_from_slice(&chunk[..size]);
++            assert!(bytes.len() < 65536);
++            if let Some(end) = bytes.windows(4).position(|s| s == b"\r\n\r\n") {
++                let headers = std::str::from_utf8(&bytes[..end])
++                    .unwrap()
++                    .to_ascii_lowercase();
++                let length = headers
++                    .lines()
++                    .find_map(|s| s.strip_prefix("content-length:"))
++                    .unwrap()
++                    .trim()
++                    .parse::<usize>()
++                    .unwrap();
++                break (end + 4, length);
++            }
++        };
++        while bytes.len() < header_end + length {
++            let mut chunk = [0; 4096];
++            let size = socket.read(&mut chunk).await.unwrap();
++            assert!(size > 0);
++            bytes.extend_from_slice(&chunk[..size]);
++        }
++        let headers = std::str::from_utf8(&bytes[..header_end])
++            .unwrap()
++            .to_ascii_lowercase();
++        assert!(headers.starts_with("post /v1/responses "));
++        assert!(headers.contains("openai-project: fixture-project"));
++        let body =
++            parse_json(std::str::from_utf8(&bytes[header_end..header_end + length]).unwrap())
++                .unwrap();
++        assert_eq!(body["model"], "fixture-model");
++        assert_eq!(body["stream"], true);
++        assert_eq!(body["store"], false);
++        assert_eq!(body["reasoning"]["effort"], "medium");
++        assert_eq!(body["text"]["format"]["strict"], true);
++        assert!(!body.to_string().contains("private-workspace"));
++        assert!(!body.to_string().contains("fixture-key"));
++        let item = json!({"id":"message","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"{\"answer\":42}","annotations":[]}]});
++        let events = vec![
++            json!({"type":"response.created","response":{"id":"response","model":"fixture-model","status":"in_progress"}}),
++            json!({"type":"response.output_item.added","output_index":0,"item":{"id":"message","type":"message","role":"assistant","content":[]}}),
++            json!({"type":"response.output_text.delta","output_index":0,"content_index":0,"item_id":"message","delta":"{\"answer\":42}"}),
++            json!({"type":"response.output_item.done","output_index":0,"item":item}),
++            json!({"type":"response.completed","response":{"id":"response","model":"fixture-model","status":"completed","output":[item],"usage":{"input_tokens":12,"output_tokens":5}}}),
++        ];
++        let wire: String = events
++            .into_iter()
++            .map(|value| format!("data: {value}\n\n"))
++            .collect();
++        socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",wire.len()).as_bytes()).await.unwrap();
++        for chunk in wire.as_bytes().chunks(5) {
++            socket.write_all(chunk).await.unwrap();
++            tokio::task::yield_now().await;
++        }
++        socket.shutdown().await.unwrap();
++    });
++    let scope = Scope {
++        tenant_id: id("tenant"),
++        workspace_id: id("private-workspace"),
++        user_id: None,
++    };
++    let connection = OpenAiConnection::new(
++        scope.clone(),
++        reference("account"),
++        "fixture-key",
++        OpenAiOptions {
++            base_url: base,
++            project_id: Some("fixture-project".into()),
++            ..Default::default()
++        },
++    )?;
++    let binding = connection.binding();
++    let model = OpenAiModel::new(connection.clone());
++    let request = ModelRequest {
++        request_id: id("attempt"),
++        purpose: ModelPurpose::Agent,
++        route: ResolvedModelRoute {
++            binding: reference("model"),
++            catalog_revision: id("catalog"),
++            routing_policy_revision: id("policy"),
++            requested_model: id("fixture-model"),
++            model_id: id("fixture-model"),
++            model_version: id("release"),
++            version_semantics: VersionSemantics::Unverified,
++            provider: binding.provider,
++            target: connection.target().clone(),
++            deployment_revision: None,
++            api_contract: OpenAiConnection::api_contract(),
++            adapter: binding.adapter,
++            capability_revision: id("caps"),
++            connection_ref: binding.connection_ref,
++        },
++        messages: vec![ModelMessage {
++            role: ModelRole::User,
++            content: vec![ModelContent::Text {
++                text: "Return the fixture answer.".into(),
++            }],
++        }],
++        tools: vec![],
++        output: ModelOutput::JsonSchema {
++            schema: json!({"type":"object","properties":{"answer":{"type":"integer"}},"required":["answer"],"additionalProperties":false}),
++        },
++        max_output_tokens: 128.try_into()?,
++        options: JsonObject::from([("reasoning_effort".into(), json!("medium"))]),
++        limits: ModelResponseLimits {
++            max_input_bytes: 32768,
++            max_response_bytes: 32768,
++            max_delta_bytes: 128,
++            max_events: 64,
++            max_tool_calls: 0,
++        },
++    };
++    let context = ModelCallContext {
++        attempt_id: request.request_id.clone(),
++        run_id: id("run"),
++        scope,
++        cancellation: Default::default(),
++        deadline: tokio::time::Instant::now() + Duration::from_secs(10),
++    };
++    let response = collect_model_response(&request, model.generate(&request, &context)).await?;
++    assert_eq!(parse_json(&response.text)?, json!({"answer":42}));
++    assert_eq!(response.finish, ModelFinish::Stop);
++    assert_eq!(
++        response.metadata.reported_model_id,
++        Some(id("fixture-model"))
++    );
++    assert!(response.metadata.reported_model_version.is_none());
++    assert_eq!(
++        response
++            .metadata
++            .usage
++            .as_ref()
++            .and_then(|u| u.output_tokens),
++        Some(5)
++    );
++    server.await?;
++    println!(
++        "OpenAI consumer: extracted adapter performs one HTTP/SSE request, preserves scoped endpoint/project identity and options, decodes JSON and reported usage, and excludes Host context from the wire (local fixture, no provider network)"
++    );
++    Ok(())
++}

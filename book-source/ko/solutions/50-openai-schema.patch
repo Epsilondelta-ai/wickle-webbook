@@ -1,0 +1,1601 @@
+diff --git a/crates/wickle-mcp/tests/stdio.rs b/crates/wickle-mcp/tests/stdio.rs
+index 29c0d7a76a383cec5f7f23ebab6bff0f44629b8c..c9d3f4a5e212e477a390578b47af3a27e1b2ceeb 100644
+--- a/crates/wickle-mcp/tests/stdio.rs
++++ b/crates/wickle-mcp/tests/stdio.rs
+@@ -274,7 +274,9 @@ async fn abandoning_execute_terminates_in_flight_write_and_prevents_reuse() {
+             result = &mut execution => panic!("hanging write completed: {result:?}"),
+             _ = async {
+                 let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+-                while !dir.0.join("calls.jsonl.effect").exists() {
++                // File creation precedes the write; wait for the effect acknowledgement
++                // before dropping the future and terminating the child.
++                while std::fs::read_to_string(dir.0.join("calls.jsonl.effect")).ok().as_deref() != Some("applied\n") {
+                     assert!(tokio::time::Instant::now() < deadline);
+                     tokio::time::sleep(Duration::from_millis(10)).await;
+                 }
+diff --git a/crates/wickle-model-openai/src/model.rs b/crates/wickle-model-openai/src/model.rs
+index dc9e9ae7ac182cb5d26ca70e08376013e0bc6ec3..f8d3e7d05980ea1cd43c005b1f5882e164f57105 100644
+--- a/crates/wickle-model-openai/src/model.rs
++++ b/crates/wickle-model-openai/src/model.rs
+@@ -19,6 +19,9 @@ impl OpenAiModel {
+     }
+ }
+ impl ModelPort for OpenAiModel {
++    fn tool_schema_compiler(&self) -> std::sync::Arc<dyn ProviderToolSchemaCompiler> {
++        std::sync::Arc::new(wickle_model_responses::ResponsesToolSchemaCompiler)
++    }
+     fn binding(&self) -> ModelPortBinding {
+         self.connection.binding()
+     }
+diff --git a/crates/wickle-model-openai/tests/agent_contract.rs b/crates/wickle-model-openai/tests/agent_contract.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..88004d6c71c08bc7a3f472c5dfed7f1a8f1cd87c
+--- /dev/null
++++ b/crates/wickle-model-openai/tests/agent_contract.rs
+@@ -0,0 +1,248 @@
++//! Actual HTTP/SSE through the core: provider projection, repair and system binding.
++#[path = "../../wickle/tests/support/agent.rs"]
++#[allow(dead_code)]
++mod core_host;
++#[allow(dead_code)]
++mod support;
++use core_host::{completed, id, reference, scope};
++use serde_json::{Value, json};
++use std::sync::{
++    Arc, Mutex,
++    atomic::{AtomicUsize, Ordering},
++};
++use std::time::Duration;
++use wickle::*;
++use wickle_model_openai::*;
++const WORKSPACE: &str = "11111111-1111-4111-8111-111111111111";
++
++struct Catalog(core_host::Catalog);
++impl ProfileResolver for Catalog {
++    fn resolve<'a>(
++        &'a self,
++        reference: &'a ComponentRef,
++        scope: &'a Scope,
++    ) -> PortFuture<'a, ComponentMetadata> {
++        Box::pin(async move {
++            let mut metadata = self.0.resolve(reference, scope).await?;
++            if reference.kind == ComponentKind::Tool {
++                metadata.model_name = Some(reference.id.clone());
++            }
++            if let Some(version) = &reference.version {
++                metadata.reference.version = Some(version.clone());
++            }
++            Ok(metadata)
++        })
++    }
++}
++struct Inspector;
++impl ModelRouteInspector for Inspector {
++    fn inspect<'a>(
++        &'a self,
++        route: &'a ResolvedModelRoute,
++        _: &'a ModelInspectionContext,
++    ) -> PortFuture<'a, ModelRouteObservation> {
++        Box::pin(async move {
++            Ok(ModelRouteObservation {
++                route_digest: route.digest(),
++                availability: ModelRouteAvailability::Available,
++                model_id: Some(route.model_id.clone()),
++                model_version: Some(route.model_version.clone()),
++                deployment_revision: None,
++                version_semantics: VersionSemantics::Pinned,
++                evidence_ref: id("local-http-fixture"),
++            })
++        })
++    }
++}
++struct Capture(Mutex<Vec<JsonObject>>);
++impl ToolExecutor for Capture {
++    fn execute<'a>(
++        &'a self,
++        call: &'a JsonObject,
++        _: &'a ToolExecutionContext,
++    ) -> PortFuture<'a, ToolExecutionResult> {
++        Box::pin(async move {
++            self.0.lock().unwrap().push(call.clone());
++            Ok(ToolExecutionResult {
++                outcome: ToolExecutionOutcome::Succeeded {
++                    value: json!("observed"),
++                },
++                effect: ToolEffect::NotApplied,
++                receipt: None,
++            })
++        })
++    }
++}
++fn call_events(index: usize, arguments: &str) -> Vec<Value> {
++    let response = format!("resp_{index}");
++    let item = format!("fc_{index}");
++    let call = format!("call_{index}");
++    let output = json!({"id":item,"type":"function_call","call_id":call,"name":"lookup","arguments":arguments,"status":"completed"});
++    vec![
++        json!({"type":"response.created","response":{"id":response,"model":"model","status":"in_progress"}}),
++        json!({"type":"response.output_item.added","output_index":0,"item":{"id":item,"type":"function_call","call_id":call,"name":"lookup","arguments":""}}),
++        json!({"type":"response.function_call_arguments.delta","output_index":0,"item_id":item,"delta":arguments}),
++        json!({"type":"response.function_call_arguments.done","output_index":0,"item_id":item,"name":"lookup","arguments":arguments}),
++        json!({"type":"response.output_item.done","output_index":0,"item":output}),
++        json!({"type":"response.completed","response":{"id":response,"model":"model","status":"completed","output":[output]}}),
++    ]
++}
++#[tokio::test]
++async fn unsupported_constraints_and_invalid_json_text_repair_before_system_binding_or_execution() {
++    let invalid_constraint = json!({"query":"latest","limit":{"present":true,"value":7},"note":{"present":true,"value":null},"filter":"[ {\"category\": \"finance\"} ]"}).to_string();
++    let invalid_json = json!({"query":"latest","limit":{"present":true,"value":9},"note":{"present":true,"value":null},"filter":"[not json"}).to_string();
++    let valid = json!({"query":"latest","limit":{"present":true,"value":9},"note":{"present":true,"value":null},"filter":"[ {\"category\": \"finance\"} ]"}).to_string();
++    let malformed = "{not json";
++    let rounded = r#"{"query":"latest","limit":0.12345678901234567890123456789}"#;
++    let server = support::Server::new(vec![
++        support::Reply::sse(&call_events(0, malformed)),
++        support::Reply::sse(&call_events(4, rounded)),
++        support::Reply::sse(&call_events(1, &invalid_constraint)),
++        support::Reply::sse(&call_events(2, &invalid_json)),
++        support::Reply::sse(&call_events(3, &valid)),
++        support::Reply::sse(&support::events("model", "complete")),
++    ])
++    .await;
++    let connection = OpenAiConnection::new(
++        scope(),
++        reference("account"),
++        "fixture-key-not-a-secret",
++        OpenAiOptions {
++            base_url: server.base.clone(),
++            ..Default::default()
++        },
++    )
++    .unwrap();
++    let fixture = core_host::Fixture::new(core_host::Response::Text, false);
++    let mut catalog = fixture.router.snapshot.catalog().clone();
++    catalog.models[0].provider = id("openai");
++    catalog.models[0].model_id = id("model");
++    catalog.models[0]
++        .capabilities
++        .features
++        .insert(id("tool_calling"));
++    catalog.bindings[0].model = catalog.models[0].reference();
++    catalog.bindings[0].requested_model = id("model");
++    catalog.bindings[0].adapter = connection.binding().adapter;
++    catalog.bindings[0].connection_ref = connection.binding().connection_ref;
++    catalog.bindings[0].api_contract = OpenAiConnection::api_contract();
++    catalog.bindings[0].target = connection.target().clone();
++    catalog.bindings[0].target_schema = json!({"type":"object","properties":{"base_url":{"type":"string"}},"required":["base_url"],"additionalProperties":false});
++    catalog.bindings[0].capabilities = catalog.models[0].capabilities.clone();
++    catalog.bindings[0].evidence[0].binding_digest = catalog.bindings[0]
++        .contract_digest(&catalog.models[0])
++        .unwrap();
++    let snapshot = RoutingSnapshot::new(catalog, fixture.router.snapshot.policy().clone()).unwrap();
++    let mut bindings = fixture.bindings();
++    bindings.profile_resolver = Arc::new(Catalog(core_host::Catalog::default()));
++    bindings.router = Arc::new(core_host::Router {
++        snapshot,
++        queries: AtomicUsize::new(0),
++        snapshots: AtomicUsize::new(0),
++    });
++    bindings.model_exchange = Arc::new(
++        ModelExchange::new(
++            Arc::new(OpenAiModel::new(connection)),
++            bindings.policy.clone(),
++        )
++        .with_route_inspector(Arc::new(Inspector), Duration::from_secs(1))
++        .unwrap(),
++    );
++    bindings.system_inputs = SystemInputRegistry::new(vec![SystemInputDefinition {
++        key: id("workspace_id"),
++        version: id("1"),
++        value_schema: json!({"type":"string","format":"uuid"}),
++        source: SystemInputSource::Run {},
++    }])
++    .unwrap();
++    let tool = SchemaCompiler::new().compile(ToolDescriptor {
++        tool: reference("lookup"), name: id("lookup"), description: "Read scoped data".into(),
++        input_schema: json!({"type":"object","properties":{
++            "query":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":10,"default":7},"note":{"type":["string","null"]},
++            "filter":{"type":"object","properties":{"category":{"type":"string"},"term":{"type":"string"}},"required":["category"],"additionalProperties":false},
++            "workspace_id":{"type":"string","format":"uuid"}
++        },"required":["query","workspace_id"],"additionalProperties":false,"if":{"properties":{"query":{"const":"latest"}}},"then":{"properties":{"limit":{"minimum":8}}}}),
++        agent_parameters: vec!["query".into(),"limit".into(),"note".into(),"filter".into()], system_bindings: None,
++        output_schema: json!({"type":"string"}), side_effect: ToolSideEffect::ReadOnly, concurrency: ToolConcurrency::Serial, retry: ToolRetryPolicy::Never, reconcile: false, max_output_bytes: 4096.try_into().unwrap(),
++    }, &bindings.system_inputs).unwrap();
++    let capture = Arc::new(Capture(Mutex::new(vec![])));
++    bindings.tools = Some(Arc::new(
++        ToolRegistry::new(
++            scope(),
++            vec![ToolRegistration {
++                compiled: tool,
++                executor: capture.clone(),
++            }],
++        )
++        .unwrap(),
++    ));
++    let mut profile = core_host::profile();
++    profile.limits.max_model_calls = 7.try_into().unwrap();
++    profile.limits.max_tool_attempts = 2;
++    profile.limits.max_repair_attempts = 4;
++    profile.tools.push(ToolBindingRef::Catalog(CatalogToolRef {
++        tool_id: id("lookup"),
++        version: id("1"),
++        bindings: None,
++        config: None,
++    }));
++    let agent = create_agent(profile, bindings).unwrap();
++    let mut context = core_host::context();
++    context.data.system_inputs = Some(SystemInputs::new(
++        [("workspace_id".into(), json!(WORKSPACE))].into(),
++    ));
++    let handle = completed(
++        agent
++            .start(core_host::request("contract"), context.clone())
++            .await
++            .unwrap(),
++    );
++    let outcome = completed(
++        tokio::time::timeout(Duration::from_secs(10), handle.outcome(&context))
++            .await
++            .unwrap()
++            .unwrap(),
++    );
++    assert_eq!(
++        outcome.result.status(),
++        RunStatus::Succeeded,
++        "{:?}",
++        outcome.result
++    );
++    assert_eq!(outcome.usage.repair_attempts, 4);
++    assert_eq!(outcome.usage.tool_attempts, 1);
++    assert_eq!(
++        capture.0.lock().unwrap().as_slice(),
++        &[JsonObject::from([
++            ("query".into(), json!("latest")),
++            ("limit".into(), json!(9)),
++            ("note".into(), Value::Null),
++            ("filter".into(), json!({"category":"finance"})),
++            ("workspace_id".into(), json!(WORKSPACE))
++        ])]
++    );
++    let requests = server.requests.lock().unwrap();
++    assert_eq!(requests.len(), 6);
++    for request in requests.iter() {
++        assert_eq!(request.body["tools"][0]["strict"], true);
++        assert!(!request.body.to_string().contains(WORKSPACE));
++    }
++    let replayed: Vec<_> = requests[5].body["input"]
++        .as_array()
++        .unwrap()
++        .iter()
++        .filter(|item| item["type"] == "function_call")
++        .map(|item| item["arguments"].as_str().unwrap())
++        .collect();
++    assert_eq!(
++        replayed,
++        vec![
++            malformed,
++            rounded,
++            invalid_constraint.as_str(),
++            invalid_json.as_str(),
++            valid.as_str()
++        ]
++    );
++    assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 0);
++}
+diff --git a/crates/wickle-model-openai/tests/responses.rs b/crates/wickle-model-openai/tests/responses.rs
+index eb65664ee600169ae5c8d9c2e6ee72a99e726788..5c5ae2e3093d1f8e489fa79ec8996079cee3c74b 100644
+--- a/crates/wickle-model-openai/tests/responses.rs
++++ b/crates/wickle-model-openai/tests/responses.rs
+@@ -613,3 +613,210 @@ async fn two_documented_release_ids_coexist_without_replacing_connection_state()
+         assert_eq!(request.body["model"], release);
+     }
+ }
++
++fn compiled_input(schema: Value) -> CompiledTool {
++    let properties = schema["properties"]
++        .as_object()
++        .unwrap()
++        .keys()
++        .cloned()
++        .collect();
++    SchemaCompiler::new()
++        .compile(
++            ToolDescriptor {
++                tool: reference("lookup"),
++                name: id("lookup"),
++                description: "Read data".into(),
++                input_schema: schema,
++                agent_parameters: properties,
++                system_bindings: None,
++                output_schema: json!({"type":"string"}),
++                side_effect: ToolSideEffect::ReadOnly,
++                concurrency: ToolConcurrency::Serial,
++                retry: ToolRetryPolicy::Never,
++                reconcile: false,
++                max_output_bytes: 4096.try_into().unwrap(),
++            },
++            &SystemInputRegistry::new(vec![]).unwrap(),
++        )
++        .unwrap()
++}
++#[tokio::test]
++async fn compiled_optional_and_nested_inputs_use_strict_wire_and_restore_the_original_contract() {
++    let server = Server::new(vec![Reply::sse(&events("model", "done"))]).await;
++    let connection = connection(&server);
++    let model = OpenAiModel::new(connection.clone());
++    let mut request = request(&connection, "model");
++    let original = compiled_input(json!({"type":"object","properties":{
++        "query":{"type":"string","minLength":2,"pattern":"^[a-z]+$"},
++        "note":{"type":["string","null"]},
++        "filter":{"type":"object","properties":{"category":{"type":"string"},"term":{"type":"string"}},"required":["category"],"additionalProperties":false}
++    },"required":["query"],"additionalProperties":false,"if":{"properties":{"query":{"const":"latest"}}},"then":{"required":["note"]}}));
++    let contract = CompiledToolContract::compile(
++        &original,
++        ProviderToolTarget::for_route(&request.route),
++        model.tool_schema_compiler().as_ref(),
++        ProviderToolSchemaLimits::default(),
++    )
++    .unwrap();
++    request.tools = vec![contract.wire_tool().clone()];
++    for fragment in contract.constraint_fragments() {
++        request.messages[0].content.push(ModelContent::Text {
++            text: fragment.text.clone(),
++        });
++    }
++    let canonical = JsonObject::from([
++        ("query".into(), json!("latest")),
++        ("note".into(), Value::Null),
++        ("filter".into(), json!({"category":"finance"})),
++    ]);
++    let wire = contract.encode_arguments(&canonical).unwrap();
++    assert_eq!(wire["note"], json!({"present":true,"value":null}));
++    assert_eq!(
++        parse_json(wire["filter"].as_str().unwrap()).unwrap(),
++        json!([{"category":"finance"}])
++    );
++    assert_eq!(
++        contract
++            .decode_arguments(
++                &serde_json::to_string(&wire).unwrap(),
++                ProviderToolSchemaLimits::default()
++            )
++            .unwrap(),
++        canonical
++    );
++    let omitted = JsonObject::from([("query".into(), json!("other"))]);
++    let encoded = contract.encode_arguments(&omitted).unwrap();
++    assert_eq!(
++        contract
++            .decode_arguments(
++                &serde_json::to_string(&encoded).unwrap(),
++                ProviderToolSchemaLimits::default()
++            )
++            .unwrap(),
++        omitted
++    );
++    assert!(
++        contract
++            .enforcement()
++            .iter()
++            .any(|constraint| constraint.canonical_pointer == "/if"
++                && constraint.context_text
++                && !constraint.provider_native)
++    );
++    collect_model_response(&request, model.generate(&request, &context(&request)))
++        .await
++        .unwrap();
++    let body = &server.requests.lock().unwrap()[0].body;
++    assert_eq!(body["tools"][0]["strict"], true);
++    assert_eq!(
++        body["tools"][0]["parameters"],
++        contract.wire_tool().model_input_schema
++    );
++    assert_eq!(
++        body["tools"][0]["parameters"]["required"]
++            .as_array()
++            .unwrap()
++            .len(),
++        3
++    );
++    assert_eq!(
++        body["tools"][0]["parameters"]["properties"]["query"]["pattern"],
++        "^[a-z]+$"
++    );
++    assert!(
++        body["tools"][0]["parameters"]["properties"]["query"]
++            .get("minLength")
++            .is_none()
++    );
++}
++
++#[tokio::test]
++async fn model_qualified_compilation_respects_fine_tuned_native_constraint_limits() {
++    let server = Server::new(vec![]).await;
++    let connection = connection(&server);
++    let model = OpenAiModel::new(connection.clone());
++    let original = compiled_input(
++        json!({"type":"object","properties":{"query":{"type":"string","pattern":"^[a-z]+$"}},"required":["query"],"additionalProperties":false}),
++    );
++    let mut route = request(&connection, "gpt-6-astra").route;
++    let normal = CompiledToolContract::compile(
++        &original,
++        ProviderToolTarget::for_route(&route),
++        model.tool_schema_compiler().as_ref(),
++        Default::default(),
++    )
++    .unwrap();
++    assert_eq!(
++        normal.wire_tool().model_input_schema,
++        *original.model_input_schema()
++    );
++    route.model_id = id("ft:base:fixture:release");
++    let tuned = CompiledToolContract::compile(
++        &original,
++        ProviderToolTarget::for_route(&route),
++        model.tool_schema_compiler().as_ref(),
++        Default::default(),
++    )
++    .unwrap();
++    assert!(
++        tuned.wire_tool().model_input_schema["properties"]["query"]
++            .get("pattern")
++            .is_none()
++    );
++    assert!(
++        tuned
++            .enforcement()
++            .iter()
++            .any(
++                |constraint| constraint.canonical_pointer == "/properties/query/pattern"
++                    && constraint.core
++                    && constraint.context_text
++            )
++    );
++    assert_ne!(normal.digest(), tuned.digest());
++    assert!(server.requests.lock().unwrap().is_empty());
++}
++
++#[tokio::test]
++async fn oversized_native_enum_uses_reversible_text_without_losing_original_validation() {
++    let server = Server::new(vec![Reply::sse(&events("model", "done"))]).await;
++    let connection = connection(&server);
++    let model = OpenAiModel::new(connection.clone());
++    let mut request = request(&connection, "model");
++    let values: Vec<_> = (0..1001).map(|index| format!("choice-{index}")).collect();
++    let original = compiled_input(
++        json!({"type":"object","properties":{"query":{"type":"string","enum":values}},"required":["query"],"additionalProperties":false}),
++    );
++    let contract = CompiledToolContract::compile(
++        &original,
++        ProviderToolTarget::for_route(&request.route),
++        model.tool_schema_compiler().as_ref(),
++        Default::default(),
++    )
++    .unwrap();
++    assert_eq!(
++        contract.wire_tool().model_input_schema["properties"]["query"],
++        json!({"type":"string"})
++    );
++    for (value, valid) in [("choice-1000", true), ("invented-choice", false)] {
++        let canonical = JsonObject::from([("query".into(), json!(value))]);
++        let encoded = contract.encode_arguments(&canonical).unwrap();
++        let restored = contract
++            .decode_arguments(
++                &serde_json::to_string(&encoded).unwrap(),
++                Default::default(),
++            )
++            .unwrap();
++        assert_eq!(restored, canonical);
++        assert_eq!(original.validate_model_inputs(&restored).is_ok(), valid);
++    }
++    request.tools = vec![contract.wire_tool().clone()];
++    collect_model_response(&request, model.generate(&request, &context(&request)))
++        .await
++        .unwrap();
++    assert_eq!(
++        server.requests.lock().unwrap()[0].body["tools"][0]["strict"],
++        true
++    );
++}
+diff --git a/crates/wickle-model-responses/src/codec.rs b/crates/wickle-model-responses/src/codec.rs
+index bd056b502a8707c3cb25cf6921517603e7b26bfb..ac15e3b32c7028e8c05e1a13052cd111db481758 100644
+--- a/crates/wickle-model-responses/src/codec.rs
++++ b/crates/wickle-model-responses/src/codec.rs
+@@ -85,9 +85,16 @@ fn encode(request: &ModelRequest, xai: bool) -> Result<Value, ContractError> {
+             for ((call_id, name, arguments), original) in calls.iter().zip(&decoded.calls) {
+                 if *call_id != original.call_id
+                     || *name != original.name
+-                    || serde_json::to_value(arguments)
+-                        .map_err(|_| failure(ErrorCode::InvalidContract))?
+-                        != parse_json(&original.arguments)?
++                    || match parse_provider_arguments(
++                        &original.arguments,
++                        request.limits.max_input_bytes,
++                    ) {
++                        Ok(original) => **arguments != original,
++                        // The core retains an empty canonical placeholder for an
++                        // unparseable proposal. Replay the original opaque text so
++                        // its paired Tool error can reach the next model turn.
++                        Err(_) => !arguments.is_empty(),
++                    }
+                 {
+                     return Err(failure(ErrorCode::ModelContextIncompatible));
+                 }
+@@ -138,7 +145,7 @@ fn encode(request: &ModelRequest, xai: bool) -> Result<Value, ContractError> {
+         }
+         append_text(&mut input, role, &mut parts);
+     }
+-    let tools: Vec<_> = request.tools.iter().map(|tool| json!({"type":"function","name":tool.name,"description":tool.description,"parameters":tool.model_input_schema,"strict":false})).collect();
++    let tools: Vec<_> = request.tools.iter().map(|tool| json!({"type":"function","name":tool.name,"description":tool.description,"parameters":tool.model_input_schema,"strict":!xai && request.route.provider.as_str() == "openai" && crate::schema::strict_schema_supported(&tool.model_input_schema, request.route.model_id.as_str().starts_with("ft:"))})).collect();
+     let mut payload = json!({"model":request.route.model_id,"input":input,"max_output_tokens":request.max_output_tokens.get(),"store":false,"stream":true,"truncation":"disabled","include":["reasoning.encrypted_content"]});
+     if !tools.is_empty() {
+         payload["tools"] = json!(tools);
+@@ -311,10 +318,11 @@ pub(crate) fn inspect_output_items(
+                         .bytes()
+                         .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+                     || !call_ids.insert(call_id)
+-                    || !parse_json(arguments)?.is_object()
+                 {
+                     return Err(failure(ErrorCode::InvalidContract));
+                 }
++                // The provider envelope is valid even when proposed arguments are not.
++                // Keep their exact bytes for the core's validation/repair loop.
+                 output.calls.push(OutputCall {
+                     index: index
+                         .try_into()
+diff --git a/crates/wickle-model-responses/src/lib.rs b/crates/wickle-model-responses/src/lib.rs
+index 926907d829c830fa2b0882a5637516123ba342f4..76f43a4d9fb3afa805dee48e85d3476835e6cf48 100644
+--- a/crates/wickle-model-responses/src/lib.rs
++++ b/crates/wickle-model-responses/src/lib.rs
+@@ -3,9 +3,11 @@
+ #![forbid(unsafe_code)]
+ mod codec;
+ mod response;
++mod schema;
+ mod sse;
+ pub use codec::{encode_request, encode_xai_request};
+ pub use response::Decoder as ResponsesDecoder;
++pub use schema::ResponsesToolSchemaCompiler;
+ pub use sse::{Decoder as SseDecoder, Event as SseEvent};
+ use wickle::{ContractError, ErrorCode};
+ fn error(code: ErrorCode, location: &str) -> ContractError {
+diff --git a/crates/wickle-model-responses/src/schema.rs b/crates/wickle-model-responses/src/schema.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..a4c354ed38f9118d87e3622913ace19e5f7b2055
+--- /dev/null
++++ b/crates/wickle-model-responses/src/schema.rs
+@@ -0,0 +1,458 @@
++//! Versioned strict projection. Original constraints are preserved by the core.
++use serde_json::{Map, Value, json};
++use std::collections::BTreeSet;
++use wickle::*;
++
++/// Responses-compatible Tool schemas with reversible omission/value handling.
++#[derive(Debug, Clone, Copy, Default)]
++pub struct ResponsesToolSchemaCompiler;
++impl ProviderToolSchemaCompiler for ResponsesToolSchemaCompiler {
++    fn reference(&self) -> VersionedRef {
++        VersionedRef {
++            id: Id::new("wickle-responses-tool-schema").expect("constant"),
++            version: Id::new("1").expect("constant"),
++        }
++    }
++    fn compile(
++        &self,
++        tool: &ModelTool,
++        target: &ProviderToolTarget,
++    ) -> Result<ProviderToolProjection, ContractError> {
++        if target.api_contract.operation.as_str() != "responses" {
++            return Err(invalid("operation"));
++        }
++        // Unqualified manual targets use the common fine-tuned subset. The
++        // normal core path supplies the exact selected model/release.
++        let fine_tuned = target
++            .model
++            .as_ref()
++            .is_none_or(|model| model.id.as_str().starts_with("ft:"));
++        if strict_schema_supported(&tool.model_input_schema, fine_tuned) {
++            return Ok(ProviderToolProjection {
++                wire_tool: tool.clone(),
++                decode_plan: ArgumentDecodePlan::Identity {},
++            });
++        }
++        let root = &tool.model_input_schema;
++        let properties = root
++            .get("properties")
++            .and_then(Value::as_object)
++            .ok_or_else(|| invalid("properties"))?;
++        let required: BTreeSet<_> = root
++            .get("required")
++            .and_then(Value::as_array)
++            .into_iter()
++            .flatten()
++            .filter_map(Value::as_str)
++            .collect();
++        let mut wire = Map::new();
++        let mut fields = vec![];
++        for (name, schema) in properties {
++            let optional = !required.contains(name.as_str());
++            let native = lower(schema, root, fine_tuned, 1, &mut BTreeSet::new());
++            let (schema, encoding) = match native {
++                Some(schema) if optional => (
++                    json!({"type":"object","properties":{"present":{"type":"boolean"},"value":{"anyOf":[schema,{"type":"null"}]}},"required":["present","value"],"additionalProperties":false}),
++                    ArgumentValueEncoding::Presence {
++                        present_key: "present".into(),
++                        value_key: "value".into(),
++                    },
++                ),
++                Some(schema) => (schema, ArgumentValueEncoding::Identity {}),
++                None => (
++                    json_text_schema(optional),
++                    ArgumentValueEncoding::JsonText { optional },
++                ),
++            };
++            wire.insert(name.clone(), schema);
++            fields.push(ArgumentFieldMapping {
++                wire_name: name.clone(),
++                canonical_name: name.clone(),
++                encoding,
++            });
++        }
++        let mut projected = tool.clone();
++        projected.model_input_schema = object_schema(wire);
++        // Representation overhead must not exceed either provider limits or
++        // the core's original per-schema byte bound. Compact the largest
++        // remaining native field, preserving every canonical field and rule.
++        while !strict_schema_supported(&projected.model_input_schema, fine_tuned)
++            || serde_json::to_vec(&projected)
++                .map_err(|_| invalid("json"))?
++                .len()
++                > ProviderToolSchemaLimits::default().max_schema_bytes
++        {
++            let candidate = fields
++                .iter()
++                .enumerate()
++                .filter(|(_, field)| {
++                    !matches!(field.encoding, ArgumentValueEncoding::JsonText { .. })
++                })
++                .max_by_key(|(_, field)| {
++                    projected.model_input_schema["properties"][&field.wire_name]
++                        .to_string()
++                        .len()
++                })
++                .map(|(index, _)| index)
++                .ok_or_else(|| invalid("limits"))?;
++            let field = &mut fields[candidate];
++            let optional = !required.contains(field.canonical_name.as_str());
++            projected.model_input_schema["properties"][&field.wire_name] =
++                json_text_schema(optional);
++            field.encoding = ArgumentValueEncoding::JsonText { optional };
++        }
++        Ok(ProviderToolProjection {
++            wire_tool: projected,
++            decode_plan: ArgumentDecodePlan::Fields { fields },
++        })
++    }
++}
++fn object_schema(properties: Map<String, Value>) -> Value {
++    let required: Vec<_> = properties.keys().cloned().collect();
++    json!({"type":"object","properties":properties,"required":required,"additionalProperties":false})
++}
++fn json_text_schema(_optional: bool) -> Value {
++    // The frozen constraint fragment explains the encoding once for the Tool;
++    // repeating it in every property needlessly consumes the schema byte budget.
++    json!({"type":"string"})
++}
++
++fn lower(
++    schema: &Value,
++    root: &Value,
++    fine_tuned: bool,
++    depth: usize,
++    visiting: &mut BTreeSet<String>,
++) -> Option<Value> {
++    if depth > 8 {
++        return None;
++    }
++    let node = schema.as_object()?;
++    if let Some(reference) = node.get("$ref") {
++        let reference = reference.as_str()?;
++        if node
++            .keys()
++            .any(|key| !matches!(key.as_str(), "$ref" | "description" | "title" | "$comment"))
++            || !reference.starts_with('#')
++            || !visiting.insert(reference.into())
++        {
++            return None;
++        }
++        let target = root.pointer(&reference[1..])?;
++        let result = lower(target, root, fine_tuned, depth + 1, visiting);
++        visiting.remove(reference);
++        return result;
++    }
++    if let Some(alternatives) = node.get("anyOf").or_else(|| node.get("oneOf")) {
++        // Keeping only a union would lose sibling intersections. Use JSON text
++        // for mixed forms rather than accidentally narrowing their values.
++        if node.keys().any(|key| {
++            !matches!(
++                key.as_str(),
++                "anyOf" | "oneOf" | "description" | "title" | "$comment"
++            )
++        }) {
++            return None;
++        }
++        let branches: Vec<_> = alternatives
++            .as_array()?
++            .iter()
++            .map(|branch| lower(branch, root, fine_tuned, depth + 1, visiting))
++            .collect::<Option<_>>()?;
++        return Some(json!({"anyOf":branches}));
++    }
++    let kind = node.get("type")?;
++    let types = schema_types(kind)?;
++    let mut result = Map::new();
++    result.insert("type".into(), kind.clone());
++    if types.contains(&"object") {
++        if node.contains_key("patternProperties")
++            || node.get("additionalProperties") != Some(&Value::Bool(false))
++        {
++            return None;
++        }
++        let properties = node.get("properties")?.as_object()?;
++        if !all_required(node, properties) {
++            return None;
++        }
++        let mut projected = Map::new();
++        for (name, child) in properties {
++            projected.insert(
++                name.clone(),
++                lower(child, root, fine_tuned, depth + 1, visiting)?,
++            );
++        }
++        result.insert("properties".into(), Value::Object(projected));
++        result.insert(
++            "required".into(),
++            node.get("required").cloned().unwrap_or_else(|| json!([])),
++        );
++        result.insert("additionalProperties".into(), Value::Bool(false));
++    }
++    if types.contains(&"array") {
++        if node.contains_key("prefixItems") || node.get("items").is_some_and(Value::is_array) {
++            return None;
++        }
++        result.insert(
++            "items".into(),
++            lower(node.get("items")?, root, fine_tuned, depth + 1, visiting)?,
++        );
++    }
++    if let Some(value) = node.get("enum") {
++        if value.as_array().is_some_and(|values| {
++            !values.is_empty()
++                && values
++                    .iter()
++                    .all(|value| !value.is_object() && !value.is_array())
++        }) {
++            result.insert("enum".into(), value.clone());
++        }
++    } else if let Some(value) = node.get("const") {
++        if !value.is_object() && !value.is_array() {
++            result.insert("enum".into(), json!([value]));
++        }
++    }
++    if !fine_tuned {
++        for key in [
++            "pattern",
++            "minimum",
++            "maximum",
++            "exclusiveMinimum",
++            "exclusiveMaximum",
++            "multipleOf",
++            "minItems",
++            "maxItems",
++        ] {
++            if let Some(value) = node.get(key) {
++                result.insert(key.into(), value.clone());
++            }
++        }
++        if let Some(value) = node
++            .get("format")
++            .filter(|value| value.as_str().is_some_and(known_format))
++        {
++            result.insert("format".into(), value.clone());
++        }
++    }
++    if let Some(description) = node.get("description").filter(|value| value.is_string()) {
++        result.insert("description".into(), description.clone());
++    }
++    Some(Value::Object(result))
++}
++fn schema_types(value: &Value) -> Option<Vec<&str>> {
++    let types = if let Some(kind) = value.as_str() {
++        vec![kind]
++    } else {
++        let values = value.as_array()?;
++        if values.len() != 2 || !values.iter().any(|kind| kind == "null") {
++            return None;
++        }
++        values
++            .iter()
++            .map(Value::as_str)
++            .collect::<Option<Vec<_>>>()?
++    };
++    types
++        .iter()
++        .all(|kind| {
++            matches!(
++                *kind,
++                "string" | "number" | "integer" | "boolean" | "object" | "array" | "null"
++            )
++        })
++        .then_some(types)
++}
++fn all_required(node: &Map<String, Value>, properties: &Map<String, Value>) -> bool {
++    let Some(required) = node.get("required").and_then(Value::as_array) else {
++        return properties.is_empty();
++    };
++    let names: BTreeSet<_> = required.iter().filter_map(Value::as_str).collect();
++    names.len() == required.len()
++        && names.len() == properties.len()
++        && properties.keys().all(|name| names.contains(name.as_str()))
++}
++fn known_format(value: &str) -> bool {
++    matches!(
++        value,
++        "date-time"
++            | "time"
++            | "date"
++            | "duration"
++            | "email"
++            | "hostname"
++            | "ipv4"
++            | "ipv6"
++            | "uuid"
++    )
++}
++#[derive(Default)]
++struct Bounds {
++    properties: usize,
++    enums: usize,
++    characters: usize,
++}
++/// Check only; this never rewrites the already compiled wire schema.
++pub(crate) fn strict_schema_supported(schema: &Value, fine_tuned: bool) -> bool {
++    schema.get("type") == Some(&json!("object"))
++        && schema.get("anyOf").is_none()
++        && strict_node(schema, schema, fine_tuned, 0, &mut Bounds::default())
++}
++fn strict_node(
++    schema: &Value,
++    root: &Value,
++    fine_tuned: bool,
++    depth: usize,
++    bounds: &mut Bounds,
++) -> bool {
++    let Some(node) = schema.as_object() else {
++        return false;
++    };
++    if depth > 10
++        || node.keys().any(|key| {
++            !matches!(
++                key.as_str(),
++                "type"
++                    | "properties"
++                    | "required"
++                    | "additionalProperties"
++                    | "items"
++                    | "enum"
++                    | "anyOf"
++                    | "$defs"
++                    | "$ref"
++                    | "description"
++                    | "title"
++                    | "pattern"
++                    | "format"
++                    | "minimum"
++                    | "maximum"
++                    | "exclusiveMinimum"
++                    | "exclusiveMaximum"
++                    | "multipleOf"
++                    | "minItems"
++                    | "maxItems"
++            )
++        })
++    {
++        return false;
++    }
++    if fine_tuned
++        && [
++            "pattern",
++            "format",
++            "minimum",
++            "maximum",
++            "exclusiveMinimum",
++            "exclusiveMaximum",
++            "multipleOf",
++            "minItems",
++            "maxItems",
++        ]
++        .iter()
++        .any(|key| node.contains_key(*key))
++    {
++        return false;
++    }
++    if node
++        .get("format")
++        .is_some_and(|value| !value.as_str().is_some_and(known_format))
++    {
++        return false;
++    }
++    if let Some(reference) = node.get("$ref") {
++        if reference.as_str().is_none_or(|reference| {
++            !reference.starts_with('#') || root.pointer(&reference[1..]).is_none()
++        }) {
++            return false;
++        }
++    }
++    let types = match node.get("type") {
++        Some(value) => match schema_types(value) {
++            Some(types) => types,
++            None => return false,
++        },
++        None if node.contains_key("anyOf") || node.contains_key("$ref") => vec![],
++        None => return false,
++    };
++    if types.contains(&"object") {
++        let Some(properties) = node.get("properties").and_then(Value::as_object) else {
++            return false;
++        };
++        if node.get("additionalProperties") != Some(&Value::Bool(false))
++            || !node.contains_key("required")
++            || !all_required(node, properties)
++        {
++            return false;
++        }
++    }
++    if types.contains(&"array") && !node.contains_key("items") {
++        return false;
++    }
++    if let Some(values) = node.get("enum") {
++        let Some(values) = values.as_array() else {
++            return false;
++        };
++        if values.is_empty()
++            || values
++                .iter()
++                .any(|value| value.is_array() || value.is_object())
++        {
++            return false;
++        }
++        bounds.enums = bounds.enums.saturating_add(values.len());
++        let characters: usize = values
++            .iter()
++            .filter_map(Value::as_str)
++            .map(|value| value.chars().count())
++            .sum();
++        if values.len() > 250 && characters > 15_000 {
++            return false;
++        }
++        bounds.characters = bounds.characters.saturating_add(characters);
++    }
++    for key in ["properties", "$defs"] {
++        if let Some(children) = node.get(key) {
++            let Some(children) = children.as_object() else {
++                return false;
++            };
++            if key == "properties" {
++                bounds.properties = bounds.properties.saturating_add(children.len());
++            }
++            bounds.characters = bounds.characters.saturating_add(
++                children
++                    .keys()
++                    .map(|name| name.chars().count())
++                    .sum::<usize>(),
++            );
++            for child in children.values() {
++                if !strict_node(child, root, fine_tuned, depth + 1, bounds) {
++                    return false;
++                }
++            }
++        }
++    }
++    if let Some(items) = node.get("items") {
++        if !strict_node(items, root, fine_tuned, depth + 1, bounds) {
++            return false;
++        }
++    }
++    if let Some(branches) = node.get("anyOf") {
++        let Some(branches) = branches.as_array() else {
++            return false;
++        };
++        if branches.is_empty()
++            || branches
++                .iter()
++                .any(|branch| !strict_node(branch, root, fine_tuned, depth + 1, bounds))
++        {
++            return false;
++        }
++    }
++    bounds.properties <= 5000 && bounds.enums <= 1000 && bounds.characters <= 120_000
++}
++fn invalid(path: &str) -> ContractError {
++    ContractError::new(
++        ErrorCode::UnsupportedInputProjection,
++        format!("responses.schema.{path}"),
++    )
++}
+diff --git a/crates/wickle-model-router/tests/support/routed.rs b/crates/wickle-model-router/tests/support/routed.rs
+index e1098114d045f319d955ac3ebc87586db6c82a3c..2027aba270afdbe59038748a96046df0e983f727 100644
+--- a/crates/wickle-model-router/tests/support/routed.rs
++++ b/crates/wickle-model-router/tests/support/routed.rs
+@@ -463,11 +463,7 @@ impl ModelRequestProjector for Projector {
+                 )?);
+                 compiled_tools.push(CompiledToolContract::compile(
+                     &binding.compiled,
+-                    ProviderToolTarget {
+-                        provider: selection.route.provider.clone(),
+-                        api_contract: selection.route.api_contract.clone(),
+-                        capability_revision: selection.route.capability_revision.clone(),
+-                    },
++                    ProviderToolTarget::for_route(&selection.route),
+                     context
+                         .tool_schema_compiler
+                         .as_deref()
+diff --git a/crates/wickle/src/agent/driver.rs b/crates/wickle/src/agent/driver.rs
+index ec065d3aa43edb572772c0a6180be14b7562871e..ed1acecdc9ab453c13bff1490e74beda601f7a76 100644
+--- a/crates/wickle/src/agent/driver.rs
++++ b/crates/wickle/src/agent/driver.rs
+@@ -1411,11 +1411,7 @@ impl ModelRequestProjector for Projector<'_> {
+                         && message.role == MessageRole::User
+                 })
+                 .ok_or_else(|| fail(ErrorCode::InvalidSnapshot, "agent.request_message"))?;
+-            let target = ProviderToolTarget {
+-                provider: selection.route.provider.clone(),
+-                api_contract: selection.route.api_contract.clone(),
+-                capability_revision: selection.route.capability_revision.clone(),
+-            };
++            let target = ProviderToolTarget::for_route(&selection.route);
+             let mut tool_set = vec![];
+             let mut compiled_tools = vec![];
+             for manifest in self.prompt.tools() {
+diff --git a/crates/wickle/src/agent/tools.rs b/crates/wickle/src/agent/tools.rs
+index f3ac9f2c70d49aeac385262ab93e7a0f975480c2..1bf0245bd8aad0a6023d0712cec0dfa4a7f8aba3 100644
+--- a/crates/wickle/src/agent/tools.rs
++++ b/crates/wickle/src/agent/tools.rs
+@@ -140,11 +140,7 @@ impl Agent {
+             if tool_set.entries.len() != root.compiled_tools.len() {
+                 return Err(fail(ErrorCode::InvalidSnapshot, "agent.prepared_tool_set"));
+             }
+-            let target = ProviderToolTarget {
+-                provider: invocation.route.provider.clone(),
+-                api_contract: invocation.route.api_contract.clone(),
+-                capability_revision: invocation.route.capability_revision.clone(),
+-            };
++            let target = ProviderToolTarget::for_route(&invocation.route);
+             for (entry, reference) in tool_set.entries.into_iter().zip(root.compiled_tools) {
+                 if !prompt.tools().contains(&entry.manifest) {
+                     return Err(fail(ErrorCode::InvalidSnapshot, "agent.prepared_manifest"));
+diff --git a/crates/wickle/src/context_projection.rs b/crates/wickle/src/context_projection.rs
+index c2a12211f0b56525f41ab084a5d63e6a273e1a43..cbec7f240e48cacf39f9ffe55aceb9c727c170e7 100644
+--- a/crates/wickle/src/context_projection.rs
++++ b/crates/wickle/src/context_projection.rs
+@@ -983,17 +983,38 @@ fn project_transcript(
+                             } else {
+                                 None
+                             };
++                            // Opaque provider replay is immutable: retain its original wire
++                            // names and argument strings/values, including rejected proposals.
++                            let original = call.provider_arguments.as_ref().filter(|_| {
++                                message
++                                    .content
++                                    .iter()
++                                    .any(|item| matches!(item, ContentBlock::ProviderOpaque { .. }))
++                            });
+                             content.push(ModelContent::ToolCall {
+                                 provider_call_id: call.provider_call_id.clone(),
+-                                name: contract.map_or_else(
+-                                    || call.tool_name.clone(),
+-                                    |contract| contract.wire_tool().name.clone(),
++                                name: original.map_or_else(
++                                    || {
++                                        contract.map_or_else(
++                                            || call.tool_name.clone(),
++                                            |contract| contract.wire_tool().name.clone(),
++                                        )
++                                    },
++                                    |original| original.name.clone(),
+                                 ),
+-                                arguments: match contract {
+-                                    Some(contract) => {
+-                                        contract.encode_arguments(&call.model_inputs)?
++                                arguments: if let Some(original) = original {
++                                    crate::parse_provider_arguments(
++                                        &original.raw,
++                                        input.response_limits.max_input_bytes,
++                                    )
++                                    .unwrap_or_default()
++                                } else {
++                                    match contract {
++                                        Some(contract) => {
++                                            contract.encode_arguments(&call.model_inputs)?
++                                        }
++                                        None => call.model_inputs.clone(),
+                                     }
+-                                    None => call.model_inputs.clone(),
+                                 },
+                             });
+                         }
+diff --git a/crates/wickle/src/input_binding.rs b/crates/wickle/src/input_binding.rs
+index e7a4aa0440afe4433a9d371ea87a6d5eb4a24f48..44a6dadf228a5f3a4a213da7adc6a0642ec2ea6e 100644
+--- a/crates/wickle/src/input_binding.rs
++++ b/crates/wickle/src/input_binding.rs
+@@ -691,11 +691,7 @@ impl InputBinder {
+                     .iter()
+                     .find(|invocation| invocation.attempt_id == call.model_request_id)
+                     .ok_or_else(|| error(ErrorCode::InvalidSnapshot, "tool.provider_invocation"))?;
+-                let target = crate::ProviderToolTarget {
+-                    provider: invocation.route.provider.clone(),
+-                    api_contract: invocation.route.api_contract.clone(),
+-                    capability_revision: invocation.route.capability_revision.clone(),
+-                };
++                let target = crate::ProviderToolTarget::for_route(&invocation.route);
+                 let record = bounded(
+                     context,
+                     budget,
+diff --git a/crates/wickle/src/lib.rs b/crates/wickle/src/lib.rs
+index 429021aebfdf3e964d00f2ed1d15fa90d62acaca..9682ce08ea435091fe6af272708cfc31040d724e 100644
+--- a/crates/wickle/src/lib.rs
++++ b/crates/wickle/src/lib.rs
+@@ -217,7 +217,7 @@ pub use provider_tool_schema::{
+     ArgumentDecodePlan, ArgumentFieldMapping, ArgumentValueEncoding, CompiledToolContract,
+     NativeToolSchemaCompiler, ProviderToolProjection, ProviderToolSchemaCompiler,
+     ProviderToolSchemaLimits, ProviderToolTarget, ToolConstraintEnforcement,
+-    ToolConstraintFragment,
++    ToolConstraintFragment, parse_provider_arguments,
+ };
+ 
+ mod context_fragment;
+diff --git a/crates/wickle/src/model_execution/prepared.rs b/crates/wickle/src/model_execution/prepared.rs
+index bb6176b06a4a9c6aedb22d818c9e627c0bb15d0c..dcd09a686dc2aaa5c264a9c0bbc88a681e51957b 100644
+--- a/crates/wickle/src/model_execution/prepared.rs
++++ b/crates/wickle/src/model_execution/prepared.rs
+@@ -139,11 +139,7 @@ impl ModelExchange {
+                 "prepared.tool_count",
+             ));
+         }
+-        let target = ProviderToolTarget {
+-            provider: selection.route.provider.clone(),
+-            api_contract: selection.route.api_contract.clone(),
+-            capability_revision: selection.route.capability_revision.clone(),
+-        };
++        let target = ProviderToolTarget::for_route(&selection.route);
+         let mut records = Vec::new();
+         let mut contracts = Vec::new();
+         for (index, ((entry, contract), wire)) in tool_set
+diff --git a/crates/wickle/src/provider_tool_schema.rs b/crates/wickle/src/provider_tool_schema.rs
+index 39dd9503b81d09eb489811d83380cd1d8b2207da..8af878e62bccc88b4233d20b200f606c98f00b61 100644
+--- a/crates/wickle/src/provider_tool_schema.rs
++++ b/crates/wickle/src/provider_tool_schema.rs
+@@ -11,6 +11,9 @@ use std::{collections::BTreeSet, fmt};
+ #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+ #[serde(deny_unknown_fields)]
+ pub struct ProviderToolTarget {
++    /// Exact model/release, absent only in older or manually unqualified contracts.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub model: Option<VersionedRef>,
+     /// Provider namespace, including deployment-specific provider adapters.
+     pub provider: Id,
+     /// Exact operation and API version.
+@@ -18,6 +21,29 @@ pub struct ProviderToolTarget {
+     /// Pinned target capability revision.
+     pub capability_revision: Id,
+ }
++impl ProviderToolTarget {
++    /// Capture the selected route without connection metadata or credentials.
++    pub fn for_route(route: &crate::ResolvedModelRoute) -> Self {
++        Self {
++            model: Some(VersionedRef {
++                id: route.model_id.clone(),
++                version: route.model_version.clone(),
++            }),
++            provider: route.provider.clone(),
++            api_contract: route.api_contract.clone(),
++            capability_revision: route.capability_revision.clone(),
++        }
++    }
++    fn matches_saved(&self, saved: &Self) -> bool {
++        self.provider == saved.provider
++            && self.api_contract == saved.api_contract
++            && self.capability_revision == saved.capability_revision
++            && saved
++                .model
++                .as_ref()
++                .is_none_or(|model| self.model.as_ref() == Some(model))
++    }
++}
+ /// Finite bounds on compilation, persisted projection and incoming arguments.
+ #[derive(Debug, Clone, Copy)]
+ pub struct ProviderToolSchemaLimits {
+@@ -46,6 +72,12 @@ impl Default for ProviderToolSchemaLimits {
+ pub enum ArgumentValueEncoding {
+     /// Preserve the JSON value, including explicit null.
+     Identity {},
++    /// A JSON document encoded as a string. Optional values use [] for omission
++    /// and `[value]` for a supplied value, keeping explicit null distinct.
++    JsonText {
++        /// Whether the string represents an optional zero-or-one value array.
++        optional: bool,
++    },
+     /// Encode omission separately from null using an object envelope.
+     Presence {
+         /// Boolean discriminator: false means omitted, true means supplied.
+@@ -227,7 +259,7 @@ impl CompiledToolContract {
+         let identity = matches!(projection.decode_plan, ArgumentDecodePlan::Identity {});
+         let explained = schema != tool.model_input_schema() || !identity;
+         let fragments = if explained {
+-            let text = format!(
++            let mut text = format!(
+                 "Tool {}: arguments must satisfy this canonical JSON Schema after decoding: {}\nDecode representation: {}. Field mappings restore wire_name to canonical_name. For a presence envelope, both members are required: true marks a supplied value (including explicit null); false with a null value placeholder means omission. Preserve omission and explicit null as distinct values.",
+                 projection.wire_tool.name,
+                 serde_json::to_string(tool.model_input_schema())
+@@ -235,6 +267,10 @@ impl CompiledToolContract {
+                 serde_json::to_string(&projection.decode_plan)
+                     .map_err(|_| invalid("provider_tool.codec"))?
+             );
++            if matches!(&projection.decode_plan, ArgumentDecodePlan::Fields { fields } if fields.iter().any(|field| matches!(field.encoding, ArgumentValueEncoding::JsonText { .. })))
++            {
++                text.push_str(" For json_text, the wire value is a JSON string parsed by the core. With optional=false it encodes the canonical value itself. With optional=true it must encode [] for omission or [value] for a supplied value, including [null] for explicit null. Nested optional properties remain absent inside that JSON document; do not replace absence with null.");
++            }
+             let digest = data_digest(&text);
+             vec![ToolConstraintFragment {
+                 id: Id::new(format!(
+@@ -299,13 +335,13 @@ impl CompiledToolContract {
+             .map_err(|_| invalid("provider_tool.record"))?;
+         if &saved.digest != expected
+             || data_digest(&saved.data) != *expected
+-            || &saved.data.target != target
++            || !target.matches_saved(&saved.data.target)
+         {
+             return Err(invalid("provider_tool.identity"));
+         }
+         let rebuilt = Self::build(
+             tool,
+-            target.clone(),
++            saved.data.target.clone(),
+             saved.data.compiler.clone(),
+             ProviderToolProjection {
+                 wire_tool: saved.data.wire_tool.clone(),
+@@ -400,6 +436,17 @@ impl CompiledToolContract {
+                                 output.insert(field.wire_name.clone(), value.clone());
+                             }
+                         }
++                        ArgumentValueEncoding::JsonText { optional } => {
++                            if *optional || value.is_some() {
++                                let encoded = if *optional {
++                                    serde_json::to_string(&value.into_iter().collect::<Vec<_>>())
++                                } else {
++                                    serde_json::to_string(value.expect("present value"))
++                                }
++                                .map_err(|_| arguments())?;
++                                output.insert(field.wire_name.clone(), Value::String(encoded));
++                            }
++                        }
+                         ArgumentValueEncoding::Presence {
+                             present_key,
+                             value_key,
+@@ -436,6 +483,20 @@ impl CompiledToolContract {
+                         .ok_or_else(arguments)?;
+                     let restored = match &mapping.encoding {
+                         ArgumentValueEncoding::Identity {} => Some(value.clone()),
++                        ArgumentValueEncoding::JsonText { optional } => {
++                            let text = value.as_str().ok_or_else(arguments)?;
++                            let parsed = parse_provider_value(text, limits.max_argument_bytes)?;
++                            if *optional {
++                                let values = parsed.as_array().ok_or_else(arguments)?;
++                                match values.len() {
++                                    0 => None,
++                                    1 => Some(values[0].clone()),
++                                    _ => return Err(arguments()),
++                                }
++                            } else {
++                                Some(parsed)
++                            }
++                        }
+                         ArgumentValueEncoding::Presence {
+                             present_key,
+                             value_key,
+@@ -702,10 +763,16 @@ fn normalized_decimal(text: &str) -> Option<(bool, String, i128)> {
+     Some((negative, trimmed.into(), exponent))
+ }
+ 
+-pub(crate) fn parse_provider_arguments(
+-    raw: &str,
+-    max_bytes: usize,
+-) -> Result<JsonObject, ContractError> {
++/// Parse model-owned provider arguments without silently rounding number tokens.
++pub fn parse_provider_arguments(raw: &str, max_bytes: usize) -> Result<JsonObject, ContractError> {
++    Ok(parse_provider_value(raw, max_bytes)?
++        .as_object()
++        .ok_or_else(arguments)?
++        .clone()
++        .into_iter()
++        .collect())
++}
++fn parse_provider_value(raw: &str, max_bytes: usize) -> Result<Value, ContractError> {
+     if raw.len() > max_bytes {
+         return Err(arguments());
+     }
+@@ -718,10 +785,5 @@ pub(crate) fn parse_provider_arguments(
+             "provider_tool.numeric_precision",
+         ));
+     }
+-    Ok(value
+-        .as_object()
+-        .ok_or_else(arguments)?
+-        .clone()
+-        .into_iter()
+-        .collect())
++    Ok(value)
+ }
+diff --git a/crates/wickle/src/state/prepared_state.rs b/crates/wickle/src/state/prepared_state.rs
+index 67df423c8dd605ec1f4a4f41f70120ba040944cd..38d67a9a783267c073cda463793912f2a4d27a03 100644
+--- a/crates/wickle/src/state/prepared_state.rs
++++ b/crates/wickle/src/state/prepared_state.rs
+@@ -214,11 +214,7 @@ pub(super) fn validate(
+             return Err(invalid("prepared.artifacts_missing"));
+         }
+         let mut manifests = manifests.iter();
+-        let target = ProviderToolTarget {
+-            provider: route.provider.clone(),
+-            api_contract: route.api_contract.clone(),
+-            capability_revision: route.capability_revision.clone(),
+-        };
++        let target = ProviderToolTarget::for_route(&route);
+         let mut contracts = vec![];
+         for ((entry, reference), wire) in tools
+             .entries
+diff --git a/crates/wickle/tests/model_execution.rs b/crates/wickle/tests/model_execution.rs
+index ef0f0e9e0e619eeb62533976befdfb20c576f3f3..c23fc5b3182f9d818b28c21ba70d3c98e25beb07 100644
+--- a/crates/wickle/tests/model_execution.rs
++++ b/crates/wickle/tests/model_execution.rs
+@@ -865,11 +865,7 @@ async fn saved_provider_codec_restores_canonical_arguments_before_required_defau
+         "agent_parameters":["query","limit"],"output_schema":{"type":"string"},"max_output_bytes":100
+     }"#).unwrap(),&registry).unwrap();
+     let mut request = request("first");
+-    let target = ProviderToolTarget {
+-        provider: request.route.provider.clone(),
+-        api_contract: request.route.api_contract.clone(),
+-        capability_revision: request.route.capability_revision.clone(),
+-    };
++    let target = ProviderToolTarget::for_route(&request.route);
+     let contract = CompiledToolContract::compile(
+         &canonical,
+         target,
+diff --git a/crates/wickle/tests/provider_tool_schema.rs b/crates/wickle/tests/provider_tool_schema.rs
+index 29d746afae0714d83adb006aa76efba7a75c8365..0063096b13fe9891c95fbafe5a01df061fd98ef8 100644
+--- a/crates/wickle/tests/provider_tool_schema.rs
++++ b/crates/wickle/tests/provider_tool_schema.rs
+@@ -12,6 +12,7 @@ fn reference(s: &str) -> VersionedRef {
+ }
+ fn target() -> ProviderToolTarget {
+     ProviderToolTarget {
++        model: None,
+         provider: id("example"),
+         api_contract: ApiContract {
+             operation: id("messages"),
+@@ -276,3 +277,115 @@ fn codecs_never_silently_round_numeric_arguments() {
+         tool.validate_model_inputs(&decoded).unwrap();
+     }
+ }
++
++struct JsonTextCompiler;
++impl ProviderToolSchemaCompiler for JsonTextCompiler {
++    fn reference(&self) -> VersionedRef {
++        reference("json-text")
++    }
++    fn compile(
++        &self,
++        tool: &ModelTool,
++        _: &ProviderToolTarget,
++    ) -> Result<ProviderToolProjection, ContractError> {
++        Ok(ProviderToolProjection {
++            wire_tool: ModelTool {
++                name: tool.name.clone(),
++                description: tool.description.clone(),
++                model_input_schema: json!({"type":"object","properties":{"query":{"type":"string"},"note":{"type":"string"}},"required":["query","note"],"additionalProperties":false}),
++            },
++            decode_plan: ArgumentDecodePlan::Fields {
++                fields: vec![
++                    ArgumentFieldMapping {
++                        wire_name: "query".into(),
++                        canonical_name: "query".into(),
++                        encoding: ArgumentValueEncoding::JsonText { optional: false },
++                    },
++                    ArgumentFieldMapping {
++                        wire_name: "note".into(),
++                        canonical_name: "note".into(),
++                        encoding: ArgumentValueEncoding::JsonText { optional: true },
++                    },
++                ],
++            },
++        })
++    }
++}
++#[test]
++fn json_text_values_preserve_omission_null_and_numeric_precision() {
++    let tool = tool();
++    let limits = ProviderToolSchemaLimits::default();
++    let contract =
++        CompiledToolContract::compile(&tool, target(), &JsonTextCompiler, limits).unwrap();
++    let missing = JsonObject::from([("query".into(), json!("facts"))]);
++    let encoded = contract.encode_arguments(&missing).unwrap();
++    assert_eq!(encoded["note"], json!("[]"));
++    assert_eq!(
++        contract
++            .decode_arguments(&serde_json::to_string(&encoded).unwrap(), limits)
++            .unwrap(),
++        missing
++    );
++    let supplied = JsonObject::from([
++        ("query".into(), json!("facts")),
++        ("note".into(), Value::Null),
++    ]);
++    let encoded = contract.encode_arguments(&supplied).unwrap();
++    assert_eq!(encoded["note"], json!("[null]"));
++    assert_eq!(
++        contract
++            .decode_arguments(&serde_json::to_string(&encoded).unwrap(), limits)
++            .unwrap(),
++        supplied
++    );
++    for value in ["null", "[null,null]", "[", "[1.000000000000000001]"] {
++        let raw = json!({"query":"\"facts\"","note":value}).to_string();
++        assert_eq!(
++            contract.decode_arguments(&raw, limits).unwrap_err().code,
++            ErrorCode::InvalidArguments
++        );
++    }
++    let record = serde_json::to_string(&contract).unwrap();
++    let restored =
++        CompiledToolContract::restore(&record, &tool, &target(), contract.digest(), limits)
++            .unwrap();
++    assert_eq!(
++        restored
++            .decode_arguments(&serde_json::to_string(&encoded).unwrap(), limits)
++            .unwrap(),
++        supplied
++    );
++}
++#[test]
++fn qualified_models_are_pinned_without_rewriting_an_older_unqualified_contract() {
++    let tool = tool();
++    let limits = ProviderToolSchemaLimits::default();
++    let legacy =
++        CompiledToolContract::compile(&tool, target(), &NativeToolSchemaCompiler, limits).unwrap();
++    let mut current = target();
++    current.model = Some(reference("model-snapshot"));
++    let restored = CompiledToolContract::restore(
++        &serde_json::to_string(&legacy).unwrap(),
++        &tool,
++        &current,
++        legacy.digest(),
++        limits,
++    )
++    .unwrap();
++    assert!(restored.target().model.is_none());
++    assert_eq!(restored.digest(), legacy.digest());
++    let modern =
++        CompiledToolContract::compile(&tool, current.clone(), &NativeToolSchemaCompiler, limits)
++            .unwrap();
++    current.model.as_mut().unwrap().version = id("different-release");
++    assert!(
++        CompiledToolContract::restore(
++            &serde_json::to_string(&modern).unwrap(),
++            &tool,
++            &current,
++            modern.digest(),
++            limits
++        )
++        .is_err()
++    );
++}
+diff --git a/docs/openai.md b/docs/openai.md
+index e1206fd6b59c4fdc1eda4411d42570cfea3a3414..4159d3f47ce2b9b8d39438b467655fb178122ebe 100644
+--- a/docs/openai.md
++++ b/docs/openai.md
+@@ -42,9 +42,11 @@ conversation state, or authentication fields.
+ 
+ Each invocation sends one POST. Redirects and SDK retries are disabled. The request
+ uses `stream: true`, `store: false`, and `truncation: disabled`; Wickle owns the
+-conversation and context limits. Function definitions use the original projected
+-schema with `strict: false`, preserving optional model parameters. Structured
+-output uses `strict: true` and rejects unsupported structural forms rather than
++conversation and context limits. The adapter provides a versioned Tool schema
++compiler; normal Agent calls use its frozen projection with `strict: true`.
++The wire encoder checks compatibility without rewriting that projection. Direct
++`ModelPort` callers that supply uncompiled schemas get explicit `strict: false`
++when their schema does not meet the strict subset. Structured output uses `strict: true` and rejects unsupported structural forms rather than
+ rewriting the output contract. [Function calling](https://developers.openai.com/api/docs/guides/function-calling),
+ [structured-output schemas](https://developers.openai.com/api/docs/guides/structured-outputs#supported-schemas).
+ 
+@@ -61,6 +63,33 @@ to the exact route. Replaying it checks the normalized text/calls, then sends th
+ original items once and in order. This retains encrypted reasoning and message
+ phase metadata without duplicating the visible assistant content.
+ 
++## Tool inputs and repair
++
++Define Tools with their ordinary canonical JSON Schema and model-visible
++parameters. The core compiles that projection for the selected provider, model
++release, and capability revision. System-bound fields and values stay outside it.
++
++The OpenAI compiler preserves supported native constraints. For optional values,
++a `{ "present": false, "value": null }` envelope means omission; `present: true`
++with a null value means explicit null. Nested optional objects, open objects, and
++forms that cannot retain their shape under strict mode use a JSON string. A
++required JSON-text field contains the value; an optional one contains `[]` for
++omission or `[value]` for presence. Application Tool executors always receive the
++restored ordinary values, with defaults and system inputs bound by the core.
++
++Unsupported validation keywords remain in the original contract and in the
++model's constraint context. They are never discarded as execution requirements.
++The compiler uses the documented smaller native subset for fine-tuned models;
++large enums and deeply nested shapes can use JSON text to fit provider limits.
++Malformed arguments, precision-losing numbers, and original-contract violations
++reach the bounded core repair loop without executing the Tool. Complete malformed
++arguments remain distinct from truncated or conflicting SSE envelopes, which are
++protocol failures. Opaque replay preserves the original argument bytes, including
++invalid proposals, so the model can receive their repair feedback.
++
++[Strict Tool rules](https://developers.openai.com/api/docs/guides/function-calling),
++[Supported schema subset and limits](https://developers.openai.com/api/docs/guides/structured-outputs).
++
+ ## Model versions and inspection
+ 
+ Model identifiers come from the selected route, not a built-in model alias. Versions
+diff --git a/docs/provider-tool-schemas.md b/docs/provider-tool-schemas.md
+index 1ea6b3b1bb96f2cb455a6add0332f62d6f045ebc..670ac87cf1e855b2a9603b4f0d76de4b65dd3dbb 100644
+--- a/docs/provider-tool-schemas.md
++++ b/docs/provider-tool-schemas.md
+@@ -28,7 +28,7 @@ through the canonical model schema for protocols that support it.
+ Whenever schema or argument representation changes, the core generates a trusted
+ explanation containing the complete canonical model schema and the codec rules.
+ The ordered fragments carry content digests. The contract records original Tool
+-identity, descriptor/schema digests, provider protocol, capability and compiler
++identity, descriptor/schema digests, provider protocol, selected model/release, capability and compiler
+ revisions, wire schema, decoding rules and enforcement locations. Size and nesting
+ bounds apply before model invocation. A request that exceeds those bounds must
+ fail explicitly rather than omit constraints.
+@@ -42,6 +42,13 @@ value, a missing required member, duplicate input keys, or
+ unknown mapped fields is an argument error. The codec never guesses that null
+ means omitted and never supplies a system-owned value.
+ 
++`ArgumentValueEncoding::JsonText` carries shapes that a provider cannot represent
++natively. A required field contains a JSON-encoded value. An optional field
++contains `[]` for omission or `[value]` for presence, preserving explicit null.
++Invalid JSON, duplicate keys, and precision-losing numbers are argument errors.
++The OpenAI adapter selects this representation for nested optional/open objects
++and provider schema limits; the original validator remains authoritative.
++
+ After decoding, apply the canonical model defaults and validation, run the
+ before-tool transformation and revalidation, bind system inputs, and validate the
+ full original execution schema. This contract does not execute or authorize a
+@@ -52,7 +59,8 @@ the model projection; hidden branch data is not added to the model explanation.
+ Persist the entire `CompiledToolContract` only in protected storage. Restore it
+ with the original `CompiledTool`, the pinned target, and an independently trusted
+ expected digest. Restoration uses the saved codec and does not run a newer
+-compiler. Send only `wire_tool()` and `constraint_fragments()` to the model.
++compiler. Legacy contracts without model identity keep their original digest;
++newly prepared contracts pin the model identity as well. Send only `wire_tool()` and `constraint_fragments()` to the model.
+ 
+ The Agent obtains the compiler through `ModelPort::tool_schema_compiler` and
+ stores its output in an immutable [prepared model step](prepared-model-steps.md).
+diff --git a/tests/support/tool_schema_consumer.rs b/tests/support/tool_schema_consumer.rs
+index 605dc7c58668ab610149aa038b17d22b8b4dd94c..31e9d9919fe0bea172100981bc8fa1d556a8b410 100644
+--- a/tests/support/tool_schema_consumer.rs
++++ b/tests/support/tool_schema_consumer.rs
+@@ -146,6 +146,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+     assert!(compiled.validate_execution_inputs(&invalid_full).is_err());
+     assert!(compiled.validate_execution_inputs(&model_inputs).is_err());
+     let target = ProviderToolTarget {
++        model: None,
+         provider: id("example-provider"),
+         api_contract: ApiContract { operation: id("messages"), version: id("1") },
+         capability_revision: id("capabilities"),

@@ -1,0 +1,2495 @@
+diff --git a/crates/wickle-mcp/tests/support/binding.rs b/crates/wickle-mcp/tests/support/binding.rs
+index fcf7cd236f1437874d7413809db3e2efcacb6ff4..2e63e19dc252b5acecf4c9f3176f6fbeba0db8c9 100644
+--- a/crates/wickle-mcp/tests/support/binding.rs
++++ b/crates/wickle-mcp/tests/support/binding.rs
+@@ -188,6 +188,8 @@ pub async fn bound_arguments(
+         .admit(
+             &scope,
+             AdmissionInput {
++                execution_principal_ref: id("execution-principal"),
++                submitted: None,
+                 snapshot,
+                 prompt_snapshot: prompt.reference().clone(),
+                 messages: vec![Message {
+diff --git a/crates/wickle-state-sqlite/src/lib.rs b/crates/wickle-state-sqlite/src/lib.rs
+index 68f05ffb3c010ba24bf8f269f63caab853c6058c..65b1cd715b40b94edb82d26c41c0121fa9c922b0 100644
+--- a/crates/wickle-state-sqlite/src/lib.rs
++++ b/crates/wickle-state-sqlite/src/lib.rs
+@@ -625,3 +625,43 @@ fn error(code: ErrorCode, path: &str) -> ContractError {
+ fn storage_error<E>(_: E) -> ContractError {
+     error(ErrorCode::PersistenceUnavailable, "sqlite.storage")
+ }
++
++impl wickle::ExecutionTransactions for SqliteStateStore {
++    fn read_execution<'a>(
++        &'a self,
++        scope: &'a Scope,
++        run_id: &'a Id,
++    ) -> PortFuture<'a, wickle::ExecutionHistory> {
++        let id = run_id.clone();
++        self.transact(scope, false, move |state, scope, runtime| {
++            runtime.block_on(state.read_execution(scope, &id))
++        })
++    }
++    fn submit_control_command<'a>(
++        &'a self,
++        scope: &'a Scope,
++        run_id: &'a Id,
++        command: wickle::ControlCommand,
++    ) -> PortFuture<'a, wickle::ControlReceipt> {
++        let id = run_id.clone();
++        self.transact(scope, true, move |state, scope, runtime| {
++            runtime.block_on(state.submit_control_command(scope, &id, command))
++        })
++    }
++    fn begin_segment<'a>(
++        &'a self,
++        scope: &'a Scope,
++        mut request: wickle::BeginSegmentRequest,
++    ) -> PortFuture<'a, wickle::BeginSegmentResult> {
++        let submitted = std::time::Instant::now();
++        self.transact(scope, true, move |state, scope, runtime| {
++            let elapsed = i64::try_from(submitted.elapsed().as_millis())
++                .map_err(|_| error(ErrorCode::InvalidContract, "sqlite.elapsed"))?;
++            request.now_ms = request
++                .now_ms
++                .checked_add(elapsed)
++                .ok_or_else(|| error(ErrorCode::InvalidContract, "sqlite.clock"))?;
++            runtime.block_on(state.begin_segment(scope, request))
++        })
++    }
++}
+diff --git a/crates/wickle-state-sqlite/tests/execution_store.rs b/crates/wickle-state-sqlite/tests/execution_store.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..e60533bd31dc43174a0f1abf9bce39b057899271
+--- /dev/null
++++ b/crates/wickle-state-sqlite/tests/execution_store.rs
+@@ -0,0 +1,123 @@
++//! Same atomic execution contract through real SQLite transactions and reopen.
++use std::sync::Arc;
++use wickle::*;
++use wickle_state_sqlite::SqliteStateStore;
++#[allow(dead_code)]
++#[path = "../../wickle/tests/support/mod.rs"]
++mod core;
++use core::*;
++#[path = "../../wickle/tests/support/execution_store.rs"]
++mod suite;
++#[allow(dead_code)]
++mod support;
++#[tokio::test]
++async fn sqlite_execution_transactions_survive_reopen() {
++    let database = support::Database::new();
++    let store = Arc::new(SqliteStateStore::open(database.path()).unwrap());
++    suite::atomic_execution_contract(store.clone()).await;
++    let expected = store
++        .read_execution(&scope(), &id("atomic-run"))
++        .await
++        .unwrap();
++    drop(store);
++    let reopened = SqliteStateStore::open(database.path()).unwrap();
++    assert_eq!(
++        reopened
++            .read_execution(&scope(), &id("atomic-run"))
++            .await
++            .unwrap(),
++        expected
++    );
++}
++#[tokio::test]
++async fn sqlite_recovery_rolls_back_and_replays_the_same_segment() {
++    let database = support::Database::new();
++    let store = Arc::new(SqliteStateStore::open(database.path()).unwrap());
++    suite::atomic_recovery_contract(store.clone()).await;
++    let history = store
++        .read_execution(&scope(), &id("recover-run"))
++        .await
++        .unwrap();
++    drop(store);
++    assert_eq!(
++        SqliteStateStore::open(database.path())
++            .unwrap()
++            .read_execution(&scope(), &id("recover-run"))
++            .await
++            .unwrap(),
++        history
++    );
++}
++
++#[tokio::test]
++async fn legacy_terminal_rows_are_read_without_rewrite_then_upgrade_on_new_admission() {
++    let database = support::Database::new();
++    let store = SqliteStateStore::open(database.path()).unwrap();
++    let first = store
++        .admit(
++            &scope(),
++            admission("legacy", "legacy-request", "legacy-session", "input", "1").await,
++        )
++        .await
++        .unwrap();
++    let lease = store
++        .acquire_lease(&scope(), &id("legacy"), &id("owner"), 0, 10000)
++        .await
++        .unwrap();
++    let terminal = store
++        .commit(
++            &scope(),
++            &id("legacy"),
++            finished(&first.state.snapshot, lease, 1),
++        )
++        .await
++        .unwrap();
++    drop(store);
++    let conn = rusqlite::Connection::open(database.path()).unwrap();
++    let raw: String = conn
++        .query_row(
++            "SELECT checkpoint_json FROM wickle_scope_checkpoints",
++            [],
++            |row| row.get(0),
++        )
++        .unwrap();
++    let mut legacy: serde_json::Value = serde_json::from_str(&raw).unwrap();
++    legacy["schema_version"] = serde_json::json!("wickle.state-store.v1");
++    legacy.as_object_mut().unwrap().remove("executions");
++    conn.execute(
++        "UPDATE wickle_scope_checkpoints SET checkpoint_json=?1,checksum=?2",
++        rusqlite::params![legacy.to_string(), canonical_digest(&legacy).as_str()],
++    )
++    .unwrap();
++    let store = SqliteStateStore::open(database.path()).unwrap();
++    assert_eq!(store.load(&scope(), &id("legacy")).await.unwrap(), terminal);
++    let after_read: String = conn
++        .query_row(
++            "SELECT checkpoint_json FROM wickle_scope_checkpoints",
++            [],
++            |row| row.get(0),
++        )
++        .unwrap();
++    assert_eq!(after_read, legacy.to_string());
++    store
++        .admit(
++            &scope(),
++            admission("new", "new-request", "new-session", "input", "1").await,
++        )
++        .await
++        .unwrap();
++    let after_write: String = conn
++        .query_row(
++            "SELECT checkpoint_json FROM wickle_scope_checkpoints",
++            [],
++            |row| row.get(0),
++        )
++        .unwrap();
++    assert_eq!(
++        serde_json::from_str::<serde_json::Value>(&after_write).unwrap()["schema_version"],
++        "wickle.state-store.v2"
++    );
++    assert_eq!(store.load(&scope(), &id("legacy")).await.unwrap(), terminal);
++    assert!(store.read_execution(&scope(), &id("legacy")).await.is_err());
++    assert!(store.read_execution(&scope(), &id("new")).await.is_ok());
++}
+diff --git a/crates/wickle-state-sqlite/tests/support/recovery_store.rs b/crates/wickle-state-sqlite/tests/support/recovery_store.rs
+index 620255cd8ecafb480734af48a2c2d245bf232e3d..b07614029bc9629a3026844b25f0b1560cfc1443 100644
+--- a/crates/wickle-state-sqlite/tests/support/recovery_store.rs
++++ b/crates/wickle-state-sqlite/tests/support/recovery_store.rs
+@@ -149,3 +149,28 @@ impl StateStore for CrashStore {
+         self.inner.read_hook_observations(scope, run_id)
+     }
+ }
++
++impl wickle::ExecutionTransactions for CrashStore {
++    fn read_execution<'a>(
++        &'a self,
++        scope: &'a wickle::Scope,
++        run_id: &'a wickle::Id,
++    ) -> wickle::PortFuture<'a, wickle::ExecutionHistory> {
++        self.inner.read_execution(scope, run_id)
++    }
++    fn submit_control_command<'a>(
++        &'a self,
++        scope: &'a wickle::Scope,
++        run_id: &'a wickle::Id,
++        command: wickle::ControlCommand,
++    ) -> wickle::PortFuture<'a, wickle::ControlReceipt> {
++        self.inner.submit_control_command(scope, run_id, command)
++    }
++    fn begin_segment<'a>(
++        &'a self,
++        scope: &'a wickle::Scope,
++        request: wickle::BeginSegmentRequest,
++    ) -> wickle::PortFuture<'a, wickle::BeginSegmentResult> {
++        self.inner.begin_segment(scope, request)
++    }
++}
+diff --git a/crates/wickle/src/agent/admission.rs b/crates/wickle/src/agent/admission.rs
+index 388ad42bede6512ab68dc5eef94a9c1430005558..a7f782e54549519e474a71b4d1d237eff8308bd9 100644
+--- a/crates/wickle/src/agent/admission.rs
++++ b/crates/wickle/src/agent/admission.rs
+@@ -542,6 +542,8 @@ impl Agent {
+         };
+         Ok((
+             AdmissionInput {
++                execution_principal_ref: context.data.principal_ref.clone(),
++                submitted: None,
+                 snapshot,
+                 prompt_snapshot: prompt_record.reference().clone(),
+                 require_durable: bindings.settings.require_durable,
+diff --git a/crates/wickle/src/agent/persistence.rs b/crates/wickle/src/agent/persistence.rs
+index 65fabca89d66a53d3bf01ba78e63a07bc609b178..60bba7cea5b0161bf0793617f22c3dc9679eac17 100644
+--- a/crates/wickle/src/agent/persistence.rs
++++ b/crates/wickle/src/agent/persistence.rs
+@@ -207,3 +207,32 @@ impl StateStore for ObservedStore {
+         self.inner.read_hook_observations(scope, run_id)
+     }
+ }
++
++impl crate::ExecutionTransactions for ObservedStore {
++    fn read_execution<'a>(
++        &'a self,
++        scope: &'a crate::Scope,
++        run_id: &'a crate::Id,
++    ) -> crate::PortFuture<'a, crate::ExecutionHistory> {
++        self.inner.read_execution(scope, run_id)
++    }
++    fn submit_control_command<'a>(
++        &'a self,
++        scope: &'a crate::Scope,
++        run_id: &'a crate::Id,
++        command: crate::ControlCommand,
++    ) -> crate::PortFuture<'a, crate::ControlReceipt> {
++        self.inner.submit_control_command(scope, run_id, command)
++    }
++    fn begin_segment<'a>(
++        &'a self,
++        scope: &'a crate::Scope,
++        request: crate::BeginSegmentRequest,
++    ) -> crate::PortFuture<'a, crate::BeginSegmentResult> {
++        Box::pin(async move {
++            let result = self.inner.begin_segment(scope, request).await?;
++            self.observed.observe(&result.state.snapshot);
++            Ok(result)
++        })
++    }
++}
+diff --git a/crates/wickle/src/execution_contracts.rs b/crates/wickle/src/execution_contracts.rs
+index 3c66c15c2a42d771c5cf160ee3fe7a2a017e543e..2d6bd9ad2d557557141cd5f7d6ea8f7c9c294c32 100644
+--- a/crates/wickle/src/execution_contracts.rs
++++ b/crates/wickle/src/execution_contracts.rs
+@@ -308,8 +308,10 @@ pub enum SegmentStart {
+     Control(Id),
+ }
+ /// Inputs for atomic command consumption, lease acquisition and segment creation.
+-#[derive(Debug, Clone)]
++#[derive(Clone)]
+ pub struct BeginSegmentRequest {
++    /// Proposed validated checkpoint/events for resume or control. Initial claim has None.
++    pub transition: Option<SegmentTransition>,
+     /// Owning Run.
+     pub run_id: Id,
+     /// CAS revision before this transaction.
+@@ -349,6 +351,13 @@ pub struct ControlReceipt {
+ /// segment driver can be enabled. No default read/then/write emulation is safe.
+ /// StateStore integration requires the same transaction as its snapshot/events.
+ pub trait ExecutionTransactions: Send + Sync {
++    /// Read protected segment/command history without mutation; Host authorizes access.
++    fn read_execution<'a>(
++        &'a self,
++        scope: &'a Scope,
++        run_id: &'a Id,
++    ) -> PortFuture<'a, ExecutionHistory>;
++
+     /// Atomically deduplicate/consume the command, check CAS and allocate ownership.
+     fn begin_segment<'a>(
+         &'a self,
+@@ -434,3 +443,63 @@ impl ExecutionSegment {
+         Ok(())
+     }
+ }
++
++/// A proposed checkpoint delta; the transaction supplies its own validated lease.
++#[derive(Clone)]
++pub struct SegmentTransition {
++    /// Next checkpoint at expected_revision + 1.
++    pub snapshot: crate::RunSnapshot,
++    /// New transcript messages.
++    pub messages: Vec<crate::Message>,
++    /// Matching durable events.
++    pub events: Vec<crate::RunEvent>,
++    /// Immutable records referenced by the new checkpoint/events.
++    pub records: Vec<crate::ProtectedRecord>,
++}
++/// Persisted control command and its optional processing result.
++#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct StoredControlCommand {
++    /// Original authenticated command payload.
++    pub command: ControlCommand,
++    /// Segment that consumed it; absent means pending, not failed.
++    pub processed_segment_id: Option<Id>,
++}
++/// Command deduplication evidence bound to an accepted segment.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct AcceptedSegmentCommand {
++    /// Stable command identity.
++    pub command_id: Id,
++    /// Original normalized command payload digest.
++    pub payload_digest: JsonDigest,
++    /// Segment created by this command.
++    pub segment_id: Id,
++}
++/// Protected execution history stored atomically with a Run's checkpoint/events.
++#[derive(Clone, PartialEq, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct ExecutionHistory {
++    /// Owning Run.
++    pub run_id: Id,
++    /// Authenticated original execution actor.
++    pub execution_principal_ref: Id,
++    /// Submitted request evidence, separate from effective configuration.
++    pub submitted: Option<RequestSnapshot>,
++    /// Initial segment has been claimed at least once. Retrying a claim is not recovery.
++    pub initial_claimed: bool,
++    /// Ordered immutable past segments and the current segment.
++    pub segments: Vec<ExecutionSegment>,
++    /// Accepted resume/control command identities.
++    pub accepted_commands: Vec<AcceptedSegmentCommand>,
++    /// Pending and processed durable controls.
++    pub controls: Vec<StoredControlCommand>,
++}
++impl fmt::Debug for ExecutionHistory {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_struct("ExecutionHistory")
++            .field("run_id", &self.run_id)
++            .field("segment_count", &self.segments.len())
++            .finish_non_exhaustive()
++    }
++}
+diff --git a/crates/wickle/src/lib.rs b/crates/wickle/src/lib.rs
+index 673b62c86e276d325ea7200fb4d474cd2b7d08c9..fd16f6ec8498241b5c7f2c8cbb9993abb85a9e2f 100644
+--- a/crates/wickle/src/lib.rs
++++ b/crates/wickle/src/lib.rs
+@@ -18,11 +18,11 @@ mod budget;
+ mod canonical;
+ mod execution_contracts;
+ pub use execution_contracts::{
+-    AppState, BeginSegmentRequest, BeginSegmentResult, ControlAction, ControlCommand,
+-    ControlReceipt, ExecutionRecordVersion, ExecutionSegment, ExecutionTransactions,
+-    InterruptionAction, InterruptionCause, InterruptionDecision, InterruptionInfo,
+-    InterruptionPolicy, InterruptionRecord, PreparedStepRecord, RequestSnapshot, SegmentOutcome,
+-    SegmentStart,
++    AcceptedSegmentCommand, AppState, BeginSegmentRequest, BeginSegmentResult, ControlAction,
++    ControlCommand, ControlReceipt, ExecutionHistory, ExecutionRecordVersion, ExecutionSegment,
++    ExecutionTransactions, InterruptionAction, InterruptionCause, InterruptionDecision,
++    InterruptionInfo, InterruptionPolicy, InterruptionRecord, PreparedStepRecord, RequestSnapshot,
++    SegmentOutcome, SegmentStart, SegmentTransition, StoredControlCommand,
+ };
+ mod clock;
+ mod component_runtime;
+diff --git a/crates/wickle/src/state.rs b/crates/wickle/src/state.rs
+index 7e872884e87df572f6bbeebe4e9f42bb1444b739..fcd4e701dead117da52db9475ff540d1f81bc6d3 100644
+--- a/crates/wickle/src/state.rs
++++ b/crates/wickle/src/state.rs
+@@ -10,6 +10,7 @@ use serde_json::Value;
+ 
+ mod checkpoint;
+ mod context_state;
++mod execution;
+ mod hook_state;
+ mod reconciliation_state;
+ mod recovery_state;
+@@ -84,6 +85,10 @@ impl fmt::Debug for ProtectedRecord {
+ /// Initial records accepted atomically for a newly admitted run.
+ #[derive(Clone)]
+ pub struct AdmissionInput {
++    /// Authenticated original execution principal, not the latest reviewer.
++    pub execution_principal_ref: Id,
++    /// Original submitted inputs when supplied by the versioned admission path.
++    pub submitted: Option<crate::RequestSnapshot>,
+     /// Running/admission checkpoint at revision zero.
+     pub snapshot: RunSnapshot,
+     /// Session-pinned prompt record; reused unchanged by subsequent runs.
+@@ -185,7 +190,7 @@ pub const MAX_EVENT_PAGE_SIZE: usize = 1_000;
+ /// Trusted core storage port. Scope isolation is enforced by the store itself.
+ /// The facade separately applies current PolicyGate authorization. No raw load or
+ /// record reference grants permission to publish the returned data.
+-pub trait StateStore: Send + Sync {
++pub trait StateStore: crate::ExecutionTransactions + Send + Sync {
+     /// Describe storage and coordination guarantees.
+     fn capabilities(&self) -> StateStoreCapabilities;
+     /// Find the original request before re-resolving current profile or routing metadata.
+@@ -308,6 +313,8 @@ struct ScopeState {
+     event_ids: BTreeSet<Id>,
+     message_ids: BTreeSet<Id>,
+     hook_observations: BTreeMap<Id, Vec<crate::HookObservation>>,
++    executions: BTreeMap<Id, crate::ExecutionHistory>,
++    legacy_runs: BTreeSet<Id>,
+ }
+ 
+ #[derive(Clone)]
+@@ -411,6 +418,14 @@ impl StateStore for MemoryStateStore {
+                     state: previous,
+                 });
+             }
++            if state.runs.iter().any(|(id, run)| {
++                !run.snapshot.status.is_terminal() && !state.executions.contains_key(id)
++            }) {
++                return Err(error(
++                    ErrorCode::CapabilityUnsupported,
++                    "execution.legacy_drain_required",
++                ));
++            }
+             input.snapshot.validate()?;
+             if input.snapshot.revision != 0
+                 || input.snapshot.status != RunStatus::Running
+@@ -486,8 +501,16 @@ impl StateStore for MemoryStateStore {
+                 session: session.clone(),
+                 messages: messages.clone(),
+             };
++            let execution = execution::initial_history(
++                &input.snapshot,
++                &input.execution_principal_ref,
++                input.submitted.as_ref(),
++            )?;
+             // All fallible checks precede these mutations.
+             let state = scopes.entry(scope_key(scope)).or_default();
++            state
++                .executions
++                .insert(input.snapshot.run_id.clone(), execution);
+             state.records.extend(additions);
+             state
+                 .message_ids
+@@ -569,31 +592,7 @@ impl StateStore for MemoryStateStore {
+         now_ms: i64,
+         ttl_ms: u64,
+     ) -> PortFuture<'a, RunLease> {
+-        Box::pin(async move {
+-            let expires_at_ms = lease_expiry(now_ms, ttl_ms)?;
+-            let mut scopes = self.lock()?;
+-            let run = run_mut(&mut scopes, scope, run_id)?;
+-            if run.snapshot.status.is_terminal() {
+-                return Err(error(ErrorCode::InvalidTransition, "run.status"));
+-            }
+-            if run.lease.as_ref().is_some_and(|l| l.expires_at_ms > now_ms) {
+-                return Err(error(ErrorCode::LeaseBusy, "lease"));
+-            }
+-            let fencing_token = run
+-                .last_fencing_token
+-                .checked_add(1)
+-                .ok_or_else(|| error(ErrorCode::InvalidContract, "lease.fencing_token"))?;
+-            let lease = RunLease {
+-                scope: scope.clone(),
+-                run_id: run_id.clone(),
+-                owner: owner.clone(),
+-                fencing_token,
+-                expires_at_ms,
+-            };
+-            run.last_fencing_token = fencing_token;
+-            run.lease = Some(lease.clone());
+-            Ok(lease)
+-        })
++        Box::pin(async move { self.acquire_lease_now(scope, run_id, owner, now_ms, ttl_ms) })
+     }
+ 
+     fn renew_lease<'a>(
+@@ -640,136 +639,7 @@ impl StateStore for MemoryStateStore {
+         run_id: &'a Id,
+         input: CommitInput,
+     ) -> PortFuture<'a, StoredRun> {
+-        Box::pin(async move {
+-            check_scope(scope, &input.snapshot.scope)?;
+-            let mut scopes = self.lock()?;
+-            let state = namespace(&scopes, scope)?;
+-            let run = state.runs.get(run_id).ok_or_else(not_found)?;
+-            validate_lease(run, scope, run_id, &input.lease, input.now_ms)?;
+-            if run.snapshot.revision != input.expected_revision {
+-                return Err(error(ErrorCode::RevisionConflict, "revision"));
+-            }
+-            validate_transition(&run.snapshot, &input.snapshot)?;
+-            recovery_state::transition(&run.snapshot, &input.snapshot, &input.events)?;
+-            if input.events.iter().any(|event| {
+-                matches!(
+-                    event.payload,
+-                    RunEventPayload::RunResumed { .. } | RunEventPayload::RunRecovered { .. }
+-                ) && event.timestamp_ms > input.now_ms
+-            }) {
+-                return Err(error(ErrorCode::InvalidEvent, "events.resume_time"));
+-            }
+-            if let Some(receipt) = input
+-                .snapshot
+-                .resume_receipts
+-                .last()
+-                .filter(|receipt| receipt.accepted_revision == input.snapshot.revision)
+-            {
+-                let expired = input.now_ms >= run.snapshot.timing.deadline_at_ms
+-                    || run
+-                        .snapshot
+-                        .wait
+-                        .as_ref()
+-                        .and_then(|wait| wait.expires_at_ms)
+-                        .is_some_and(|deadline| input.now_ms >= deadline);
+-                // A durable adapter may advance the lease-check time after
+-                // queue/lock delay. Crossing expiry must not turn a stale
+-                // on-time decision into an accepted approval.
+-                if receipt.expired != expired {
+-                    return Err(error(
+-                        ErrorCode::DeadlineExceeded,
+-                        "resume.acceptance_expiry",
+-                    ));
+-                }
+-            }
+-            if let Some(receipt) = input
+-                .snapshot
+-                .recovery_receipts
+-                .last()
+-                .filter(|receipt| receipt.accepted_revision == input.snapshot.revision)
+-            {
+-                if receipt.expired != (input.now_ms >= run.snapshot.timing.deadline_at_ms) {
+-                    return Err(error(
+-                        ErrorCode::DeadlineExceeded,
+-                        "recovery.acceptance_expiry",
+-                    ));
+-                }
+-            }
+-            let additions = validate_records(state, &input.records)?;
+-            validate_snapshot_refs(state, &additions, &input.snapshot)?;
+-            context_state::validate_update(&run.snapshot, &input.snapshot, &input.events)?;
+-            verification_state::transition(
+-                state,
+-                &additions,
+-                &run.snapshot,
+-                &input.snapshot,
+-                &input.messages,
+-                &input.events,
+-            )?;
+-            validate_events(
+-                state,
+-                &additions,
+-                &input.snapshot,
+-                run.snapshot.last_event_seq,
+-                &input.events,
+-                false,
+-                &input.messages,
+-            )?;
+-            let session = state
+-                .sessions
+-                .get(&run.snapshot.request.session_id)
+-                .ok_or_else(not_found)?;
+-            if session.snapshot.active_run_id.as_ref() != Some(run_id) {
+-                return Err(error(ErrorCode::InvalidTransition, "session.active_run_id"));
+-            }
+-            let transcript_revision = validate_messages(
+-                state,
+-                &additions,
+-                run_id,
+-                session.snapshot.transcript_revision,
+-                &input.messages,
+-            )?;
+-            let mut session_snapshot = session.snapshot.clone();
+-            let history: Vec<_> = run.events.iter().chain(&input.events).collect();
+-            let transcript: Vec<_> = session.messages.iter().chain(&input.messages).collect();
+-            validate_resume_history(state, &additions, &input.snapshot, &history, &transcript)?;
+-            session_snapshot.transcript_revision = transcript_revision;
+-            session_snapshot.context_revision_ref = input.snapshot.context_revision_ref.clone();
+-            if input.snapshot.status.is_terminal() {
+-                session_snapshot.active_run_id = None;
+-            }
+-            let mut messages = session.messages.clone();
+-            messages.extend(input.messages);
+-            let result = StoredRun {
+-                snapshot: input.snapshot.clone(),
+-                session: session_snapshot.clone(),
+-                messages: messages.clone(),
+-            };
+-            let state = scopes
+-                .get_mut(&scope_key(scope))
+-                .expect("validated namespace");
+-            state.records.extend(additions);
+-            state
+-                .message_ids
+-                .extend(messages.iter().map(|m| m.message_id.clone()));
+-            state
+-                .event_ids
+-                .extend(input.events.iter().map(|e| e.event_id.clone()));
+-            state.sessions.insert(
+-                session_snapshot.session_id.clone(),
+-                SessionState {
+-                    snapshot: session_snapshot,
+-                    messages,
+-                },
+-            );
+-            let run = state.runs.get_mut(run_id).expect("validated run");
+-            run.snapshot = input.snapshot;
+-            run.events.extend(input.events);
+-            if run.snapshot.status.is_terminal() {
+-                run.lease = None;
+-            }
+-            Ok(result)
+-        })
++        Box::pin(async move { self.commit_now(scope, run_id, input, None) })
+     }
+ 
+     fn read_events<'a>(
+@@ -2178,3 +2048,193 @@ fn validate_transition(previous: &RunSnapshot, next: &RunSnapshot) -> Result<(),
+     }
+     Ok(())
+ }
++
++impl MemoryStateStore {
++    fn acquire_lease_now(
++        &self,
++        scope: &Scope,
++        run_id: &Id,
++        owner: &Id,
++        now_ms: i64,
++        ttl_ms: u64,
++    ) -> Result<RunLease, ContractError> {
++        let expires_at_ms = lease_expiry(now_ms, ttl_ms)?;
++        let mut scopes = self.lock()?;
++        let run = run_mut(&mut scopes, scope, run_id)?;
++        if run.snapshot.status.is_terminal() {
++            return Err(error(ErrorCode::InvalidTransition, "run.status"));
++        }
++        if run.lease.as_ref().is_some_and(|l| l.expires_at_ms > now_ms) {
++            return Err(error(ErrorCode::LeaseBusy, "lease"));
++        }
++        let fencing_token = run
++            .last_fencing_token
++            .checked_add(1)
++            .ok_or_else(|| error(ErrorCode::InvalidContract, "lease.fencing_token"))?;
++        let lease = RunLease {
++            scope: scope.clone(),
++            run_id: run_id.clone(),
++            owner: owner.clone(),
++            fencing_token,
++            expires_at_ms,
++        };
++        run.last_fencing_token = fencing_token;
++        run.lease = Some(lease.clone());
++        Ok(lease)
++    }
++}
++
++impl MemoryStateStore {
++    fn commit_now(
++        &self,
++        scope: &Scope,
++        run_id: &Id,
++        input: CommitInput,
++        segment_override: Option<&Id>,
++    ) -> Result<StoredRun, ContractError> {
++        check_scope(scope, &input.snapshot.scope)?;
++        let mut scopes = self.lock()?;
++        let state = namespace(&scopes, scope)?;
++        let run = state.runs.get(run_id).ok_or_else(not_found)?;
++        validate_lease(run, scope, run_id, &input.lease, input.now_ms)?;
++        if run.snapshot.revision != input.expected_revision {
++            return Err(error(ErrorCode::RevisionConflict, "revision"));
++        }
++        validate_transition(&run.snapshot, &input.snapshot)?;
++        recovery_state::transition(&run.snapshot, &input.snapshot, &input.events)?;
++        if input.events.iter().any(|event| {
++            matches!(
++                event.payload,
++                RunEventPayload::RunResumed { .. } | RunEventPayload::RunRecovered { .. }
++            ) && event.timestamp_ms > input.now_ms
++        }) {
++            return Err(error(ErrorCode::InvalidEvent, "events.resume_time"));
++        }
++        if let Some(receipt) = input
++            .snapshot
++            .resume_receipts
++            .last()
++            .filter(|receipt| receipt.accepted_revision == input.snapshot.revision)
++        {
++            let expired = input.now_ms >= run.snapshot.timing.deadline_at_ms
++                || run
++                    .snapshot
++                    .wait
++                    .as_ref()
++                    .and_then(|wait| wait.expires_at_ms)
++                    .is_some_and(|deadline| input.now_ms >= deadline);
++            // A durable adapter may advance the lease-check time after
++            // queue/lock delay. Crossing expiry must not turn a stale
++            // on-time decision into an accepted approval.
++            if receipt.expired != expired {
++                return Err(error(
++                    ErrorCode::DeadlineExceeded,
++                    "resume.acceptance_expiry",
++                ));
++            }
++        }
++        if let Some(receipt) = input
++            .snapshot
++            .recovery_receipts
++            .last()
++            .filter(|receipt| receipt.accepted_revision == input.snapshot.revision)
++        {
++            if receipt.expired != (input.now_ms >= run.snapshot.timing.deadline_at_ms) {
++                return Err(error(
++                    ErrorCode::DeadlineExceeded,
++                    "recovery.acceptance_expiry",
++                ));
++            }
++        }
++        let additions = validate_records(state, &input.records)?;
++        validate_snapshot_refs(state, &additions, &input.snapshot)?;
++        context_state::validate_update(&run.snapshot, &input.snapshot, &input.events)?;
++        verification_state::transition(
++            state,
++            &additions,
++            &run.snapshot,
++            &input.snapshot,
++            &input.messages,
++            &input.events,
++        )?;
++        validate_events(
++            state,
++            &additions,
++            &input.snapshot,
++            run.snapshot.last_event_seq,
++            &input.events,
++            false,
++            &input.messages,
++        )?;
++        let session = state
++            .sessions
++            .get(&run.snapshot.request.session_id)
++            .ok_or_else(not_found)?;
++        if session.snapshot.active_run_id.as_ref() != Some(run_id) {
++            return Err(error(ErrorCode::InvalidTransition, "session.active_run_id"));
++        }
++        let transcript_revision = validate_messages(
++            state,
++            &additions,
++            run_id,
++            session.snapshot.transcript_revision,
++            &input.messages,
++        )?;
++        let mut session_snapshot = session.snapshot.clone();
++        let history: Vec<_> = run.events.iter().chain(&input.events).collect();
++        let transcript: Vec<_> = session.messages.iter().chain(&input.messages).collect();
++        validate_resume_history(state, &additions, &input.snapshot, &history, &transcript)?;
++        session_snapshot.transcript_revision = transcript_revision;
++        session_snapshot.context_revision_ref = input.snapshot.context_revision_ref.clone();
++        if input.snapshot.status.is_terminal() {
++            session_snapshot.active_run_id = None;
++        }
++        let mut messages = session.messages.clone();
++        messages.extend(input.messages);
++        let result = StoredRun {
++            snapshot: input.snapshot.clone(),
++            session: session_snapshot.clone(),
++            messages: messages.clone(),
++        };
++        let execution = state
++            .executions
++            .get(run_id)
++            .map(|history| {
++                execution::advance_history(
++                    history,
++                    &run.snapshot,
++                    &input.snapshot,
++                    segment_override,
++                )
++            })
++            .transpose()?;
++        let state = scopes
++            .get_mut(&scope_key(scope))
++            .expect("validated namespace");
++        if let Some(execution) = execution {
++            state.executions.insert(run_id.clone(), execution);
++        }
++
++        state.records.extend(additions);
++        state
++            .message_ids
++            .extend(messages.iter().map(|m| m.message_id.clone()));
++        state
++            .event_ids
++            .extend(input.events.iter().map(|e| e.event_id.clone()));
++        state.sessions.insert(
++            session_snapshot.session_id.clone(),
++            SessionState {
++                snapshot: session_snapshot,
++                messages,
++            },
++        );
++        let run = state.runs.get_mut(run_id).expect("validated run");
++        run.snapshot = input.snapshot;
++        run.events.extend(input.events);
++        if run.snapshot.status.is_terminal() {
++            run.lease = None;
++        }
++        Ok(result)
++    }
++}
+diff --git a/crates/wickle/src/state/checkpoint.rs b/crates/wickle/src/state/checkpoint.rs
+index c9918ab1d52c11aec6aa3904f18683a798ffc6ac..40703f418c0e823199ba373cd612d0433b6c55a6 100644
+--- a/crates/wickle/src/state/checkpoint.rs
++++ b/crates/wickle/src/state/checkpoint.rs
+@@ -3,7 +3,8 @@ use crate::{JsonDigest, RunOutcome, RunRequest, serialization::data_digest};
+ use serde::{Deserialize, Serialize, Serializer};
+ 
+ /// Version of the protected, scope-local memory-store checkpoint format.
+-pub const STATE_STORE_CHECKPOINT_VERSION: &str = "wickle.state-store.v1";
++pub const STATE_STORE_CHECKPOINT_VERSION: &str = "wickle.state-store.v2";
++const LEGACY_CHECKPOINT_VERSION: &str = "wickle.state-store.v1";
+ 
+ /// An owned, validated scope graph. Explicit serialization contains protected
+ /// transcript and input data and is intended only for authorized storage adapters.
+@@ -33,6 +34,10 @@ struct CheckpointView<'a> {
+     records: Vec<RecordView<'a>>,
+     #[serde(skip_serializing_if = "Vec::is_empty")]
+     hook_observations: Vec<&'a crate::HookObservation>,
++    #[serde(skip_serializing_if = "Vec::is_empty")]
++    executions: Vec<&'a crate::ExecutionHistory>,
++    #[serde(skip_serializing_if = "Vec::is_empty")]
++    legacy_runs: Vec<&'a Id>,
+ }
+ #[derive(Serialize)]
+ struct SessionView<'a> {
+@@ -55,7 +60,17 @@ struct RecordView<'a> {
+ impl Serialize for StateStoreCheckpoint {
+     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+         CheckpointView {
+-            schema_version: STATE_STORE_CHECKPOINT_VERSION,
++            schema_version: if self.state.executions.is_empty() {
++                LEGACY_CHECKPOINT_VERSION
++            } else {
++                STATE_STORE_CHECKPOINT_VERSION
++            },
++            executions: self.state.executions.values().collect(),
++            legacy_runs: if self.state.executions.is_empty() {
++                Vec::new()
++            } else {
++                self.state.legacy_runs.iter().collect()
++            },
+             scope: &self.scope,
+             sessions: self
+                 .state
+@@ -102,6 +117,10 @@ struct CheckpointData {
+     records: Vec<RecordData>,
+     #[serde(default)]
+     hook_observations: Vec<crate::HookObservation>,
++    #[serde(default)]
++    executions: Vec<crate::ExecutionHistory>,
++    #[serde(default)]
++    legacy_runs: Vec<Id>,
+ }
+ #[derive(Deserialize)]
+ #[serde(deny_unknown_fields)]
+@@ -173,9 +192,10 @@ impl StateStoreCheckpoint {
+         expected_digest: &JsonDigest,
+     ) -> Result<Self, ContractError> {
+         let value = crate::parse_json(input)?;
+-        if value.get("schema_version").and_then(Value::as_str)
+-            != Some(STATE_STORE_CHECKPOINT_VERSION)
+-        {
++        if !matches!(
++            value.get("schema_version").and_then(Value::as_str),
++            Some(STATE_STORE_CHECKPOINT_VERSION | LEGACY_CHECKPOINT_VERSION)
++        ) {
+             return Err(error(
+                 ErrorCode::UnsupportedSchemaVersion,
+                 "checkpoint.schema_version",
+@@ -220,9 +240,17 @@ impl MemoryStateStore {
+ }
+ 
+ fn restore_graph(data: CheckpointData) -> Result<StateStoreCheckpoint, ContractError> {
+-    if data.schema_version != STATE_STORE_CHECKPOINT_VERSION {
++    if data.schema_version != STATE_STORE_CHECKPOINT_VERSION
++        && data.schema_version != LEGACY_CHECKPOINT_VERSION
++    {
+         return Err(invalid("checkpoint.schema_version"));
+     }
++    if data.schema_version == LEGACY_CHECKPOINT_VERSION
++        && (!data.executions.is_empty() || !data.legacy_runs.is_empty())
++    {
++        return Err(invalid("checkpoint.legacy_execution"));
++    }
++    let execution_records = data.executions.clone();
+     let mut state = ScopeState::default();
+     for record in data.records {
+         if canonical_digest(&record.value) != record.reference.digest {
+@@ -409,6 +437,56 @@ fn restore_graph(data: CheckpointData) -> Result<StateStoreCheckpoint, ContractE
+     }
+     state.message_ids = message_ids;
+     state.event_ids = event_ids;
++    for execution in execution_records {
++        let run = state
++            .runs
++            .get(&execution.run_id)
++            .ok_or_else(|| invalid("checkpoint.execution_run"))?;
++        super::execution::validate_history(&execution, &run.snapshot)?;
++        for segment in &execution.segments {
++            let effects = match &segment.outcome {
++                Some(crate::SegmentOutcome::Interrupted { interruption }) => {
++                    &interruption.unresolved_effects
++                }
++                Some(crate::SegmentOutcome::Settled { outcome }) => &outcome.unresolved_effects,
++                None => continue,
++            };
++            for reference in effects {
++                record_value(&state, &BTreeMap::new(), reference)?;
++            }
++        }
++
++        if state
++            .executions
++            .insert(execution.run_id.clone(), execution)
++            .is_some()
++        {
++            return Err(invalid("checkpoint.duplicate_execution"));
++        }
++    }
++    if data.schema_version == LEGACY_CHECKPOINT_VERSION {
++        state.legacy_runs = state.runs.keys().cloned().collect();
++    } else {
++        for id in data.legacy_runs {
++            let run = state
++                .runs
++                .get(&id)
++                .ok_or_else(|| invalid("checkpoint.legacy_run"))?;
++            if !run.snapshot.status.is_terminal()
++                || state.executions.contains_key(&id)
++                || !state.legacy_runs.insert(id)
++            {
++                return Err(invalid("checkpoint.legacy_run"));
++            }
++        }
++        if state
++            .runs
++            .keys()
++            .any(|id| !state.executions.contains_key(id) && !state.legacy_runs.contains(id))
++        {
++            return Err(invalid("checkpoint.execution_missing"));
++        }
++    }
+     Ok(StateStoreCheckpoint {
+         scope: data.scope,
+         state,
+diff --git a/crates/wickle/src/state/execution.rs b/crates/wickle/src/state/execution.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..db88d74e46b8b886bf6d30e60b781ba2a5851195
+--- /dev/null
++++ b/crates/wickle/src/state/execution.rs
+@@ -0,0 +1,627 @@
++use super::*;
++use crate::serialization::data_digest;
++use crate::{
++    AcceptedSegmentCommand, BeginSegmentRequest, BeginSegmentResult, ControlAction, ControlCommand,
++    ControlReceipt, ExecutionHistory, ExecutionRecordVersion, ExecutionSegment,
++    ExecutionTransactions, InterruptionCause, InterruptionRecord, JsonTextLimits, RequestSnapshot,
++    SegmentOutcome, SegmentStart, StoredControlCommand,
++};
++fn invalid(path: &str) -> ContractError {
++    error(ErrorCode::InvalidSnapshot, path)
++}
++
++pub(super) fn initial_history(
++    snapshot: &RunSnapshot,
++    actor: &Id,
++    submitted: Option<&RequestSnapshot>,
++) -> Result<ExecutionHistory, ContractError> {
++    if let Some(value) = submitted {
++        validate_submission(value, snapshot)?;
++    }
++    Ok(ExecutionHistory {
++        run_id: snapshot.run_id.clone(),
++        execution_principal_ref: actor.clone(),
++        submitted: submitted.cloned(),
++        initial_claimed: false,
++        segments: vec![ExecutionSegment {
++            schema_version: ExecutionRecordVersion::V1,
++            execution_principal_ref: actor.clone(),
++            run_id: snapshot.run_id.clone(),
++            segment_id: segment_id(&snapshot.run_id, 0)?,
++            accepted_revision: 0,
++            outcome: None,
++            app_state: None,
++        }],
++        accepted_commands: vec![],
++        controls: vec![],
++    })
++}
++fn segment_id(run: &Id, revision: u64) -> Result<Id, ContractError> {
++    Id::new(format!("segment:{}", data_digest(&(run, revision))))
++}
++fn interrupted(previous: &RunSnapshot, segment: &ExecutionSegment) -> SegmentOutcome {
++    SegmentOutcome::Interrupted {
++        interruption: InterruptionRecord {
++            segment_id: segment.segment_id.clone(),
++            cause: InterruptionCause::SegmentStopped,
++            checkpoint_revision: previous.revision,
++            recoverable: true,
++            unresolved_effects: previous
++                .tool_ledger
++                .iter()
++                .filter(|entry| {
++                    matches!(
++                        entry.state,
++                        ToolCallState::Dispatching { .. } | ToolCallState::Unknown { .. }
++                    )
++                })
++                .filter_map(|entry| entry.call.bound_input_ref.clone())
++                .collect(),
++        },
++    }
++}
++pub(super) fn advance_history(
++    history: &ExecutionHistory,
++    previous: &RunSnapshot,
++    next: &RunSnapshot,
++    override_id: Option<&Id>,
++) -> Result<ExecutionHistory, ContractError> {
++    let mut result = history.clone();
++    let command = next
++        .resume_receipts
++        .last()
++        .filter(|r| r.accepted_revision == next.revision)
++        .map(|r| &r.command)
++        .or_else(|| {
++            next.recovery_receipts
++                .last()
++                .filter(|r| r.accepted_revision == next.revision)
++                .map(|r| &r.command)
++        });
++    let last = result
++        .segments
++        .last_mut()
++        .ok_or_else(|| invalid("execution.segment"))?;
++    let new_segment = command.is_some()
++        || last.outcome.is_some()
++        || override_id.is_some_and(|id| *id != last.segment_id);
++    if new_segment {
++        if last.outcome.is_none() {
++            last.outcome = Some(interrupted(previous, last));
++        }
++        let id = override_id
++            .cloned()
++            .unwrap_or(segment_id(&next.run_id, next.revision)?);
++        if result.segments.iter().any(|s| s.segment_id == id) {
++            return Err(error(ErrorCode::RequestConflict, "execution.segment_id"));
++        }
++        result.segments.push(ExecutionSegment {
++            schema_version: ExecutionRecordVersion::V1,
++            execution_principal_ref: history.execution_principal_ref.clone(),
++            run_id: next.run_id.clone(),
++            segment_id: id,
++            accepted_revision: next.revision,
++            outcome: None,
++            app_state: result.segments.last().and_then(|s| s.app_state.clone()),
++        });
++    }
++    let current = result
++        .segments
++        .last_mut()
++        .ok_or_else(|| invalid("execution.segment"))?;
++    if let Some(outcome) = &next.outcome {
++        current.outcome = Some(SegmentOutcome::Settled {
++            outcome: Box::new(outcome.clone()),
++        });
++    }
++    if let Some(command) = command {
++        if result
++            .accepted_commands
++            .iter()
++            .any(|c| c.command_id == command.command_id)
++            || result
++                .controls
++                .iter()
++                .any(|c| c.command.command_id == command.command_id)
++        {
++            return Err(error(ErrorCode::RequestConflict, "execution.command_id"));
++        }
++        result.accepted_commands.push(AcceptedSegmentCommand {
++            command_id: command.command_id.clone(),
++            payload_digest: data_digest(command),
++            segment_id: current.segment_id.clone(),
++        });
++    }
++    result.initial_claimed = true;
++    validate_history(&result, next)?;
++    Ok(result)
++}
++pub(super) fn validate_history(
++    history: &ExecutionHistory,
++    snapshot: &RunSnapshot,
++) -> Result<(), ContractError> {
++    if history.run_id != snapshot.run_id || history.segments.is_empty() {
++        return Err(invalid("execution.run"));
++    }
++    if let Some(submitted) = &history.submitted {
++        validate_submission(submitted, snapshot)?;
++    }
++    let mut ids = BTreeSet::new();
++    let mut revision = 0;
++    for (i, segment) in history.segments.iter().enumerate() {
++        segment.validate()?;
++        if segment.run_id != history.run_id
++            || segment.execution_principal_ref != history.execution_principal_ref
++            || !ids.insert(segment.segment_id.clone())
++            || (i == 0 && segment.accepted_revision != 0)
++            || (i > 0 && segment.accepted_revision <= revision)
++            || segment.accepted_revision > snapshot.revision
++            || (i + 1 < history.segments.len() && segment.outcome.is_none())
++        {
++            return Err(invalid("execution.history"));
++        }
++        revision = segment.accepted_revision;
++    }
++    let current = history
++        .segments
++        .last()
++        .ok_or_else(|| invalid("execution.segment"))?;
++    match (&snapshot.outcome, &current.outcome) {
++        (Some(expected), Some(SegmentOutcome::Settled { outcome }))
++            if expected == outcome.as_ref() => {}
++        (None, None) => {}
++        (None, Some(SegmentOutcome::Interrupted { .. }))
++            if snapshot.status == RunStatus::Interrupted => {}
++        _ => return Err(invalid("execution.current_outcome")),
++    }
++    if !history.initial_claimed && (snapshot.revision > 0 || history.segments.len() > 1) {
++        return Err(invalid("execution.initial_claim"));
++    }
++    let mut commands = BTreeSet::new();
++    for command in &history.accepted_commands {
++        if !commands.insert(command.command_id.clone()) || !ids.contains(&command.segment_id) {
++            return Err(invalid("execution.accepted"));
++        }
++    }
++    let mut expected = BTreeMap::new();
++    for (command, revision) in snapshot
++        .resume_receipts
++        .iter()
++        .map(|r| (&r.command, r.accepted_revision))
++        .chain(
++            snapshot
++                .recovery_receipts
++                .iter()
++                .map(|r| (&r.command, r.accepted_revision)),
++        )
++    {
++        if expected
++            .insert(command.command_id.clone(), (data_digest(command), revision))
++            .is_some()
++        {
++            return Err(invalid("execution.receipt_duplicate"));
++        }
++    }
++    for control in &history.controls {
++        if let Some(id) = &control.processed_segment_id {
++            let segment = history
++                .segments
++                .iter()
++                .find(|s| &s.segment_id == id)
++                .ok_or_else(|| invalid("execution.control_segment"))?;
++            if expected
++                .insert(
++                    control.command.command_id.clone(),
++                    (data_digest(&control.command), segment.accepted_revision),
++                )
++                .is_some()
++            {
++                return Err(invalid("execution.receipt_duplicate"));
++            }
++        }
++    }
++    if expected.len() != history.accepted_commands.len() {
++        return Err(invalid("execution.receipt_coverage"));
++    }
++    for accepted in &history.accepted_commands {
++        let segment = history
++            .segments
++            .iter()
++            .find(|s| s.segment_id == accepted.segment_id)
++            .ok_or_else(|| invalid("execution.receipt_segment"))?;
++        if expected.get(&accepted.command_id)
++            != Some(&(accepted.payload_digest.clone(), segment.accepted_revision))
++        {
++            return Err(invalid("execution.receipt_payload"));
++        }
++    }
++    let mut controls = BTreeSet::new();
++    for control in &history.controls {
++        validate_control(&control.command)?;
++        let accepted = history
++            .accepted_commands
++            .iter()
++            .find(|c| c.command_id == control.command.command_id);
++        match (&control.processed_segment_id, accepted) {
++            (Some(segment), Some(receipt))
++                if *segment == receipt.segment_id
++                    && receipt.payload_digest == data_digest(&control.command) => {}
++            (None, None) => {}
++            _ => return Err(invalid("execution.control_receipt")),
++        }
++
++        if !controls.insert(control.command.command_id.clone())
++            || control
++                .processed_segment_id
++                .as_ref()
++                .is_some_and(|id| !ids.contains(id))
++        {
++            return Err(invalid("execution.controls"));
++        }
++    }
++    Ok(())
++}
++fn validate_control(command: &ControlCommand) -> Result<(), ContractError> {
++    if matches!(command.action,ControlAction::Stop{cause} if !matches!(cause,InterruptionCause::HostShutdown|InterruptionCause::SegmentStopped))
++    {
++        return Err(error(ErrorCode::InvalidContract, "control.stop_cause"));
++    }
++    Ok(())
++}
++
++impl ExecutionTransactions for MemoryStateStore {
++    fn read_execution<'a>(
++        &'a self,
++        scope: &'a Scope,
++        run_id: &'a Id,
++    ) -> PortFuture<'a, ExecutionHistory> {
++        Box::pin(async move {
++            let scopes = self.lock()?;
++            let state = namespace(&scopes, scope)?;
++            if !state.runs.contains_key(run_id) {
++                return Err(not_found());
++            }
++            state.executions.get(run_id).cloned().ok_or_else(|| {
++                error(
++                    ErrorCode::CapabilityUnsupported,
++                    "execution.legacy_checkpoint",
++                )
++            })
++        })
++    }
++    fn submit_control_command<'a>(
++        &'a self,
++        scope: &'a Scope,
++        run_id: &'a Id,
++        command: ControlCommand,
++    ) -> PortFuture<'a, ControlReceipt> {
++        Box::pin(async move {
++            validate_control(&command)?;
++            let mut scopes = self.lock()?;
++            let state = scopes.get_mut(&scope_key(scope)).ok_or_else(not_found)?;
++            let run = state.runs.get(run_id).ok_or_else(not_found)?;
++            let history = state.executions.get_mut(run_id).ok_or_else(|| {
++                error(
++                    ErrorCode::CapabilityUnsupported,
++                    "execution.legacy_checkpoint",
++                )
++            })?;
++            if let Some(existing) = history
++                .controls
++                .iter()
++                .find(|c| c.command.command_id == command.command_id)
++            {
++                if existing.command != command {
++                    return Err(error(ErrorCode::RequestConflict, "control.command_id"));
++                }
++                return Ok(ControlReceipt {
++                    run_id: run_id.clone(),
++                    command_id: command.command_id,
++                    processed_segment_id: existing.processed_segment_id.clone(),
++                });
++            }
++            if history
++                .accepted_commands
++                .iter()
++                .any(|c| c.command_id == command.command_id)
++            {
++                return Err(error(ErrorCode::RequestConflict, "control.command_id"));
++            }
++            let receipt = ControlReceipt {
++                run_id: run_id.clone(),
++                command_id: command.command_id.clone(),
++                processed_segment_id: None,
++            };
++            if !run.snapshot.status.is_terminal() {
++                history.controls.push(StoredControlCommand {
++                    command,
++                    processed_segment_id: None,
++                });
++            }
++            Ok(receipt)
++        })
++    }
++    fn begin_segment<'a>(
++        &'a self,
++        scope: &'a Scope,
++        request: BeginSegmentRequest,
++    ) -> PortFuture<'a, BeginSegmentResult> {
++        Box::pin(async move {
++            // A private working copy is validated synchronously under the scope
++            // mutex. Publish once only after all lease/commit checks succeed.
++            let mut scopes = self.lock()?;
++            let previous = namespace(&scopes, scope)?.clone();
++            let working = MemoryStateStore {
++                scopes: Mutex::new(BTreeMap::from([(scope_key(scope), previous)])),
++            };
++            let result = working.begin_segment_now(scope, request)?;
++            let mut committed = working
++                .scopes
++                .into_inner()
++                .map_err(|_| error(ErrorCode::PersistenceUnavailable, "execution.transaction"))?;
++            scopes.insert(
++                scope_key(scope),
++                committed.remove(&scope_key(scope)).ok_or_else(not_found)?,
++            );
++            Ok(result)
++        })
++    }
++}
++impl MemoryStateStore {
++    fn begin_segment_now(
++        &self,
++        scope: &Scope,
++        request: BeginSegmentRequest,
++    ) -> Result<BeginSegmentResult, ContractError> {
++        let (saved, history) = {
++            let scopes = self.lock()?;
++            let state = namespace(&scopes, scope)?;
++            (
++                stored_run(state, &request.run_id)?,
++                state
++                    .executions
++                    .get(&request.run_id)
++                    .cloned()
++                    .ok_or_else(|| {
++                        error(
++                            ErrorCode::CapabilityUnsupported,
++                            "execution.legacy_checkpoint",
++                        )
++                    })?,
++            )
++        };
++        let current = history
++            .segments
++            .last()
++            .ok_or_else(|| invalid("execution.segment"))?;
++        let payload = match &request.start {
++            SegmentStart::Initial => None,
++            SegmentStart::Resume(command) => {
++                if command.run_id != request.run_id
++                    || command.expected_revision != request.expected_revision
++                {
++                    return Err(error(ErrorCode::RequestConflict, "execution.command"));
++                }
++                Some((command.command_id.clone(), data_digest(command)))
++            }
++            SegmentStart::Control(id) => {
++                let command = history
++                    .controls
++                    .iter()
++                    .find(|c| c.command.command_id == *id)
++                    .ok_or_else(not_found)?;
++                Some((id.clone(), data_digest(&command.command)))
++            }
++        };
++        if let Some((id, digest)) = &payload {
++            if let Some(receipt) = history
++                .accepted_commands
++                .iter()
++                .find(|c| c.command_id == *id)
++            {
++                if receipt.payload_digest != *digest {
++                    return Err(error(ErrorCode::RequestConflict, "execution.command"));
++                }
++                let segment = history
++                    .segments
++                    .iter()
++                    .find(|s| s.segment_id == receipt.segment_id)
++                    .cloned()
++                    .ok_or_else(|| invalid("execution.receipt"))?;
++                return Ok(BeginSegmentResult {
++                    state: saved,
++                    segment,
++                    lease: None,
++                });
++            }
++        } else if history.initial_claimed {
++            if request.segment_id != history.segments[0].segment_id {
++                return Err(error(ErrorCode::RequestConflict, "execution.initial_id"));
++            }
++            return Ok(BeginSegmentResult {
++                state: saved,
++                segment: history.segments[0].clone(),
++                lease: None,
++            });
++        }
++        if saved.snapshot.revision != request.expected_revision {
++            return Err(error(ErrorCode::RevisionConflict, "execution.revision"));
++        }
++        if saved.snapshot.status.is_terminal() {
++            if matches!(request.start, SegmentStart::Control(_)) {
++                return Ok(BeginSegmentResult {
++                    state: saved,
++                    segment: current.clone(),
++                    lease: None,
++                });
++            }
++            return Err(error(ErrorCode::InvalidTransition, "execution.terminal"));
++        }
++        if !matches!(request.start, SegmentStart::Initial)
++            && history
++                .segments
++                .iter()
++                .any(|s| s.segment_id == request.segment_id)
++        {
++            return Err(error(ErrorCode::RequestConflict, "execution.segment_id"));
++        }
++        let lease = self.acquire_lease_now(
++            scope,
++            &request.run_id,
++            &request.owner,
++            request.now_ms,
++            request.lease_ttl_ms.get(),
++        )?;
++        if matches!(request.start, SegmentStart::Initial) {
++            if request.transition.is_some()
++                || request.segment_id != current.segment_id
++                || saved.snapshot.phase != RunPhase::Admission
++            {
++                return Err(error(ErrorCode::InvalidTransition, "execution.initial"));
++            }
++            let mut scopes = self.lock()?;
++            scopes
++                .get_mut(&scope_key(scope))
++                .ok_or_else(not_found)?
++                .executions
++                .get_mut(&request.run_id)
++                .ok_or_else(not_found)?
++                .initial_claimed = true;
++            return Ok(BeginSegmentResult {
++                state: saved,
++                segment: current.clone(),
++                lease: Some(lease),
++            });
++        }
++        let transition = request
++            .transition
++            .ok_or_else(|| error(ErrorCode::InvalidContract, "execution.transition"))?;
++        match &request.start {
++            SegmentStart::Resume(command) => {
++                let actual = transition
++                    .snapshot
++                    .resume_receipts
++                    .last()
++                    .filter(|r| r.accepted_revision == transition.snapshot.revision)
++                    .map(|r| &r.command)
++                    .or_else(|| {
++                        transition
++                            .snapshot
++                            .recovery_receipts
++                            .last()
++                            .filter(|r| r.accepted_revision == transition.snapshot.revision)
++                            .map(|r| &r.command)
++                    });
++                if actual != Some(command) {
++                    return Err(error(
++                        ErrorCode::InvalidContract,
++                        "execution.resume_transition",
++                    ));
++                }
++            }
++            SegmentStart::Control(id) => {
++                let control = history
++                    .controls
++                    .iter()
++                    .find(|c| c.command.command_id == *id)
++                    .ok_or_else(not_found)?;
++                let allowed = match &control.command.action {
++                    ControlAction::Cancel { reason } => {
++                        transition.snapshot.status == RunStatus::Cancelled
++                            && matches!(transition.snapshot.outcome.as_ref().map(|o| &o.result), Some(OutcomeResult::Cancelled { reason: actual }) if actual == reason.as_str())
++                    }
++                    ControlAction::Expire => {
++                        request.now_ms >= saved.snapshot.timing.deadline_at_ms
++                            && transition.snapshot.status == RunStatus::Exhausted
++                            && matches!(
++                                transition.snapshot.outcome.as_ref().map(|o| &o.result),
++                                Some(OutcomeResult::Exhausted {
++                                    budget: crate::BudgetKind::Elapsed
++                                })
++                            )
++                    }
++                    ControlAction::Stop { .. } => {
++                        return Err(error(
++                            ErrorCode::CapabilityUnsupported,
++                            "execution.stop_checkpoint",
++                        ));
++                    }
++                };
++                if !allowed {
++                    return Err(error(
++                        ErrorCode::InvalidTransition,
++                        "execution.control_transition",
++                    ));
++                }
++            }
++            SegmentStart::Initial => unreachable!(),
++        }
++        let result = self.commit_now(
++            scope,
++            &request.run_id,
++            CommitInput {
++                expected_revision: request.expected_revision,
++                lease: lease.clone(),
++                now_ms: request.now_ms,
++                snapshot: transition.snapshot,
++                messages: transition.messages,
++                events: transition.events,
++                records: transition.records,
++            },
++            Some(&request.segment_id),
++        )?;
++        let mut scopes = self.lock()?;
++        let state = scopes.get_mut(&scope_key(scope)).ok_or_else(not_found)?;
++        let history = state
++            .executions
++            .get_mut(&request.run_id)
++            .ok_or_else(not_found)?;
++        if let SegmentStart::Control(id) = request.start {
++            let (_, digest) = payload.ok_or_else(|| invalid("execution.control"))?;
++            history.accepted_commands.push(AcceptedSegmentCommand {
++                command_id: id.clone(),
++                payload_digest: digest,
++                segment_id: request.segment_id.clone(),
++            });
++            history
++                .controls
++                .iter_mut()
++                .find(|c| c.command.command_id == id)
++                .ok_or_else(not_found)?
++                .processed_segment_id = Some(request.segment_id);
++        }
++        validate_history(history, &result.snapshot)?;
++        let segment = history.segments.last().cloned().ok_or_else(not_found)?;
++        let lease = if result.snapshot.status.is_terminal() {
++            None
++        } else {
++            Some(lease)
++        };
++        Ok(BeginSegmentResult {
++            state: result,
++            segment,
++            lease,
++        })
++    }
++}
++
++fn validate_submission(
++    submitted: &RequestSnapshot,
++    snapshot: &RunSnapshot,
++) -> Result<(), ContractError> {
++    submitted.validate(JsonTextLimits::default())?;
++    let request = crate::RunRequest::from_json(submitted.request_json())?;
++    let expected_system = snapshot
++        .system_inputs
++        .as_ref()
++        .map(|s| s.values_digest.clone())
++        .unwrap_or_else(|| crate::canonical_digest(&serde_json::json!({})));
++    if request != snapshot.request
++        || submitted.profile_ref.id != snapshot.profile.profile().agent_id
++        || submitted.profile_ref.version != snapshot.profile.profile().version
++        || crate::canonical_digest_json(submitted.system_inputs_json())? != expected_system
++    {
++        return Err(invalid("execution.submitted_snapshot"));
++    }
++    Ok(())
++}
+diff --git a/crates/wickle/tests/budget.rs b/crates/wickle/tests/budget.rs
+index 304d74eb0bb3700df4a545c02f632b50afa1b14d..b8e6ad0c755a27936430cc5bdcc18129ebc0de5e 100644
+--- a/crates/wickle/tests/budget.rs
++++ b/crates/wickle/tests/budget.rs
+@@ -728,3 +728,28 @@ async fn restoring_a_snapshot_rejects_missing_reservations_and_forged_counts() {
+         snapshot
+     );
+ }
++
++impl wickle::ExecutionTransactions for ControlledStore {
++    fn read_execution<'a>(
++        &'a self,
++        scope: &'a wickle::Scope,
++        run_id: &'a wickle::Id,
++    ) -> wickle::PortFuture<'a, wickle::ExecutionHistory> {
++        self.inner.read_execution(scope, run_id)
++    }
++    fn submit_control_command<'a>(
++        &'a self,
++        scope: &'a wickle::Scope,
++        run_id: &'a wickle::Id,
++        command: wickle::ControlCommand,
++    ) -> wickle::PortFuture<'a, wickle::ControlReceipt> {
++        self.inner.submit_control_command(scope, run_id, command)
++    }
++    fn begin_segment<'a>(
++        &'a self,
++        scope: &'a wickle::Scope,
++        request: wickle::BeginSegmentRequest,
++    ) -> wickle::PortFuture<'a, wickle::BeginSegmentResult> {
++        self.inner.begin_segment(scope, request)
++    }
++}
+diff --git a/crates/wickle/tests/execution_store.rs b/crates/wickle/tests/execution_store.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..8b431c811b333fc4d463d863febb5cd89790ac70
+--- /dev/null
++++ b/crates/wickle/tests/execution_store.rs
+@@ -0,0 +1,153 @@
++//! Atomic execution ownership, commands, rollback and checkpoint validation.
++use serde_json::json;
++use std::sync::Arc;
++use wickle::*;
++#[allow(dead_code)]
++mod support;
++use support::*;
++#[path = "support/execution_store.rs"]
++mod suite;
++#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++async fn memory_store_atomically_claims_segments_and_consumes_controls() {
++    suite::atomic_execution_contract(Arc::new(MemoryStateStore::new())).await;
++}
++#[tokio::test]
++async fn checkpoint_preserves_history_and_rejects_corrupted_execution_identity() {
++    let store = MemoryStateStore::new();
++    store
++        .admit(
++            &scope(),
++            admission("run", "request", "session", "input", "1").await,
++        )
++        .await
++        .unwrap();
++    let checkpoint = store.export_checkpoint(&scope()).unwrap();
++    let encoded = serde_json::to_string(&checkpoint).unwrap();
++    let restored = MemoryStateStore::from_checkpoint(
++        StateStoreCheckpoint::from_json(&encoded, &scope(), &checkpoint.digest()).unwrap(),
++    );
++    assert_eq!(
++        restored.read_execution(&scope(), &id("run")).await.unwrap(),
++        store.read_execution(&scope(), &id("run")).await.unwrap()
++    );
++    let mut corrupt: serde_json::Value = serde_json::from_str(&encoded).unwrap();
++    corrupt["executions"][0]["segments"][0]["execution_principal_ref"] = json!("replacement");
++    assert!(
++        StateStoreCheckpoint::from_json(
++            &corrupt.to_string(),
++            &scope(),
++            &canonical_digest(&corrupt)
++        )
++        .is_err()
++    );
++    // An authentic legacy-format graph remains readable, but has no invented actor/segment evidence.
++    let mut legacy: serde_json::Value = serde_json::from_str(&encoded).unwrap();
++    legacy["schema_version"] = json!("wickle.state-store.v1");
++    legacy.as_object_mut().unwrap().remove("executions");
++    let restored = MemoryStateStore::from_checkpoint(
++        StateStoreCheckpoint::from_json(&legacy.to_string(), &scope(), &canonical_digest(&legacy))
++            .unwrap(),
++    );
++    assert_eq!(
++        restored
++            .load(&scope(), &id("run"))
++            .await
++            .unwrap()
++            .snapshot
++            .run_id,
++        id("run")
++    );
++    assert_eq!(
++        restored
++            .read_execution(&scope(), &id("run"))
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::CapabilityUnsupported
++    );
++    assert_eq!(
++        restored
++            .admit(
++                &scope(),
++                admission("other", "other", "other", "input", "1").await
++            )
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::CapabilityUnsupported
++    );
++}
++#[tokio::test]
++async fn recovery_acceptance_and_lease_are_one_transaction() {
++    suite::atomic_recovery_contract(Arc::new(MemoryStateStore::new())).await;
++}
++
++#[tokio::test]
++async fn version_two_rejects_missing_active_history_even_when_other_histories_remain() {
++    let store = MemoryStateStore::new();
++    for run in ["first", "second"] {
++        store
++            .admit(&scope(), admission(run, run, run, "input", "1").await)
++            .await
++            .unwrap();
++    }
++    let mut image = serde_json::to_value(store.export_checkpoint(&scope()).unwrap()).unwrap();
++    image["executions"].as_array_mut().unwrap().remove(0);
++    assert!(
++        StateStoreCheckpoint::from_json(&image.to_string(), &scope(), &canonical_digest(&image))
++            .is_err()
++    );
++}
++#[tokio::test]
++async fn restored_receipts_must_match_the_original_recovery_command_and_segment() {
++    let store = Arc::new(MemoryStateStore::new());
++    suite::atomic_recovery_contract(store.clone()).await;
++    let image = serde_json::to_value(store.export_checkpoint(&scope()).unwrap()).unwrap();
++    for kind in ["missing", "digest", "segment"] {
++        let mut changed = image.clone();
++        match kind {
++            "missing" => changed["executions"][0]["accepted_commands"] = json!([]),
++            "digest" => {
++                changed["executions"][0]["accepted_commands"][0]["payload_digest"] =
++                    json!(canonical_digest(&json!(false)))
++            }
++            _ => {
++                changed["executions"][0]["accepted_commands"][0]["segment_id"] =
++                    changed["executions"][0]["segments"][0]["segment_id"].clone()
++            }
++        }
++        assert!(
++            StateStoreCheckpoint::from_json(
++                &changed.to_string(),
++                &scope(),
++                &canonical_digest(&changed)
++            )
++            .is_err(),
++            "{kind}"
++        );
++    }
++}
++
++#[tokio::test]
++async fn version_two_cannot_silently_reclassify_new_terminal_runs_as_legacy() {
++    let store = Arc::new(MemoryStateStore::new());
++    suite::atomic_execution_contract(store.clone()).await;
++    store
++        .admit(
++            &scope(),
++            admission("other", "other", "other", "input", "1").await,
++        )
++        .await
++        .unwrap();
++    let mut image = serde_json::to_value(store.export_checkpoint(&scope()).unwrap()).unwrap();
++    let histories = image["executions"].as_array_mut().unwrap();
++    let index = histories
++        .iter()
++        .position(|v| v["run_id"] == "atomic-run")
++        .unwrap();
++    histories.remove(index);
++    assert!(
++        StateStoreCheckpoint::from_json(&image.to_string(), &scope(), &canonical_digest(&image))
++            .is_err()
++    );
++}
+diff --git a/crates/wickle/tests/input_binding.rs b/crates/wickle/tests/input_binding.rs
+index 31a57046f2f75f38a53d3eff4ed25953f7f9cd1d..e31a7f456bf760e4a103030d966df7a26b3c807b 100644
+--- a/crates/wickle/tests/input_binding.rs
++++ b/crates/wickle/tests/input_binding.rs
+@@ -1346,3 +1346,28 @@ async fn zero_resolver_capacity_and_small_value_bounds_stop_before_unsafe_progre
+             .is_none()
+     );
+ }
++
++impl wickle::ExecutionTransactions for FailingCommitStore {
++    fn read_execution<'a>(
++        &'a self,
++        scope: &'a wickle::Scope,
++        run_id: &'a wickle::Id,
++    ) -> wickle::PortFuture<'a, wickle::ExecutionHistory> {
++        self.inner.read_execution(scope, run_id)
++    }
++    fn submit_control_command<'a>(
++        &'a self,
++        scope: &'a wickle::Scope,
++        run_id: &'a wickle::Id,
++        command: wickle::ControlCommand,
++    ) -> wickle::PortFuture<'a, wickle::ControlReceipt> {
++        self.inner.submit_control_command(scope, run_id, command)
++    }
++    fn begin_segment<'a>(
++        &'a self,
++        scope: &'a wickle::Scope,
++        request: wickle::BeginSegmentRequest,
++    ) -> wickle::PortFuture<'a, wickle::BeginSegmentResult> {
++        self.inner.begin_segment(scope, request)
++    }
++}
+diff --git a/crates/wickle/tests/support/agent.rs b/crates/wickle/tests/support/agent.rs
+index 9e282ca3db73daeff2dfd71e2937ada0730fc81d..acce7af83b94e16b6c3d883e46e6db168d5a4da0 100644
+--- a/crates/wickle/tests/support/agent.rs
++++ b/crates/wickle/tests/support/agent.rs
+@@ -814,3 +814,28 @@ impl Fixture {
+         completed(agent.start(request(name), context()).await.unwrap())
+     }
+ }
++
++impl wickle::ExecutionTransactions for FinalCommitStore {
++    fn read_execution<'a>(
++        &'a self,
++        scope: &'a wickle::Scope,
++        run_id: &'a wickle::Id,
++    ) -> wickle::PortFuture<'a, wickle::ExecutionHistory> {
++        self.inner.read_execution(scope, run_id)
++    }
++    fn submit_control_command<'a>(
++        &'a self,
++        scope: &'a wickle::Scope,
++        run_id: &'a wickle::Id,
++        command: wickle::ControlCommand,
++    ) -> wickle::PortFuture<'a, wickle::ControlReceipt> {
++        self.inner.submit_control_command(scope, run_id, command)
++    }
++    fn begin_segment<'a>(
++        &'a self,
++        scope: &'a wickle::Scope,
++        request: wickle::BeginSegmentRequest,
++    ) -> wickle::PortFuture<'a, wickle::BeginSegmentResult> {
++        self.inner.begin_segment(scope, request)
++    }
++}
+diff --git a/crates/wickle/tests/support/agent_hooks.rs b/crates/wickle/tests/support/agent_hooks.rs
+index 7d98339c14026eb01e14e711a5df7cc15d0f553c..9b95aebf6da5a9c28ecf16f448243bf75280be8c 100644
+--- a/crates/wickle/tests/support/agent_hooks.rs
++++ b/crates/wickle/tests/support/agent_hooks.rs
+@@ -600,3 +600,28 @@ impl StateStore for FaultStore {
+         self.inner.read_hook_observations(s, r)
+     }
+ }
++
++impl wickle::ExecutionTransactions for FaultStore {
++    fn read_execution<'a>(
++        &'a self,
++        scope: &'a wickle::Scope,
++        run_id: &'a wickle::Id,
++    ) -> wickle::PortFuture<'a, wickle::ExecutionHistory> {
++        self.inner.read_execution(scope, run_id)
++    }
++    fn submit_control_command<'a>(
++        &'a self,
++        scope: &'a wickle::Scope,
++        run_id: &'a wickle::Id,
++        command: wickle::ControlCommand,
++    ) -> wickle::PortFuture<'a, wickle::ControlReceipt> {
++        self.inner.submit_control_command(scope, run_id, command)
++    }
++    fn begin_segment<'a>(
++        &'a self,
++        scope: &'a wickle::Scope,
++        request: wickle::BeginSegmentRequest,
++    ) -> wickle::PortFuture<'a, wickle::BeginSegmentResult> {
++        self.inner.begin_segment(scope, request)
++    }
++}
+diff --git a/crates/wickle/tests/support/agent_resume.rs b/crates/wickle/tests/support/agent_resume.rs
+index 0ef5d64de1c10162c41bf1d58810d2e6d8a36091..18f8f1d9e80c0a5a39369452301911a8137e1c2d 100644
+--- a/crates/wickle/tests/support/agent_resume.rs
++++ b/crates/wickle/tests/support/agent_resume.rs
+@@ -877,3 +877,28 @@ impl StateStore for CommandStore {
+         })
+     }
+ }
++
++impl wickle::ExecutionTransactions for CommandStore {
++    fn read_execution<'a>(
++        &'a self,
++        scope: &'a wickle::Scope,
++        run_id: &'a wickle::Id,
++    ) -> wickle::PortFuture<'a, wickle::ExecutionHistory> {
++        self.inner.read_execution(scope, run_id)
++    }
++    fn submit_control_command<'a>(
++        &'a self,
++        scope: &'a wickle::Scope,
++        run_id: &'a wickle::Id,
++        command: wickle::ControlCommand,
++    ) -> wickle::PortFuture<'a, wickle::ControlReceipt> {
++        self.inner.submit_control_command(scope, run_id, command)
++    }
++    fn begin_segment<'a>(
++        &'a self,
++        scope: &'a wickle::Scope,
++        request: wickle::BeginSegmentRequest,
++    ) -> wickle::PortFuture<'a, wickle::BeginSegmentResult> {
++        self.inner.begin_segment(scope, request)
++    }
++}
+diff --git a/crates/wickle/tests/support/context_sources.rs b/crates/wickle/tests/support/context_sources.rs
+index 0d7282786848419b3ee70304085ff16b9e3c189c..fab8cd240a62a9581197b196106a9c68ef19a2d6 100644
+--- a/crates/wickle/tests/support/context_sources.rs
++++ b/crates/wickle/tests/support/context_sources.rs
+@@ -711,3 +711,28 @@ impl ModelRouter for FallbackRouter {
+         })
+     }
+ }
++
++impl wickle::ExecutionTransactions for SourceStore {
++    fn read_execution<'a>(
++        &'a self,
++        scope: &'a wickle::Scope,
++        run_id: &'a wickle::Id,
++    ) -> wickle::PortFuture<'a, wickle::ExecutionHistory> {
++        self.inner.read_execution(scope, run_id)
++    }
++    fn submit_control_command<'a>(
++        &'a self,
++        scope: &'a wickle::Scope,
++        run_id: &'a wickle::Id,
++        command: wickle::ControlCommand,
++    ) -> wickle::PortFuture<'a, wickle::ControlReceipt> {
++        self.inner.submit_control_command(scope, run_id, command)
++    }
++    fn begin_segment<'a>(
++        &'a self,
++        scope: &'a wickle::Scope,
++        request: wickle::BeginSegmentRequest,
++    ) -> wickle::PortFuture<'a, wickle::BeginSegmentResult> {
++        self.inner.begin_segment(scope, request)
++    }
++}
+diff --git a/crates/wickle/tests/support/execution_store.rs b/crates/wickle/tests/support/execution_store.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..7b35fccf43e4ea719aac5d630267deb3fa2dbb8c
+--- /dev/null
++++ b/crates/wickle/tests/support/execution_store.rs
+@@ -0,0 +1,304 @@
++use super::*;
++use std::sync::Arc;
++
++pub async fn atomic_execution_contract(store: Arc<dyn StateStore>) {
++    let s = scope();
++    let run = id("atomic-run");
++    let initial = store
++        .admit(
++            &s,
++            admission(run.as_str(), "request", "session", "input", "1").await,
++        )
++        .await
++        .unwrap()
++        .state;
++    let history = store.read_execution(&s, &run).await.unwrap();
++    assert!(!history.initial_claimed);
++    let first_id = history.segments[0].segment_id.clone();
++    let claim = |segment_id| BeginSegmentRequest {
++        transition: None,
++        run_id: run.clone(),
++        expected_revision: 0,
++        segment_id,
++        owner: id("worker"),
++        now_ms: 0,
++        lease_ttl_ms: 1000.try_into().unwrap(),
++        start: SegmentStart::Initial,
++    };
++    // A failure after tentative lease acquisition must not publish the lease.
++    assert!(
++        store
++            .begin_segment(&s, claim(id("wrong-initial-id")))
++            .await
++            .is_err()
++    );
++    assert!(
++        !store
++            .read_execution(&s, &run)
++            .await
++            .unwrap()
++            .initial_claimed
++    );
++    let lease = store
++        .acquire_lease(&s, &run, &id("rollback-probe"), 0, 1000)
++        .await
++        .unwrap();
++    store.release_lease(&s, &run, &lease, 0).await.unwrap();
++    let gate = Arc::new(tokio::sync::Barrier::new(2));
++    let mut claims = Vec::new();
++    for request in [claim(first_id.clone()), claim(first_id)] {
++        let store = store.clone();
++        let owner = s.clone();
++        let gate = gate.clone();
++        claims.push(tokio::spawn(async move {
++            gate.wait().await;
++            store.begin_segment(&owner, request).await
++        }));
++    }
++    let b = claims.pop().unwrap().await.unwrap();
++    let a = claims.pop().unwrap().await.unwrap();
++    let a = a.unwrap();
++    let b = b.unwrap();
++    assert_eq!(
++        usize::from(a.lease.is_some()) + usize::from(b.lease.is_some()),
++        1
++    );
++    let lease = a.lease.or(b.lease).unwrap();
++    store.release_lease(&s, &run, &lease, 1).await.unwrap();
++    let command = ControlCommand {
++        command_id: id("cancel"),
++        principal_ref: id("reviewer"),
++        action: ControlAction::Cancel { reason: id("stop") },
++    };
++    let (a, b) = tokio::join!(
++        store.submit_control_command(&s, &run, command.clone()),
++        store.submit_control_command(&s, &run, command.clone())
++    );
++    assert_eq!(a.unwrap(), b.unwrap());
++    assert_eq!(
++        store.read_execution(&s, &run).await.unwrap().controls.len(),
++        1
++    );
++    let mut changed = command;
++    changed.principal_ref = id("different-user");
++    assert_eq!(
++        store
++            .submit_control_command(&s, &run, changed)
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::RequestConflict
++    );
++    let mut commit = finished(&initial.snapshot, lease, 2);
++    commit.snapshot.status = RunStatus::Cancelled;
++    commit.snapshot.outcome.as_mut().unwrap().result = OutcomeResult::Cancelled {
++        reason: "stop".into(),
++    };
++    let outcome = ProtectedRecord::new(
++        id("cancel-outcome"),
++        1,
++        serde_json::to_value(commit.snapshot.outcome.as_ref().unwrap()).unwrap(),
++    );
++    commit.events[0].payload = RunEventPayload::RunFinished {
++        outcome_ref: outcome.reference().clone(),
++    };
++    let transition = SegmentTransition {
++        snapshot: commit.snapshot,
++        messages: commit.messages,
++        events: commit.events,
++        records: vec![outcome],
++    };
++    let request = BeginSegmentRequest {
++        transition: Some(transition),
++        run_id: run.clone(),
++        expected_revision: 0,
++        segment_id: id("cancel-segment"),
++        owner: id("controller"),
++        now_ms: 2,
++        lease_ttl_ms: 1000.try_into().unwrap(),
++        start: SegmentStart::Control(id("cancel")),
++    };
++    let mut reused = request.clone();
++    reused.segment_id = history.segments[0].segment_id.clone();
++    assert!(
++        store.begin_segment(&s, reused).await.is_err(),
++        "a control must allocate a new segment ID"
++    );
++    let (a, b) = tokio::join!(
++        store.begin_segment(&s, request.clone()),
++        store.begin_segment(&s, request)
++    );
++    let a = a.unwrap();
++    let b = b.unwrap();
++    assert_eq!(a.segment, b.segment);
++    assert!(a.lease.is_none() && b.lease.is_none());
++    assert_eq!(a.state.snapshot.status, RunStatus::Cancelled);
++    let history = store.read_execution(&s, &run).await.unwrap();
++    assert_eq!(history.segments.len(), 2);
++    assert_eq!(history.accepted_commands.len(), 1);
++    assert_eq!(
++        history.controls[0].processed_segment_id,
++        Some(id("cancel-segment"))
++    );
++    assert_eq!(history.execution_principal_ref, id("execution-principal"));
++    assert!(matches!(
++        history.segments[0].outcome,
++        Some(SegmentOutcome::Interrupted { .. })
++    ));
++    assert!(matches!(
++        history.segments[1].outcome,
++        Some(SegmentOutcome::Settled { .. })
++    ));
++    assert!(
++        store
++            .load(&s, &run)
++            .await
++            .unwrap()
++            .session
++            .active_run_id
++            .is_none()
++    );
++    let before = store.read_events(&s, &run, 0, 100).await.unwrap();
++    store
++        .submit_control_command(
++            &s,
++            &run,
++            ControlCommand {
++                command_id: id("terminal-noop"),
++                principal_ref: id("reviewer"),
++                action: ControlAction::Expire,
++            },
++        )
++        .await
++        .unwrap();
++    assert_eq!(store.read_execution(&s, &run).await.unwrap(), history);
++    assert_eq!(store.read_events(&s, &run, 0, 100).await.unwrap(), before);
++    let foreign = Scope {
++        workspace_id: id("foreign"),
++        ..s
++    };
++    assert!(store.read_execution(&foreign, &run).await.is_err());
++}
++
++pub async fn atomic_recovery_contract(store: Arc<dyn StateStore>) {
++    let s = scope();
++    let run = id("recover-run");
++    let saved = store
++        .admit(
++            &s,
++            admission(
++                run.as_str(),
++                "recover-request",
++                "recover-session",
++                "input",
++                "1",
++            )
++            .await,
++        )
++        .await
++        .unwrap()
++        .state;
++    let source = saved.snapshot.recovery_record(id("source")).unwrap();
++    let command = ResumeCommand {
++        run_id: run.clone(),
++        expected_revision: 0,
++        command_id: id("recover-once"),
++        action: ResumeAction::Recover {
++            recovery_ref: source.reference().clone(),
++        },
++    };
++    let command_record = ProtectedRecord::new(
++        id("recovery-command"),
++        1,
++        serde_json::to_value(&command).unwrap(),
++    );
++    let receipt = RecoveryReceipt {
++        command: command.clone(),
++        command_ref: command_record.reference().clone(),
++        source_snapshot_ref: source.reference().clone(),
++        accepted_revision: 1,
++        previous_segment_start_revision: 0,
++        previous_last_event_seq: 1,
++        actor_ref: id("reviewer"),
++        capability_grant_ref: id("grant"),
++        expired: false,
++        recovery_attempt_id: Some(id("recovery-budget")),
++    };
++    let receipt_record = ProtectedRecord::new(
++        id("recovery-receipt"),
++        1,
++        serde_json::to_value(&receipt).unwrap(),
++    );
++    let mut next = saved.snapshot.clone();
++    next.revision = 1;
++    next.phase = RunPhase::Prepare;
++    next.recovery_receipts.push(receipt);
++    next.usage.recovery_attempts += 1;
++    next.reservations.push(AttemptReservation {
++        attempt_id: id("recovery-budget"),
++        kind: ReservationKind::Recovery {},
++        reserved_at_ms: 0,
++    });
++    next.last_event_seq = 2;
++    let mut e = event(
++        &run,
++        &id("recover-session"),
++        &s,
++        2,
++        RunEventPayload::RunRecovered {
++            recovery_receipt_ref: receipt_record.reference().clone(),
++        },
++    );
++    e.timestamp_ms = 0;
++    let transition = SegmentTransition {
++        snapshot: next,
++        messages: vec![],
++        events: vec![e],
++        records: vec![source, command_record, receipt_record],
++    };
++    let request = BeginSegmentRequest {
++        transition: Some(transition),
++        run_id: run.clone(),
++        expected_revision: 0,
++        segment_id: id("recovered"),
++        owner: id("recover-worker"),
++        now_ms: 0,
++        lease_ttl_ms: 1000.try_into().unwrap(),
++        start: SegmentStart::Resume(command),
++    };
++    let mut broken = request.clone();
++    broken.transition.as_mut().unwrap().events.clear();
++    assert!(store.begin_segment(&s, broken).await.is_err());
++    assert_eq!(store.load(&s, &run).await.unwrap(), saved);
++    assert!(
++        store
++            .read_execution(&s, &run)
++            .await
++            .unwrap()
++            .accepted_commands
++            .is_empty()
++    );
++    let before = store.read_execution(&s, &run).await.unwrap();
++    let accepted = store.begin_segment(&s, request.clone()).await.unwrap();
++    assert!(accepted.lease.is_some());
++    let replay = store.begin_segment(&s, request.clone()).await.unwrap();
++    assert!(replay.lease.is_none());
++    assert_eq!(accepted.segment, replay.segment);
++    assert_eq!(replay.state.snapshot.usage.recovery_attempts, 1);
++    let mut conflict = request;
++    conflict.expected_revision = 1;
++    if let SegmentStart::Resume(c) = &mut conflict.start {
++        c.expected_revision = 1;
++    }
++    assert!(matches!(
++        store.begin_segment(&s, conflict).await,
++        Err(ContractError {
++            code: ErrorCode::RequestConflict,
++            ..
++        })
++    ));
++    let after = store.read_execution(&s, &run).await.unwrap();
++    assert_eq!(after.segments.len(), before.segments.len() + 1);
++    assert_eq!(after.accepted_commands.len(), 1);
++    assert_eq!(after.execution_principal_ref, id("execution-principal"));
++}
+diff --git a/crates/wickle/tests/support/mod.rs b/crates/wickle/tests/support/mod.rs
+index d9fb36803c0a84202708bccfebe795869e63960e..5b3f8deec97a7459ae3f3793aab52a3a754849e5 100644
+--- a/crates/wickle/tests/support/mod.rs
++++ b/crates/wickle/tests/support/mod.rs
+@@ -161,6 +161,8 @@ pub async fn admission(
+         visibility: Visibility::UserAndModel,
+     };
+     AdmissionInput {
++        execution_principal_ref: id("execution-principal"),
++        submitted: None,
+         snapshot,
+         prompt_snapshot: prompt_record.reference().clone(),
+         messages: vec![message],
+diff --git a/crates/wickle/tests/support/tool_execution.rs b/crates/wickle/tests/support/tool_execution.rs
+index 687349fd40b08837653706d6cf5511af688475a7..1e2c1a055b3979df3f5faf9627adc604c17344cf 100644
+--- a/crates/wickle/tests/support/tool_execution.rs
++++ b/crates/wickle/tests/support/tool_execution.rs
+@@ -706,3 +706,28 @@ impl StateStore for FaultStore {
+         })
+     }
+ }
++
++impl wickle::ExecutionTransactions for FaultStore {
++    fn read_execution<'a>(
++        &'a self,
++        scope: &'a wickle::Scope,
++        run_id: &'a wickle::Id,
++    ) -> wickle::PortFuture<'a, wickle::ExecutionHistory> {
++        self.inner.read_execution(scope, run_id)
++    }
++    fn submit_control_command<'a>(
++        &'a self,
++        scope: &'a wickle::Scope,
++        run_id: &'a wickle::Id,
++        command: wickle::ControlCommand,
++    ) -> wickle::PortFuture<'a, wickle::ControlReceipt> {
++        self.inner.submit_control_command(scope, run_id, command)
++    }
++    fn begin_segment<'a>(
++        &'a self,
++        scope: &'a wickle::Scope,
++        request: wickle::BeginSegmentRequest,
++    ) -> wickle::PortFuture<'a, wickle::BeginSegmentResult> {
++        self.inner.begin_segment(scope, request)
++    }
++}
+diff --git a/docs/sqlite-state-store.md b/docs/sqlite-state-store.md
+index af03dd7939de8fb4565f9e8dd208a58daee2a991..0053f6190c7ad1728475ccfff09c95218e87ab29 100644
+--- a/docs/sqlite-state-store.md
++++ b/docs/sqlite-state-store.md
+@@ -82,3 +82,25 @@ python3 scripts/check-package.py --allow-dirty
+ 
+ Process termination and restart are tested directly. Hardware power-loss behavior
+ depends on SQLite and the underlying storage and is not simulated by those tests.
++
++## Execution-history checkpoint upgrade
++
++New admissions write `wickle.state-store.v2` scope checkpoints containing original
++execution actors, segments and control-command history. The SQL table layout is
++unchanged. Version-one checkpoints remain readable without rewriting them, and
++existing terminal outcomes/events remain intact when a later admission upgrades
++the scope in the same transaction. The v2 checkpoint explicitly lists inherited
++legacy Run IDs; missing history for an unmarked Run is corruption, including for
++terminal Runs. Accepted command evidence must match the saved recovery/resume
++receipt payload and segment revision.
++
++A legacy nonterminal Run has no trustworthy execution-history metadata. New
++admission into such a scope is rejected with `execution.legacy_drain_required`;
++new execution-transaction access returns `execution.legacy_checkpoint`. Finish or
++otherwise resolve these Runs using their original runtime before upgrading. The
++store does not invent actors, segment identities or command receipts for them.
++
++Back up the database before allowing the first new write. Do not run an older
++binary against a scope written in v2. Rollback means restoring a compatible backup
++and reconciling external effects, not simply switching the executable. Reads and
++failed transactions do not migrate a scope. See [runtime compatibility](compatibility.md).
+diff --git a/docs/state.md b/docs/state.md
+index 37655c5cefb7111226522ff844a89857bc5507fb..7151298574457d7184421e4a9087fb315996bfba 100644
+--- a/docs/state.md
++++ b/docs/state.md
+@@ -76,3 +76,35 @@ The [independent consumer](../tests/support/state_consumer.rs) exercises admissi
+ idempotent replay, lease acquisition, terminal commit, event replay, and a foreign
+ scope lookup. It is built against the extracted package by
+ `python3 scripts/check-package.py`.
++
++## Atomic execution transactions
++
++StateStore implementations also implement `ExecutionTransactions`. Admission
++stores the original authenticated `execution_principal_ref`, an initial segment
++identity, and an optional validated submitted-request snapshot. A later reviewer
++or worker does not replace the execution principal.
++
++`begin_segment` accepts initial ownership or a resume/control transition in one
++transaction. The caller proposes checkpoint/messages/events/records, but the
++store validates them and supplies the lease itself. A failed validation rolls
++back lease acquisition and command consumption too. Replaying an accepted command
++returns its original segment with no new lease; it must not start another driver.
++The result's Run state may be newer than that historical segment.
++
++`submit_control_command` durably records an authenticated command without changing
++Run status. Reusing its ID with a different payload is a conflict. Cancel/expire
++processing requires a matching terminal transition, and expiry requires the Run
++deadline to have elapsed. Terminal control submissions are no-ops. Stop intent can
++be stored, but consuming it remains unsupported until interrupted checkpoint and
++driver integration is enabled; it is never reported as a completed stop.
++
++`read_execution` returns protected segment and command history. Apply current Host
++authorization before exposing it. Past segment outcomes are immutable; a later
++resume or idle terminal control creates another segment. Application-state and
++policy execution remain driver responsibilities.
++
++The memory reference implementation validates a private scope working copy under
++its mutex and publishes it only after all checks pass. SQLite executes the same
++operation inside its existing immediate transaction, persisting history,
++checkpoint, records and events together. This correctness-oriented reference path
++copies scope state; it is not a claim of constant-time mutation for large histories.
+diff --git a/tests/support/budget_consumer.rs b/tests/support/budget_consumer.rs
+index 1f8e49a4e8e17f0686d630c237078e808272f26f..85f6291205dc56739426618d30e895eba29bba7d 100644
+--- a/tests/support/budget_consumer.rs
++++ b/tests/support/budget_consumer.rs
+@@ -131,6 +131,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+         .admit(
+             &scope,
+             AdmissionInput {
++                execution_principal_ref: id("execution-principal"),
++                submitted: None,
+                 snapshot,
+                 prompt_snapshot: prompt.reference().clone(),
+                 messages: vec![Message {
+diff --git a/tests/support/context_consumer.rs b/tests/support/context_consumer.rs
+index 56ec71edac0b5f7e92c57c288cdf2f5d5dee6ce6..fae65905c08434d92d1a3217db9006938483335b 100644
+--- a/tests/support/context_consumer.rs
++++ b/tests/support/context_consumer.rs
+@@ -128,6 +128,8 @@ fn admission(
+         last_event_seq: 1,
+     };
+     AdmissionInput {
++        execution_principal_ref: id("execution-principal"),
++        submitted: None,
+         snapshot,
+         prompt_snapshot: prompt.reference().clone(),
+         require_durable: false,
+diff --git a/tests/support/input_binding_consumer.rs b/tests/support/input_binding_consumer.rs
+index dc035f1bc079c290502b573994e828474c418dc9..84302be94358c8ec1f2d6efe475fd5ca4f1b2572 100644
+--- a/tests/support/input_binding_consumer.rs
++++ b/tests/support/input_binding_consumer.rs
+@@ -287,6 +287,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+         .admit(
+             &scope,
+             AdmissionInput {
++                execution_principal_ref: id("execution-principal"),
++                submitted: None,
+                 snapshot,
+                 prompt_snapshot: prompt.reference().clone(),
+                 messages: vec![Message {
+diff --git a/tests/support/routing_consumer.rs b/tests/support/routing_consumer.rs
+index 9635a6dda83171e3d16e507f9460e391d9f35eb4..eda79ae71ed4b918221af6a57f38f8f4e657a115 100644
+--- a/tests/support/routing_consumer.rs
++++ b/tests/support/routing_consumer.rs
+@@ -352,6 +352,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+         visibility: Visibility::UserAndModel,
+     };
+     let input = AdmissionInput {
++        execution_principal_ref: id("execution-principal"),
++        submitted: None,
+         snapshot,
+         prompt_snapshot: prompt.reference().clone(),
+         messages: vec![message],
+diff --git a/tests/support/sqlite_consumer.rs b/tests/support/sqlite_consumer.rs
+index 7c0d75a5c01743acecd5f40e5208328604664e3a..b2ee090bb04a5a609530603042e59ec652d3ecc3 100644
+--- a/tests/support/sqlite_consumer.rs
++++ b/tests/support/sqlite_consumer.rs
+@@ -74,6 +74,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+         let restored = store.load(&scope, &id("run")).await?;
+         assert_eq!(restored.snapshot.status, RunStatus::Succeeded);
+         assert_eq!(restored.snapshot.revision, 1);
++        let execution = store.read_execution(&scope, &id("run")).await?;
++        assert_eq!(execution.execution_principal_ref, id("execution-principal"));
++        assert!(matches!(execution.segments[0].outcome, Some(SegmentOutcome::Settled { .. })));
+         assert_eq!(
+             restored.snapshot.request.model_options.get("reasoning_effort"),
+             Some(&json!("high"))
+@@ -187,6 +190,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+         visibility: Visibility::UserAndModel,
+     };
+     let input = AdmissionInput {
++        execution_principal_ref: id("execution-principal"),
++        submitted: None,
+         snapshot,
+         prompt_snapshot: prompt.reference().clone(),
+         messages: vec![message],
+@@ -206,9 +211,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+         "admission: created={}, retry_created={}, run={}",
+         first.created, replay.created, replay.state.snapshot.run_id
+     );
+-    let lease = store
+-        .acquire_lease(&scope, &id("run"), &id("worker"), 1000, 10_000)
+-        .await?;
++    let execution = store.read_execution(&scope, &id("run")).await?;
++    let claim = BeginSegmentRequest {
++        run_id: id("run"), expected_revision: 0,
++        segment_id: execution.segments[0].segment_id.clone(), owner: id("worker"),
++        now_ms: 1000, lease_ttl_ms: 10_000.try_into()?,
++        start: SegmentStart::Initial, transition: None,
++    };
++    let accepted = store.begin_segment(&scope, claim.clone()).await?;
++    assert!(store.begin_segment(&scope, claim).await?.lease.is_none());
++    let lease = accepted.lease.ok_or("initial lease missing")?;
+     let mut next = first.state.snapshot.clone();
+     next.revision = 1;
+     next.last_event_seq = 2;
+diff --git a/tests/support/state_consumer.rs b/tests/support/state_consumer.rs
+index f5a18e0915f58795bb8e84f343693e9a821e9124..0e8ddeff09b6cfd263e3ba0dc61bb3a535d197bb 100644
+--- a/tests/support/state_consumer.rs
++++ b/tests/support/state_consumer.rs
+@@ -119,6 +119,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+         visibility: Visibility::UserAndModel,
+     };
+     let input = AdmissionInput {
++        execution_principal_ref: id("execution-principal"),
++        submitted: None,
+         snapshot,
+         prompt_snapshot: prompt.reference().clone(),
+         messages: vec![message],

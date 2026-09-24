@@ -1,0 +1,25 @@
+[package]
+name = "wickle-adapter-runtime"
+version.workspace = true
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+description = "Scoped adapter assembly and lifecycle management for Wickle"
+publish = false
+include = ["Cargo.toml", "LICENSE", "src/**"]
+
+[dependencies]
+wickle = { path = "../wickle", version = "=0.2.0" }
+futures-util.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "test-util"] }
+wickle-model-router = { path = "../wickle-model-router", version = "=0.2.0" }
+wickle-state-sqlite = { path = "../wickle-state-sqlite", version = "=0.2.0" }
+
+[lints]
+workspace = true

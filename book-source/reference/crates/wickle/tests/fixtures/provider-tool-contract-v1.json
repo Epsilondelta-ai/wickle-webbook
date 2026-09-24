@@ -1,0 +1,157 @@
+{
+  "data": {
+    "schema_version": "wickle.provider-tool-contract.v1",
+    "tool": {
+      "id": "search",
+      "version": "1"
+    },
+    "canonical_name": "search",
+    "descriptor_digest": "sorted-json-v1:sha256:6e47504ab5ad7db790714ded15c01fc8b09ea18a375ad6136350e6897706969c",
+    "canonical_schema_digest": "sorted-json-v1:sha256:78369895358b0441f22fda62e5a2e60ee4a1ea0dd833b9d3ce046a479a71d6e1",
+    "compiler": {
+      "id": "restricted",
+      "version": "1"
+    },
+    "target": {
+      "provider": "example",
+      "api_contract": {
+        "operation": "messages",
+        "version": "1"
+      },
+      "capability_revision": "caps-1"
+    },
+    "wire_tool": {
+      "name": "wire_search",
+      "description": "Search",
+      "model_input_schema": {
+        "type": "object",
+        "properties": {
+          "q": {
+            "type": "string"
+          },
+          "n": {
+            "type": "object",
+            "properties": {
+              "present": {
+                "type": "boolean"
+              },
+              "value": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "present",
+              "value"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "q",
+          "n"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "decode_plan": {
+      "type": "fields",
+      "fields": [
+        {
+          "wire_name": "q",
+          "canonical_name": "query",
+          "encoding": {
+            "type": "identity"
+          }
+        },
+        {
+          "wire_name": "n",
+          "canonical_name": "note",
+          "encoding": {
+            "type": "presence",
+            "present_key": "present",
+            "value_key": "value"
+          }
+        }
+      ]
+    },
+    "fragments": [
+      {
+        "id": "tool-constraints-sorted-json-v1:sha256:98a57031d55dc8c6711fcf444e1406f26c3f1fe18689c278c5847b905d328441",
+        "text": "Tool wire_search: arguments must satisfy this canonical JSON Schema after decoding: {\"type\":\"object\",\"additionalProperties\":false,\"properties\":{\"query\":{\"$ref\":\"#/$defs/Query\"},\"note\":{\"type\":[\"string\",\"null\"]}},\"required\":[\"query\"],\"$defs\":{\"Query\":{\"type\":\"string\",\"minLength\":2}}}\nDecode representation: {\"type\":\"fields\",\"fields\":[{\"wire_name\":\"q\",\"canonical_name\":\"query\",\"encoding\":{\"type\":\"identity\"}},{\"wire_name\":\"n\",\"canonical_name\":\"note\",\"encoding\":{\"type\":\"presence\",\"present_key\":\"present\",\"value_key\":\"value\"}}]}. Field mappings restore wire_name to canonical_name. For a presence envelope, both members are required: true marks a supplied value (including explicit null); false with a null value placeholder means omission. Preserve omission and explicit null as distinct values.",
+        "digest": "sorted-json-v1:sha256:98a57031d55dc8c6711fcf444e1406f26c3f1fe18689c278c5847b905d328441"
+      }
+    ],
+    "enforcement": [
+      {
+        "canonical_pointer": "",
+        "provider_native": false,
+        "context_text": true,
+        "core": true
+      },
+      {
+        "canonical_pointer": "/type",
+        "provider_native": false,
+        "context_text": true,
+        "core": true
+      },
+      {
+        "canonical_pointer": "/additionalProperties",
+        "provider_native": false,
+        "context_text": true,
+        "core": true
+      },
+      {
+        "canonical_pointer": "/properties/query",
+        "provider_native": false,
+        "context_text": true,
+        "core": true
+      },
+      {
+        "canonical_pointer": "/properties/query/$ref",
+        "provider_native": false,
+        "context_text": true,
+        "core": true
+      },
+      {
+        "canonical_pointer": "/properties/note",
+        "provider_native": false,
+        "context_text": true,
+        "core": true
+      },
+      {
+        "canonical_pointer": "/properties/note/type",
+        "provider_native": false,
+        "context_text": true,
+        "core": true
+      },
+      {
+        "canonical_pointer": "/required",
+        "provider_native": false,
+        "context_text": true,
+        "core": true
+      },
+      {
+        "canonical_pointer": "/$defs/Query",
+        "provider_native": false,
+        "context_text": true,
+        "core": true
+      },
+      {
+        "canonical_pointer": "/$defs/Query/type",
+        "provider_native": false,
+        "context_text": true,
+        "core": true
+      },
+      {
+        "canonical_pointer": "/$defs/Query/minLength",
+        "provider_native": false,
+        "context_text": true,
+        "core": true
+      }
+    ]
+  },
+  "digest": "sorted-json-v1:sha256:15950047c70dbf17d8be0b0f7a920c009b214d1abb9ef8c6d26dd838e5c2e5e5"
+}

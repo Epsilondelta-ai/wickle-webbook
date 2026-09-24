@@ -1,0 +1,3521 @@
+diff --git a/.env.example b/.env.example
+index 9db3ab2ae03741d9599fbeaa11daf0e3f5742d99..b5c0c922566d2b2da43045a2fac332f85af35e58 100644
+--- a/.env.example
++++ b/.env.example
+@@ -1,6 +1,7 @@
+-# Provider credentials and model targets for Host applications and live tests.
++# Model-specific live integration test configuration only.
+ # See docs/env/README.md and each provider guide. Wickle core does not load this file.
+ # Provider adapters and model-specific live tests are not implemented yet.
++# These variable names are test-harness conventions, not library runtime settings.
+ # Each numbered model slot is an independent model/version test case.
+ # Share credentials within a provider; use another .env file for another resource.
+ # Never commit the resulting .env.
+diff --git a/crates/wickle/src/error.rs b/crates/wickle/src/error.rs
+index 5724ebb7e70c463bd50ca04a30f7d23f688de196..1f51e5825e41ab866422d22142c2b53317982558 100644
+--- a/crates/wickle/src/error.rs
++++ b/crates/wickle/src/error.rs
+@@ -35,6 +35,16 @@ pub enum ErrorCode {
+     InvalidArguments,
+     /// A supplied system value does not satisfy its registered input contract.
+     SystemInputInvalid,
++    /// A required registered system value is absent; the model must not invent it.
++    SystemInputMissing,
++    /// A read-only system-value resolver is unavailable or failed safely.
++    SystemInputUnavailable,
++    /// Supplied/resumed values or pinned input metadata differ from the saved snapshot.
++    SystemInputsMismatch,
++    /// Lookup permission requires separate Host approval before a target is known.
++    SystemInputApprovalRequired,
++    /// Resolver-count or serialized input-size bounds were exceeded.
++    InputBindingLimitExceeded,
+     /// Context identity, provenance structure, or call/result protocol is invalid.
+     InvalidContext,
+     /// Context scope, pinned assets, or protected-record identity does not match.
+diff --git a/crates/wickle/src/input_binding.rs b/crates/wickle/src/input_binding.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..d5aa782341d3dc90911181d2c87aad3af083dd37
+--- /dev/null
++++ b/crates/wickle/src/input_binding.rs
+@@ -0,0 +1,1197 @@
++use std::{
++    collections::{BTreeMap, BTreeSet},
++    fmt,
++    future::Future,
++    io,
++    panic::AssertUnwindSafe,
++    sync::Arc,
++};
++
++use futures_util::FutureExt;
++use serde::{Deserialize, Serialize, Serializer};
++use serde_json::Value;
++use tokio_util::sync::CancellationToken;
++
++use crate::{
++    CommitInput, CompiledTool, ContractError, ErrorCode, ExecutionContext, ExecutionContextData,
++    Id, IdSource, JsonDigest, JsonObject, PolicyAction, PolicyDecision, PolicyGate, PolicyRequest,
++    PortFuture, ProtectedRecord, RecordRef, RunBudget, RunSnapshot, Scope, SystemInputDefinition,
++    SystemInputRegistry, SystemInputSnapshotRef, SystemInputSource, SystemInputs, ToolBindingRef,
++    ToolCall, ToolCallState, ToolPolicyInput, VersionedRef, serialization::data_digest,
++    tool_schema::compile_validator,
++};
++
++const RUN_INPUT_VERSION: &str = "wickle.run-system-inputs.v1";
++const BOUND_INPUT_VERSION: &str = "wickle.bound-tool-input.v1";
++
++/// Finite resolver and input-size bounds. They are independent of model token budgets.
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub struct InputBindingLimits {
++    /// Maximum distinct resolver keys read for one new call; zero disables resolver reads.
++    pub max_resolver_calls: usize,
++    /// Maximum serialized bytes in one resolved or run-supplied value.
++    pub max_value_bytes: usize,
++    /// Maximum protected run-input or bound-input record size.
++    pub max_bound_bytes: usize,
++}
++impl Default for InputBindingLimits {
++    fn default() -> Self {
++        Self {
++            max_resolver_calls: 64,
++            max_value_bytes: 65_536,
++            max_bound_bytes: 1_048_576,
++        }
++    }
++}
++impl InputBindingLimits {
++    fn validate(self) -> Result<(), ContractError> {
++        if self.max_value_bytes == 0 || self.max_bound_bytes == 0 {
++            return Err(error(ErrorCode::InvalidContract, "input_binding.limits"));
++        }
++        Ok(())
++    }
++}
++
++#[derive(Clone, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++struct RunInputData {
++    schema_version: String,
++    scope: Scope,
++    values: SystemInputs,
++    definitions: BTreeMap<Id, SystemInputDefinition>,
++}
++
++/// Owned admission-time values and definition metadata. No resolver executes during
++/// capture, and a missing value is not replaced by a schema default or generated ID.
++#[derive(Clone)]
++pub struct RunSystemInputs {
++    data: RunInputData,
++}
++
++impl Serialize for RunSystemInputs {
++    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
++        self.data.serialize(serializer)
++    }
++}
++impl fmt::Debug for RunSystemInputs {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_struct("RunSystemInputs")
++            .field("value_count", &self.data.values.values().len())
++            .field("definition_count", &self.data.definitions.len())
++            .finish_non_exhaustive()
++    }
++}
++
++impl RunSystemInputs {
++    /// Validate supplied keys/types and freeze owned values with the default finite bounds.
++    pub fn capture(
++        scope: Scope,
++        supplied: Option<SystemInputs>,
++        registry: &SystemInputRegistry,
++    ) -> Result<Self, ContractError> {
++        Self::capture_with_limits(scope, supplied, registry, InputBindingLimits::default())
++    }
++    /// Capture using explicit finite size bounds. Missing registered keys are allowed.
++    pub fn capture_with_limits(
++        scope: Scope,
++        supplied: Option<SystemInputs>,
++        registry: &SystemInputRegistry,
++        limits: InputBindingLimits,
++    ) -> Result<Self, ContractError> {
++        limits.validate()?;
++        let snapshot = Self {
++            data: RunInputData {
++                schema_version: RUN_INPUT_VERSION.into(),
++                scope,
++                values: supplied.unwrap_or_default(),
++                definitions: registry.definitions().clone(),
++            },
++        };
++        snapshot.validate_data()?;
++        check_size(&snapshot, limits.max_bound_bytes)?;
++        for value in snapshot.values().values() {
++            check_size(value, limits.max_value_bytes)?;
++        }
++        Ok(snapshot)
++    }
++    /// Explicit access for the trusted binder; never automatic model projection.
++    pub fn values(&self) -> &JsonObject {
++        self.data.values.values()
++    }
++    /// Definition revisions and schemas pinned at admission.
++    pub fn definitions(&self) -> &BTreeMap<Id, SystemInputDefinition> {
++        &self.data.definitions
++    }
++    /// Exact owning scope of these values.
++    pub fn scope(&self) -> &Scope {
++        &self.data.scope
++    }
++    /// Digest of the complete protected serialized snapshot.
++    pub fn digest(&self) -> JsonDigest {
++        data_digest(&self.data)
++    }
++    /// Create the immutable record to include in the admission transaction.
++    pub fn to_record(&self, record_id: Id, revision: u64) -> ProtectedRecord {
++        ProtectedRecord::new(
++            record_id,
++            revision,
++            serde_json::to_value(self).expect("serializable input data"),
++        )
++    }
++    /// Create the run checkpoint reference after verifying its protected record identity.
++    pub fn snapshot_ref(
++        &self,
++        record: &RecordRef,
++    ) -> Result<SystemInputSnapshotRef, ContractError> {
++        if record.digest != self.digest() {
++            return Err(error(
++                ErrorCode::SystemInputsMismatch,
++                "system_inputs.record",
++            ));
++        }
++        Ok(SystemInputSnapshotRef {
++            snapshot_ref: record.clone(),
++            values_digest: data_digest(self.values()),
++            definition_versions: self
++                .definitions()
++                .iter()
++                .map(|(key, definition)| (key.clone(), definition.version.clone()))
++                .collect(),
++        })
++    }
++    /// Restore exact stored data and verify every pinned definition against the registry.
++    /// Additional unrelated registry keys do not replace or enlarge the saved snapshot.
++    pub fn restore(
++        record: &ProtectedRecord,
++        reference: &SystemInputSnapshotRef,
++        scope: &Scope,
++        registry: &SystemInputRegistry,
++    ) -> Result<Self, ContractError> {
++        if record.reference() != &reference.snapshot_ref {
++            return Err(error(
++                ErrorCode::SystemInputsMismatch,
++                "system_inputs.record",
++            ));
++        }
++        let snapshot = Self::from_value(record.value(), reference, scope)?;
++        if snapshot
++            .definitions()
++            .iter()
++            .any(|(key, definition)| registry.get(key) != Some(definition))
++        {
++            return Err(error(
++                ErrorCode::SystemInputsMismatch,
++                "system_inputs.definitions",
++            ));
++        }
++        Ok(snapshot)
++    }
++    /// Omission reuses saved values. Any supplied map, including an empty map, must match.
++    pub fn validate_resume(&self, supplied: Option<&SystemInputs>) -> Result<(), ContractError> {
++        if supplied.is_some_and(|values| data_digest(values.values()) != data_digest(self.values()))
++        {
++            return Err(error(ErrorCode::SystemInputsMismatch, "system_inputs"));
++        }
++        Ok(())
++    }
++    fn validate_data(&self) -> Result<(), ContractError> {
++        if self.data.schema_version != RUN_INPUT_VERSION
++            || self
++                .definitions()
++                .iter()
++                .any(|(key, definition)| key != &definition.key)
++        {
++            return Err(error(
++                ErrorCode::SystemInputInvalid,
++                "system_inputs.snapshot",
++            ));
++        }
++        SystemInputRegistry::new(self.definitions().values().cloned().collect())
++            .map_err(|_| error(ErrorCode::SystemInputInvalid, "system_inputs.definitions"))?;
++        for (key, value) in self.values() {
++            let key = Id::new(key.clone())
++                .map_err(|_| error(ErrorCode::SystemInputInvalid, "system_inputs.key"))?;
++            let definition = self
++                .definitions()
++                .get(&key)
++                .ok_or_else(|| error(ErrorCode::SystemInputInvalid, "system_inputs.key"))?;
++            if !matches!(definition.source, SystemInputSource::Run {}) {
++                return Err(error(ErrorCode::SystemInputInvalid, "system_inputs.source"));
++            }
++            validate_value(definition, value)?;
++        }
++        Ok(())
++    }
++    pub(crate) fn from_value(
++        value: &Value,
++        reference: &SystemInputSnapshotRef,
++        scope: &Scope,
++    ) -> Result<Self, ContractError> {
++        let data: RunInputData = serde_json::from_value(value.clone())
++            .map_err(|_| error(ErrorCode::SystemInputInvalid, "system_inputs.snapshot"))?;
++        let snapshot = Self { data };
++        snapshot.validate_data()?;
++        if snapshot.scope() != scope
++            || snapshot.snapshot_ref(&reference.snapshot_ref)? != *reference
++        {
++            return Err(error(
++                ErrorCode::SystemInputsMismatch,
++                "system_inputs.snapshot",
++            ));
++        }
++        Ok(snapshot)
++    }
++}
++
++/// One exact read-only resolver lookup, without other system values or credentials.
++#[derive(Clone)]
++pub struct SystemInputResolveRequest {
++    /// Registered key being requested.
++    pub key: Id,
++    /// Pinned value-definition revision.
++    pub definition_version: Id,
++    /// Exact resolver implementation selected by the definition.
++    pub resolver_ref: VersionedRef,
++    /// Normalized model-owned arguments only, including declared top-level defaults.
++    pub model_inputs: JsonObject,
++}
++impl fmt::Debug for SystemInputResolveRequest {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_struct("SystemInputResolveRequest")
++            .field("key", &self.key)
++            .field("definition_version", &self.definition_version)
++            .finish_non_exhaustive()
++    }
++}
++
++/// Current actor and execution bounds supplied to a trusted read-only resolver.
++#[derive(Debug, Clone)]
++pub struct SystemInputResolveContext {
++    /// Authenticated scope, not a value extracted from the model's arguments.
++    pub scope: Scope,
++    /// Current principal; it does not rewrite the run's original system-input values.
++    pub principal_ref: Id,
++    /// Current capability grant, checked by policy and the resolver's own backend.
++    pub capability_grant_ref: Id,
++    /// Current owning run.
++    pub run_id: Id,
++    /// Original logical call identity.
++    pub call_id: Id,
++    /// Deadline for this lookup.
++    pub deadline: tokio::time::Instant,
++    /// Child cancellation signal linked to both execution and caller cancellation.
++    pub cancellation: CancellationToken,
++}
++
++/// Data and source revision returned by a resolver, or recorded from a run snapshot.
++#[derive(Clone, PartialEq, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct ResolvedSystemInput {
++    /// Supplied JSON value; explicit null is different from an absent result.
++    pub value: Value,
++    /// Source data revision, not a newly invented foreign key.
++    pub revision: Id,
++}
++impl fmt::Debug for ResolvedSystemInput {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.write_str("ResolvedSystemInput(<redacted>)")
++    }
++}
++
++/// Trusted read-only lookup port. It must honor scope, principal, deadline and
++/// cancellation, and must not hide business writes or create missing foreign keys.
++pub trait SystemInputResolver: Send + Sync {
++    /// Read one exact registered key; None means absent, not JSON null.
++    fn resolve<'a>(
++        &'a self,
++        request: &'a SystemInputResolveRequest,
++        context: &'a SystemInputResolveContext,
++    ) -> PortFuture<'a, Option<ResolvedSystemInput>>;
++}
++
++/// One hidden parameter's fixed source, revision and optional value.
++#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct BoundSystemInput {
++    /// Registry key, which may differ from the handler parameter name.
++    pub key: Id,
++    /// Value-definition version pinned by the compiler and admission snapshot.
++    pub definition_version: Id,
++    /// Run snapshot or exact resolver implementation.
++    pub source: SystemInputSource,
++    /// None is absence; Some with value:null is an explicitly supplied null.
++    pub resolved: Option<ResolvedSystemInput>,
++}
++
++#[derive(Clone, PartialEq, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++struct BoundInputData {
++    schema_version: String,
++    scope: Scope,
++    run_id: Id,
++    call_id: Id,
++    tool: VersionedRef,
++    descriptor_digest: JsonDigest,
++    compiled_digest: JsonDigest,
++    compiler_version: String,
++    original_model_inputs: JsonObject,
++    normalized_model_inputs: JsonObject,
++    run_inputs_ref: Option<SystemInputSnapshotRef>,
++    system_inputs: BTreeMap<String, BoundSystemInput>,
++    execution_args: JsonObject,
++}
++
++/// Immutable execution inputs. Serialization is only for protected storage/policy,
++/// never a replacement for the original model ToolCall or its transcript message.
++#[derive(Clone, Serialize)]
++pub struct BoundToolInput {
++    data: BoundInputData,
++    binding_digest: JsonDigest,
++}
++#[derive(Deserialize)]
++#[serde(deny_unknown_fields)]
++struct BoundInputRecord {
++    data: BoundInputData,
++    binding_digest: JsonDigest,
++}
++
++impl fmt::Debug for BoundToolInput {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_struct("BoundToolInput")
++            .field("call_id", &self.data.call_id)
++            .field("tool", &self.data.tool)
++            .field("binding_digest", &self.binding_digest)
++            .finish_non_exhaustive()
++    }
++}
++
++impl BoundToolInput {
++    /// Exact owning resource scope.
++    pub fn scope(&self) -> &Scope {
++        &self.data.scope
++    }
++    /// Owning run identity.
++    pub fn run_id(&self) -> &Id {
++        &self.data.run_id
++    }
++    /// Stable logical call identity.
++    pub fn call_id(&self) -> &Id {
++        &self.data.call_id
++    }
++    /// Exact registered tool identity.
++    pub fn tool(&self) -> &VersionedRef {
++        &self.data.tool
++    }
++    /// Original descriptor digest.
++    pub fn descriptor_digest(&self) -> &JsonDigest {
++        &self.data.descriptor_digest
++    }
++    /// Compiler, schema and selected system-definition identity.
++    pub fn compiled_digest(&self) -> &JsonDigest {
++        &self.data.compiled_digest
++    }
++    /// Pinned compiler contract version.
++    pub fn compiler_version(&self) -> &str {
++        &self.data.compiler_version
++    }
++    /// Unmodified arguments originally recorded for the model call.
++    pub fn original_model_inputs(&self) -> &JsonObject {
++        &self.data.original_model_inputs
++    }
++    /// Original model arguments plus declared optional top-level defaults.
++    pub fn normalized_model_inputs(&self) -> &JsonObject {
++        &self.data.normalized_model_inputs
++    }
++    /// Only hidden parameters needed by this tool, with fixed absence/value metadata.
++    pub fn system_inputs(&self) -> &BTreeMap<String, BoundSystemInput> {
++        &self.data.system_inputs
++    }
++    /// Full handler arguments; privileged access, never automatic model echo.
++    pub fn execution_args(&self) -> &JsonObject {
++        &self.data.execution_args
++    }
++    /// Digest over exact inputs, tool/compiler identity, source revisions, scope and call.
++    pub fn binding_digest(&self) -> &JsonDigest {
++        &self.binding_digest
++    }
++    /// Build the existing final-value policy input without introducing a new ownership port.
++    pub fn policy_input(&self) -> ToolPolicyInput {
++        ToolPolicyInput::new(
++            self.data.call_id.clone(),
++            self.data.tool.clone(),
++            self.data.descriptor_digest.clone(),
++            self.binding_digest.clone(),
++            self.data.execution_args.clone(),
++        )
++    }
++    /// Exact action checked for allow/deny/approval after all values are fixed.
++    pub fn policy_request(&self) -> PolicyRequest {
++        PolicyRequest {
++            owner_scope: self.data.scope.clone(),
++            resource_id: self.data.run_id.clone(),
++            action: PolicyAction::ExecuteTool {
++                input: self.policy_input(),
++            },
++        }
++    }
++    /// Restore protected inputs using the saved ledger call's exact record reference
++    /// and the currently supplied compiled contract.
++    pub fn restore(
++        record: &ProtectedRecord,
++        compiled: &CompiledTool,
++        scope: &Scope,
++        run_id: &Id,
++        call: &ToolCall,
++        run_inputs_ref: Option<&SystemInputSnapshotRef>,
++    ) -> Result<Self, ContractError> {
++        let bound = Self::from_value(record.value())?;
++        if call.bound_input_ref.as_ref() != Some(record.reference())
++            || data_digest(&bound) != record.reference().digest
++        {
++            return Err(error(ErrorCode::SystemInputsMismatch, "bound_input.record"));
++        }
++        bound.validate_identity(scope, run_id, call, run_inputs_ref)?;
++        bound.validate_compiled(compiled)?;
++        Ok(bound)
++    }
++    fn from_value(value: &Value) -> Result<Self, ContractError> {
++        let record: BoundInputRecord = serde_json::from_value(value.clone())
++            .map_err(|_| error(ErrorCode::SystemInputInvalid, "bound_input"))?;
++        let bound = Self {
++            data: record.data,
++            binding_digest: record.binding_digest,
++        };
++        if bound.data.schema_version != BOUND_INPUT_VERSION
++            || data_digest(&bound.data) != bound.binding_digest
++            || data_digest(&bound) != crate::canonical_digest(value)
++        {
++            return Err(error(ErrorCode::SystemInputsMismatch, "bound_input.digest"));
++        }
++        let mut execution = bound.data.normalized_model_inputs.clone();
++        if bound
++            .data
++            .original_model_inputs
++            .iter()
++            .any(|(key, value)| execution.get(key) != Some(value))
++        {
++            return Err(error(
++                ErrorCode::SystemInputsMismatch,
++                "bound_input.model_inputs",
++            ));
++        }
++        let mut sources: BTreeMap<&Id, &BoundSystemInput> = BTreeMap::new();
++        for (parameter, input) in &bound.data.system_inputs {
++            if execution.contains_key(parameter) {
++                return Err(error(
++                    ErrorCode::SystemInputsMismatch,
++                    "bound_input.ownership",
++                ));
++            }
++            if sources
++                .insert(&input.key, input)
++                .is_some_and(|previous| previous != input)
++            {
++                return Err(error(
++                    ErrorCode::SystemInputsMismatch,
++                    "bound_input.sources",
++                ));
++            }
++            if let Some(resolved) = &input.resolved {
++                execution.insert(parameter.clone(), resolved.value.clone());
++            }
++        }
++        if execution != bound.data.execution_args {
++            return Err(error(
++                ErrorCode::SystemInputsMismatch,
++                "bound_input.execution_args",
++            ));
++        }
++        Ok(bound)
++    }
++    fn validate_identity(
++        &self,
++        scope: &Scope,
++        run_id: &Id,
++        call: &ToolCall,
++        run_inputs_ref: Option<&SystemInputSnapshotRef>,
++    ) -> Result<(), ContractError> {
++        if self.scope() != scope
++            || self.run_id() != run_id
++            || self.call_id() != &call.call_id
++            || self.descriptor_digest() != &call.descriptor_digest
++            || self.original_model_inputs() != &call.model_inputs
++            || self.data.run_inputs_ref.as_ref() != run_inputs_ref
++        {
++            return Err(error(
++                ErrorCode::SystemInputsMismatch,
++                "bound_input.identity",
++            ));
++        }
++        Ok(())
++    }
++    fn validate_compiled(&self, compiled: &CompiledTool) -> Result<(), ContractError> {
++        if self.compiled_digest() != compiled.digest()
++            || self.compiler_version() != compiled.compiler_version()
++            || self.tool() != &compiled.descriptor().tool
++            || self.descriptor_digest() != compiled.descriptor_digest()
++            || self.system_inputs().len() != compiled.system_bindings().len()
++        {
++            return Err(error(
++                ErrorCode::SystemInputsMismatch,
++                "bound_input.compiled",
++            ));
++        }
++        compiled.validate_model_inputs(self.original_model_inputs())?;
++        if normalize_model_inputs(compiled, self.original_model_inputs())?
++            != *self.normalized_model_inputs()
++        {
++            return Err(error(
++                ErrorCode::SystemInputsMismatch,
++                "bound_input.normalization",
++            ));
++        }
++        for (parameter, definition) in compiled.system_bindings() {
++            let input = self
++                .system_inputs()
++                .get(parameter)
++                .ok_or_else(|| error(ErrorCode::SystemInputsMismatch, "bound_input.parameters"))?;
++            if input.key != definition.key
++                || input.definition_version != definition.version
++                || input.source != definition.source
++            {
++                return Err(error(
++                    ErrorCode::SystemInputsMismatch,
++                    "bound_input.definitions",
++                ));
++            }
++            if let Some(value) = &input.resolved {
++                validate_value(definition, &value.value)?;
++            }
++        }
++        compiled
++            .validate_execution_inputs(self.execution_args())
++            .map_err(|_| error(ErrorCode::SystemInputInvalid, "tool.execution_inputs"))
++    }
++}
++
++/// A saved candidate and the decision observed at binding time, not a reusable
++/// dispatch permit. The executor must recheck current policy/budgets before I/O.
++#[derive(Debug)]
++pub struct ToolBindingResult {
++    /// Owned immutable protected input.
++    pub input: BoundToolInput,
++    /// Record stored atomically with the call's bound_input_ref.
++    pub reference: RecordRef,
++    /// Allow or require_approval. Deny is returned as an error without saving a new candidate.
++    pub decision: PolicyDecision,
++}
++
++/// Default normalization, registered system-value lookup and immutable candidate persistence.
++/// This version starts from the original model input. Hook transformations require
++/// a separate recorded path and never overwrite the original ToolCall.
++pub struct InputBinder {
++    registry: Arc<SystemInputRegistry>,
++    resolver: Option<Arc<dyn SystemInputResolver>>,
++    policy: Arc<PolicyGate>,
++    ids: Arc<dyn IdSource>,
++    limits: InputBindingLimits,
++}
++
++impl InputBinder {
++    /// Wire trusted metadata, optional read-only resolver, policy, and internal record IDs.
++    pub fn new(
++        registry: Arc<SystemInputRegistry>,
++        resolver: Option<Arc<dyn SystemInputResolver>>,
++        policy: Arc<PolicyGate>,
++        ids: Arc<dyn IdSource>,
++    ) -> Self {
++        Self {
++            registry,
++            resolver,
++            policy,
++            ids,
++            limits: InputBindingLimits::default(),
++        }
++    }
++    /// Set finite lookup/value/candidate bounds. Zero lookups disables resolver sources.
++    pub fn with_limits(mut self, limits: InputBindingLimits) -> Result<Self, ContractError> {
++        limits.validate()?;
++        self.limits = limits;
++        Ok(self)
++    }
++
++    /// Reuse an existing saved binding, or bind and atomically save a new candidate.
++    /// Every path checks current policy; an existing call never re-queries its resolver.
++    pub async fn bind(
++        &self,
++        compiled: &CompiledTool,
++        call_id: &Id,
++        context: &ExecutionContext,
++        budget: &RunBudget,
++    ) -> Result<ToolBindingResult, ContractError> {
++        boundary(context, budget).await?;
++        let saved = bounded(
++            context,
++            budget,
++            budget.store().load(budget.scope(), budget.run_id()),
++        )
++        .await?;
++        let call = saved
++            .snapshot
++            .tool_ledger
++            .iter()
++            .find(|entry| &entry.call.call_id == call_id)
++            .ok_or_else(|| error(ErrorCode::InvalidReference, "tool_call"))?
++            .call
++            .clone();
++        check_selection(&saved.snapshot, compiled, &call)?;
++        let run_inputs = match &saved.snapshot.system_inputs {
++            Some(reference) => {
++                boundary(context, budget).await?;
++                let record = bounded(
++                    context,
++                    budget,
++                    budget
++                        .store()
++                        .read_record(budget.scope(), &reference.snapshot_ref),
++                )
++                .await?;
++                let inputs =
++                    RunSystemInputs::restore(&record, reference, budget.scope(), &self.registry)?;
++                inputs.validate_resume(context.data.system_inputs.as_ref())?;
++                Some(inputs)
++            }
++            None => {
++                if context
++                    .data
++                    .system_inputs
++                    .as_ref()
++                    .is_some_and(|values| !values.values().is_empty())
++                {
++                    return Err(error(ErrorCode::SystemInputsMismatch, "system_inputs"));
++                }
++                if !compiled.system_bindings().is_empty() {
++                    return Err(error(
++                        ErrorCode::SystemInputMissing,
++                        "system_inputs.snapshot",
++                    ));
++                }
++                None
++            }
++        };
++        for definition in compiled.system_bindings().values() {
++            if self.registry.get(&definition.key) != Some(definition)
++                || run_inputs
++                    .as_ref()
++                    .and_then(|inputs| inputs.definitions().get(&definition.key))
++                    != Some(definition)
++            {
++                return Err(error(
++                    ErrorCode::SystemInputsMismatch,
++                    "system_inputs.definitions",
++                ));
++            }
++        }
++        if let Some(reference) = &call.bound_input_ref {
++            boundary(context, budget).await?;
++            let record = bounded(
++                context,
++                budget,
++                budget.store().read_record(budget.scope(), reference),
++            )
++            .await?;
++            let input = BoundToolInput::restore(
++                &record,
++                compiled,
++                budget.scope(),
++                budget.run_id(),
++                &call,
++                saved.snapshot.system_inputs.as_ref(),
++            )?;
++            validate_bound_record(record.value(), &saved.snapshot, &call, run_inputs.as_ref())?;
++            check_size(&input, self.limits.max_bound_bytes)?;
++            for value in input
++                .system_inputs()
++                .values()
++                .filter_map(|input| input.resolved.as_ref())
++            {
++                check_size(&value.value, self.limits.max_value_bytes)?;
++            }
++            let decision = self
++                .authorize(&input.policy_request(), context, budget, false)
++                .await?;
++            boundary(context, budget).await?;
++            return Ok(ToolBindingResult {
++                input,
++                reference: reference.clone(),
++                decision,
++            });
++        }
++        if !matches!(
++            saved
++                .snapshot
++                .tool_ledger
++                .iter()
++                .find(|entry| &entry.call.call_id == call_id)
++                .expect("found call")
++                .state,
++            ToolCallState::Planned {}
++        ) {
++            return Err(error(ErrorCode::InvalidTransition, "tool_call.state"));
++        }
++        let normalized = normalize_model_inputs(compiled, &call.model_inputs)?;
++        check_size(&normalized, self.limits.max_bound_bytes)?;
++        let mut execution_args = normalized.clone();
++        let mut system_inputs = BTreeMap::new();
++        let mut values: BTreeMap<Id, Option<ResolvedSystemInput>> = BTreeMap::new();
++        let mut resolver_calls = 0;
++        for (parameter, definition) in compiled.system_bindings() {
++            let resolved = if let Some(cached) = values.get(&definition.key) {
++                cached.clone()
++            } else {
++                let value = match &definition.source {
++                    SystemInputSource::Run {} => run_inputs
++                        .as_ref()
++                        .and_then(|inputs| inputs.values().get(definition.key.as_str()))
++                        .cloned()
++                        .map(|value| ResolvedSystemInput {
++                            value,
++                            revision: Id::new(
++                                saved
++                                    .snapshot
++                                    .system_inputs
++                                    .as_ref()
++                                    .expect("required run snapshot")
++                                    .snapshot_ref
++                                    .revision
++                                    .to_string(),
++                            )
++                            .expect("numeric revision"),
++                        }),
++                    SystemInputSource::Resolver { resolver_ref } => {
++                        if resolver_calls >= self.limits.max_resolver_calls {
++                            return Err(limit_error());
++                        }
++                        let request = PolicyRequest {
++                            owner_scope: budget.scope().clone(),
++                            resource_id: budget.run_id().clone(),
++                            action: PolicyAction::ResolveSystemInput {
++                                tool: compiled.descriptor().tool.clone(),
++                                call_id: call_id.clone(),
++                                descriptor_digest: compiled.descriptor_digest().clone(),
++                                compiled_digest: compiled.digest().clone(),
++                                key: definition.key.clone(),
++                                definition_version: definition.version.clone(),
++                                resolver_ref: resolver_ref.clone(),
++                            },
++                        };
++                        self.authorize(&request, context, budget, true).await?;
++                        let resolver = self.resolver.as_ref().ok_or_else(|| {
++                            error(ErrorCode::SystemInputUnavailable, "system_input.resolver")
++                        })?;
++                        boundary(context, budget).await?;
++                        let request = SystemInputResolveRequest {
++                            key: definition.key.clone(),
++                            definition_version: definition.version.clone(),
++                            resolver_ref: resolver_ref.clone(),
++                            model_inputs: normalized.clone(),
++                        };
++                        let child = budget.cancellation().child_token();
++                        let lookup_context = SystemInputResolveContext {
++                            scope: budget.scope().clone(),
++                            principal_ref: context.data.principal_ref.clone(),
++                            capability_grant_ref: context.data.capability_grant_ref.clone(),
++                            run_id: budget.run_id().clone(),
++                            call_id: call_id.clone(),
++                            deadline: budget.call_deadline()?,
++                            cancellation: child.clone(),
++                        };
++                        let lookup = AssertUnwindSafe(async {
++                            resolver.resolve(&request, &lookup_context).await
++                        })
++                        .catch_unwind();
++                        tokio::pin!(lookup);
++                        let guard = child.drop_guard();
++                        resolver_calls += 1;
++                        let answer = bounded(context, budget, async {
++                            lookup
++                                .await
++                                .map_err(|_| {
++                                    error(
++                                        ErrorCode::SystemInputUnavailable,
++                                        "system_input.resolver",
++                                    )
++                                })?
++                                .map_err(|_| {
++                                    error(
++                                        ErrorCode::SystemInputUnavailable,
++                                        "system_input.resolver",
++                                    )
++                                })
++                        })
++                        .await;
++                        drop(guard);
++                        let answer = answer?;
++                        boundary(context, budget).await?;
++                        answer
++                    }
++                };
++                if let Some(resolved) = &value {
++                    check_size(&resolved.value, self.limits.max_value_bytes)?;
++                    validate_value(definition, &resolved.value)?;
++                }
++                values.insert(definition.key.clone(), value.clone());
++                value
++            };
++            if let Some(value) = &resolved {
++                execution_args.insert(parameter.clone(), value.value.clone());
++            } else if required_parameter(compiled, parameter) {
++                return Err(error(
++                    ErrorCode::SystemInputMissing,
++                    &system_input_path(&definition.key),
++                ));
++            }
++            system_inputs.insert(
++                parameter.clone(),
++                BoundSystemInput {
++                    key: definition.key.clone(),
++                    definition_version: definition.version.clone(),
++                    source: definition.source.clone(),
++                    resolved,
++                },
++            );
++        }
++        compiled
++            .validate_execution_inputs(&execution_args)
++            .map_err(|_| error(ErrorCode::SystemInputInvalid, "tool.execution_inputs"))?;
++        let data = BoundInputData {
++            schema_version: BOUND_INPUT_VERSION.into(),
++            scope: budget.scope().clone(),
++            run_id: budget.run_id().clone(),
++            call_id: call_id.clone(),
++            tool: compiled.descriptor().tool.clone(),
++            descriptor_digest: compiled.descriptor_digest().clone(),
++            compiled_digest: compiled.digest().clone(),
++            compiler_version: compiled.compiler_version().into(),
++            original_model_inputs: call.model_inputs.clone(),
++            normalized_model_inputs: normalized,
++            run_inputs_ref: saved.snapshot.system_inputs.clone(),
++            system_inputs,
++            execution_args,
++        };
++        let input = BoundToolInput {
++            binding_digest: data_digest(&data),
++            data,
++        };
++        check_size(&input, self.limits.max_bound_bytes)?;
++        let decision = self
++            .authorize(&input.policy_request(), context, budget, false)
++            .await?;
++        boundary(context, budget).await?;
++        let record = ProtectedRecord::new(
++            self.ids.next_id()?,
++            1,
++            serde_json::to_value(&input).expect("bound input serialization"),
++        );
++        let reference = record.reference().clone();
++        let mut next = saved.snapshot;
++        let expected_revision = next.revision;
++        let (elapsed, now_ms) = budget.settlement_time(next.usage.elapsed_ms)?;
++        next.revision = next
++            .revision
++            .checked_add(1)
++            .ok_or_else(|| error(ErrorCode::RevisionConflict, "revision"))?;
++        next.usage.elapsed_ms = elapsed;
++        next.timing.last_observed_at_ms = now_ms;
++        next.tool_ledger
++            .iter_mut()
++            .find(|entry| &entry.call.call_id == call_id)
++            .expect("found call")
++            .call
++            .bound_input_ref = Some(reference.clone());
++        bounded(
++            context,
++            budget,
++            budget.store().commit(
++                budget.scope(),
++                budget.run_id(),
++                CommitInput {
++                    expected_revision,
++                    lease: budget.lease().clone(),
++                    now_ms,
++                    snapshot: next,
++                    messages: Vec::new(),
++                    events: Vec::new(),
++                    records: vec![record],
++                },
++            ),
++        )
++        .await?;
++        boundary(context, budget).await?;
++        Ok(ToolBindingResult {
++            input,
++            reference,
++            decision,
++        })
++    }
++
++    async fn authorize(
++        &self,
++        request: &PolicyRequest,
++        context: &ExecutionContext,
++        budget: &RunBudget,
++        lookup: bool,
++    ) -> Result<PolicyDecision, ContractError> {
++        boundary(context, budget).await?;
++        let deadline = budget.call_deadline()?;
++        let child = budget.cancellation().child_token();
++        let policy_context = ExecutionContext::new(
++            ExecutionContextData {
++                scope: context.data.scope.clone(),
++                principal_ref: context.data.principal_ref.clone(),
++                capability_grant_ref: context.data.capability_grant_ref.clone(),
++                trace_context: None,
++                system_inputs: None,
++            },
++            child.clone(),
++        );
++        let check = self
++            .policy
++            .check(request, &policy_context, Some(deadline), None);
++        tokio::pin!(check);
++        let guard = child.drop_guard();
++        let result = bounded(context, budget, &mut check).await;
++        drop(guard);
++        let decision = result?;
++        boundary(context, budget).await?;
++        match decision {
++            PolicyDecision::Deny { .. } => Err(error(ErrorCode::AccessDenied, "policy")),
++            PolicyDecision::RequireApproval { .. } if lookup => Err(error(
++                ErrorCode::SystemInputApprovalRequired,
++                "system_input.lookup",
++            )),
++            decision => Ok(decision),
++        }
++    }
++}
++
++fn check_selection(
++    snapshot: &RunSnapshot,
++    compiled: &CompiledTool,
++    call: &ToolCall,
++) -> Result<(), ContractError> {
++    if call.descriptor_digest != *compiled.descriptor_digest()
++        || !snapshot
++            .profile
++            .profile()
++            .tools
++            .iter()
++            .any(|selection| match selection {
++                ToolBindingRef::Catalog(reference) => {
++                    reference.tool_id == compiled.descriptor().tool.id
++                        && reference.version == compiled.descriptor().tool.version
++                        && call.tool_name == compiled.descriptor().name
++                }
++                ToolBindingRef::Export(export) => {
++                    export.alias.as_ref().unwrap_or(&compiled.descriptor().name) == &call.tool_name
++                        && snapshot
++                            .profile
++                            .profile()
++                            .adapters
++                            .as_ref()
++                            .is_some_and(|adapters| {
++                                adapters
++                                    .iter()
++                                    .any(|adapter| adapter.binding_id == export.adapter_binding)
++                            })
++                }
++            })
++    {
++        return Err(error(
++            ErrorCode::InvalidToolInputContract,
++            "tool_call.descriptor",
++        ));
++    }
++    Ok(())
++}
++
++fn normalize_model_inputs(
++    compiled: &CompiledTool,
++    original: &JsonObject,
++) -> Result<JsonObject, ContractError> {
++    compiled.validate_model_inputs(original)?;
++    let mut normalized = original.clone();
++    let properties = compiled
++        .model_input_schema()
++        .get("properties")
++        .and_then(Value::as_object)
++        .expect("compiled properties");
++    for parameter in &compiled.descriptor().agent_parameters {
++        if normalized.contains_key(parameter) || required_parameter(compiled, parameter) {
++            continue;
++        }
++        let mut schema = &properties[parameter];
++        let mut seen = BTreeSet::new();
++        loop {
++            if let Some(default) = schema.get("default") {
++                normalized.insert(parameter.clone(), default.clone());
++                break;
++            }
++            let Some(reference) = schema.get("$ref").and_then(Value::as_str) else {
++                break;
++            };
++            if !seen.insert(reference) {
++                break;
++            }
++            let pointer = reference
++                .strip_prefix('#')
++                .ok_or_else(|| error(ErrorCode::InvalidToolInputContract, "model_defaults"))?;
++            schema = compiled
++                .model_input_schema()
++                .pointer(pointer)
++                .ok_or_else(|| error(ErrorCode::InvalidToolInputContract, "model_defaults"))?;
++        }
++    }
++    compiled.validate_model_inputs(&normalized)?;
++    Ok(normalized)
++}
++fn required_parameter(compiled: &CompiledTool, parameter: &str) -> bool {
++    compiled
++        .input_schema()
++        .get("required")
++        .and_then(Value::as_array)
++        .is_some_and(|required| required.iter().any(|name| name.as_str() == Some(parameter)))
++}
++fn validate_value(definition: &SystemInputDefinition, value: &Value) -> Result<(), ContractError> {
++    let validator = compile_validator(&definition.value_schema).map_err(|_| {
++        error(
++            ErrorCode::SystemInputInvalid,
++            &system_input_path(&definition.key),
++        )
++    })?;
++    if !validator.is_valid(value) {
++        return Err(error(
++            ErrorCode::SystemInputInvalid,
++            &system_input_path(&definition.key),
++        ));
++    }
++    Ok(())
++}
++
++fn system_input_path(key: &Id) -> String {
++    // Only registered metadata is named; JSON escaping prevents control characters
++    // or punctuation from being interpreted as a path or leaking a supplied value.
++    format!(
++        "system_inputs[{}]",
++        serde_json::to_string(key.as_str()).expect("serializable key")
++    )
++}
++
++async fn boundary(context: &ExecutionContext, budget: &RunBudget) -> Result<(), ContractError> {
++    if &context.data.scope != budget.scope() {
++        return Err(error(ErrorCode::AccessDenied, "scope"));
++    }
++    if context.cancellation.is_cancelled() {
++        return Err(error(ErrorCode::Cancelled, "input_binding"));
++    }
++    bounded(context, budget, budget.check_boundary()).await
++}
++async fn bounded<T>(
++    context: &ExecutionContext,
++    budget: &RunBudget,
++    future: impl Future<Output = Result<T, ContractError>>,
++) -> Result<T, ContractError> {
++    if context.cancellation.is_cancelled() {
++        return Err(error(ErrorCode::Cancelled, "input_binding"));
++    }
++    tokio::select! {
++        biased;
++        _ = context.cancellation.cancelled() => Err(error(ErrorCode::Cancelled, "input_binding")),
++        stopped = budget.wait_for_cancellation_or_deadline() => { stopped?; Err(error(ErrorCode::DeadlineExceeded, "input_binding")) },
++        result = future => {
++            if context.cancellation.is_cancelled() || budget.cancellation().is_cancelled() { return Err(error(ErrorCode::Cancelled, "input_binding")); }
++            budget.call_deadline()?;
++            result
++        }
++    }
++}
++
++pub(crate) fn validate_bound_record(
++    value: &Value,
++    snapshot: &RunSnapshot,
++    call: &ToolCall,
++    run_inputs: Option<&RunSystemInputs>,
++) -> Result<(), ContractError> {
++    let input = BoundToolInput::from_value(value)?;
++    input.validate_identity(
++        &snapshot.scope,
++        &snapshot.run_id,
++        call,
++        snapshot.system_inputs.as_ref(),
++    )?;
++    for bound in input.system_inputs().values() {
++        let data = run_inputs
++            .ok_or_else(|| error(ErrorCode::SystemInputsMismatch, "bound_input.run_snapshot"))?;
++        let definition = data
++            .definitions()
++            .get(&bound.key)
++            .ok_or_else(|| error(ErrorCode::SystemInputsMismatch, "bound_input.definition"))?;
++        if definition.version != bound.definition_version || definition.source != bound.source {
++            return Err(error(
++                ErrorCode::SystemInputsMismatch,
++                "bound_input.definition",
++            ));
++        }
++        if let Some(value) = &bound.resolved {
++            validate_value(definition, &value.value)?;
++        }
++        if matches!(bound.source, SystemInputSource::Run {}) {
++            let expected = data.values().get(bound.key.as_str());
++            if bound.resolved.as_ref().map(|resolved| &resolved.value) != expected
++                || bound.resolved.as_ref().is_some_and(|resolved| {
++                    resolved.revision.as_str()
++                        != snapshot
++                            .system_inputs
++                            .as_ref()
++                            .expect("snapshot supplied")
++                            .snapshot_ref
++                            .revision
++                            .to_string()
++                })
++            {
++                return Err(error(
++                    ErrorCode::SystemInputsMismatch,
++                    "bound_input.run_value",
++                ));
++            }
++        }
++    }
++    Ok(())
++}
++
++struct ByteCounter {
++    total: usize,
++    limit: usize,
++}
++impl io::Write for ByteCounter {
++    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
++        self.total = self
++            .total
++            .checked_add(bytes.len())
++            .filter(|size| *size <= self.limit)
++            .ok_or_else(|| io::Error::other("input size limit"))?;
++        Ok(bytes.len())
++    }
++    fn flush(&mut self) -> io::Result<()> {
++        Ok(())
++    }
++}
++fn check_size(value: &impl Serialize, limit: usize) -> Result<(), ContractError> {
++    serde_json::to_writer(&mut ByteCounter { total: 0, limit }, value).map_err(|_| limit_error())
++}
++fn limit_error() -> ContractError {
++    error(ErrorCode::InputBindingLimitExceeded, "input_binding.limits")
++}
++fn error(code: ErrorCode, path: &str) -> ContractError {
++    ContractError::new(code, path)
++}
+diff --git a/crates/wickle/src/lib.rs b/crates/wickle/src/lib.rs
+index adfc5b2a52701c3ef57e7bfaaf6c29b05c8e24ca..bbbec7c5735c3ba0740b8b30115c3c31c9b210c7 100644
+--- a/crates/wickle/src/lib.rs
++++ b/crates/wickle/src/lib.rs
+@@ -17,6 +17,7 @@ mod clock;
+ mod context;
+ mod context_projection;
+ mod error;
++mod input_binding;
+ mod message;
+ mod model;
+ mod model_execution;
+@@ -37,6 +38,11 @@ pub use context_projection::{
+     ContextPriority, ContextProjection, InstructionAssetContent, PinnedPromptTool, ProjectionInput,
+     ProjectionLimits, PromptSnapshot, PromptToolBinding, ScopedOpaque, SkillManifest,
+ };
++pub use input_binding::{
++    BoundSystemInput, BoundToolInput, InputBinder, InputBindingLimits, ResolvedSystemInput,
++    RunSystemInputs, SystemInputResolveContext, SystemInputResolveRequest, SystemInputResolver,
++    ToolBindingResult,
++};
+ pub use model_protocol::{
+     ModelCallContext, ModelContent, ModelEvent, ModelFinish, ModelMessage, ModelOutput, ModelPort,
+     ModelPortBinding, ModelProtocolError, ModelProtocolErrorCode, ModelRequest, ModelResponse,
+diff --git a/crates/wickle/src/policy.rs b/crates/wickle/src/policy.rs
+index 9c4676cb31150529a60e5815914d14e6c5e102fd..0361649372f57397c8f5250195e05299acf980ff 100644
+--- a/crates/wickle/src/policy.rs
++++ b/crates/wickle/src/policy.rs
+@@ -87,6 +87,23 @@ pub enum PolicyAction {
+     ReadRecord {},
+     /// Use scoped data in model context.
+     UseContext {},
++    /// Read one registered system key before the final target value is known.
++    ResolveSystemInput {
++        /// Exact tool requesting the lookup.
++        tool: VersionedRef,
++        /// Logical call whose binding is being prepared.
++        call_id: Id,
++        /// Pinned tool descriptor identity.
++        descriptor_digest: JsonDigest,
++        /// Compiled input contract identity.
++        compiled_digest: JsonDigest,
++        /// Exact registry key, never a path expression.
++        key: Id,
++        /// Pinned system-input definition revision.
++        definition_version: Id,
++        /// Exact read-only resolver implementation.
++        resolver_ref: VersionedRef,
++    },
+     /// Send input to a selected model route.
+     InvokeModel {
+         /// Immutable selected route identity.
+diff --git a/crates/wickle/src/state.rs b/crates/wickle/src/state.rs
+index b9b8021a6e92694109b9e1aba63fa3c441372ede..bba953491e5b634c6680f5efcde249f55f843a8c 100644
+--- a/crates/wickle/src/state.rs
++++ b/crates/wickle/src/state.rs
+@@ -799,9 +799,18 @@ fn validate_snapshot_refs(
+     snapshot: &RunSnapshot,
+ ) -> Result<(), ContractError> {
+     let mut references = Vec::new();
+-    if let Some(inputs) = &snapshot.system_inputs {
+-        references.push(&inputs.snapshot_ref);
+-    }
++    let run_inputs = snapshot
++        .system_inputs
++        .as_ref()
++        .map(|inputs| {
++            crate::RunSystemInputs::from_value(
++                record_value(state, additions, &inputs.snapshot_ref)?,
++                inputs,
++                &snapshot.scope,
++            )
++            .map_err(|_| error(ErrorCode::InvalidSnapshot, "system_inputs"))
++        })
++        .transpose()?;
+     for invocation in &snapshot.model_ledger {
+         if let Some(reference) = &invocation.response_ref {
+             validate_model_response(state, additions, invocation, reference)?;
+@@ -810,12 +819,17 @@ fn validate_snapshot_refs(
+     references.extend(snapshot.assembly_ref.iter());
+     references.extend(&snapshot.context_batches);
+     references.extend(snapshot.source_states.iter().map(|s| &s.batch_ref));
+-    references.extend(
+-        snapshot
+-            .tool_ledger
+-            .iter()
+-            .filter_map(|entry| entry.call.bound_input_ref.as_ref()),
+-    );
++    for entry in &snapshot.tool_ledger {
++        if let Some(reference) = &entry.call.bound_input_ref {
++            crate::input_binding::validate_bound_record(
++                record_value(state, additions, reference)?,
++                snapshot,
++                &entry.call,
++                run_inputs.as_ref(),
++            )
++            .map_err(|_| error(ErrorCode::InvalidSnapshot, "bound_input"))?;
++        }
++    }
+     for entry in &snapshot.tool_ledger {
+         if let ToolCallState::Settled { result } = &entry.state {
+             references.extend(tool_result_refs(result));
+diff --git a/crates/wickle/src/tool_schema.rs b/crates/wickle/src/tool_schema.rs
+index 1103f24dd14bbbaab59a7ffa53aa92c4ff9640cd..3e056206155c3b1be492e8a77bbb5b6f76945acb 100644
+--- a/crates/wickle/src/tool_schema.rs
++++ b/crates/wickle/src/tool_schema.rs
+@@ -710,7 +710,7 @@ impl jsonschema::Retrieve for NoSchemaRetrieval {
+         Err("external schema retrieval is disabled".into())
+     }
+ }
+-fn compile_validator(schema: &Value) -> Result<jsonschema::Validator, ContractError> {
++pub(crate) fn compile_validator(schema: &Value) -> Result<jsonschema::Validator, ContractError> {
+     jsonschema::draft202012::options()
+         .should_validate_formats(true)
+         .with_retriever(NoSchemaRetrieval)
+diff --git a/crates/wickle/tests/input_binding.rs b/crates/wickle/tests/input_binding.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..5ec12c68f699c8ff9ec834897d2d598807c9fc27
+--- /dev/null
++++ b/crates/wickle/tests/input_binding.rs
+@@ -0,0 +1,1340 @@
++//! Frozen system inputs, scoped resolution, defaults, and binding persistence boundaries.
++
++use serde_json::{Value, json};
++use std::{
++    collections::BTreeMap,
++    sync::{
++        Arc, Mutex,
++        atomic::{AtomicUsize, Ordering},
++    },
++    time::Duration,
++};
++use tokio::sync::Notify;
++use tokio_util::sync::CancellationToken;
++use wickle::*;
++
++#[allow(dead_code)]
++mod support;
++use support::{id, scope};
++
++const OWNED: &str = "11111111-1111-4111-8111-111111111111";
++const OTHER: &str = "22222222-2222-4222-8222-222222222222";
++fn object(value: Value) -> JsonObject {
++    value
++        .as_object()
++        .unwrap()
++        .iter()
++        .map(|(key, value)| (key.clone(), value.clone()))
++        .collect()
++}
++fn inputs(value: Value) -> SystemInputs {
++    SystemInputs::new(object(value))
++}
++fn versioned(name: &str) -> VersionedRef {
++    VersionedRef {
++        id: id(name),
++        version: id("1"),
++    }
++}
++fn definition(key: &str, schema: Value) -> SystemInputDefinition {
++    SystemInputDefinition {
++        key: id(key),
++        version: id("1"),
++        value_schema: schema,
++        source: SystemInputSource::Run {},
++    }
++}
++fn registry() -> SystemInputRegistry {
++    SystemInputRegistry::new(vec![
++        definition("workspace_id", json!({"type":"string","format":"uuid"})),
++        definition("query", json!({"type":"string"})),
++        definition("user_id", json!({"type":"string"})),
++    ])
++    .unwrap()
++}
++fn descriptor() -> ToolDescriptor {
++    ToolDescriptor {
++        tool: versioned("search"),
++        name: id("search"),
++        description: "Search records".into(),
++        input_schema: json!({"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer","minimum":1,"default":10},"workspace_id":{"type":"string","format":"uuid"}},"required":["query","workspace_id"],"additionalProperties":false}),
++        agent_parameters: vec!["query".into(), "limit".into()],
++        system_bindings: None,
++        output_schema: json!({"type":"string"}),
++        side_effect: ToolSideEffect::ReadOnly,
++        concurrency: ToolConcurrency::Serial,
++        retry: ToolRetryPolicy::Never,
++        reconcile: false,
++        max_output_bytes: 4096.try_into().unwrap(),
++    }
++}
++
++#[derive(Default)]
++struct FakeClock {
++    reading: Mutex<(i64, u64)>,
++    changed: Notify,
++}
++impl FakeClock {
++    fn advance(&self, millis: u64) {
++        *self.reading.lock().unwrap() = (millis as i64, millis);
++        self.changed.notify_waiters();
++    }
++}
++impl Clock for FakeClock {
++    fn now(&self) -> Result<ClockReading, ContractError> {
++        let (utc_ms, monotonic_ms) = *self.reading.lock().unwrap();
++        Ok(ClockReading {
++            utc_ms,
++            monotonic_ms,
++        })
++    }
++    fn sleep_until<'a>(&'a self, deadline: u64) -> PortFuture<'a, ()> {
++        Box::pin(async move {
++            loop {
++                let changed = self.changed.notified();
++                tokio::pin!(changed);
++                changed.as_mut().enable();
++                if self.now()?.monotonic_ms >= deadline {
++                    return Ok(());
++                }
++                changed.await;
++            }
++        })
++    }
++}
++#[derive(Default)]
++struct Ids(AtomicUsize);
++impl IdSource for Ids {
++    fn next_id(&self) -> Result<Id, ContractError> {
++        Ok(id(&format!(
++            "binding-{}",
++            self.0.fetch_add(1, Ordering::SeqCst)
++        )))
++    }
++}
++struct Catalog;
++impl ProfileResolver for Catalog {
++    fn resolve<'a>(
++        &'a self,
++        reference: &'a ComponentRef,
++        _: &'a Scope,
++    ) -> PortFuture<'a, ComponentMetadata> {
++        Box::pin(async move {
++            Ok(ComponentMetadata {
++                reference: ComponentRef {
++                    version: Some(id("1")),
++                    ..reference.clone()
++                },
++                contract_version: 1,
++                manifest_digest: canonical_digest(&json!("catalog")),
++                config_schema: json!({"type":"object","additionalProperties":false}),
++                dependencies: vec![],
++                capabilities: Default::default(),
++                required_capabilities: Default::default(),
++                required_connections: Default::default(),
++                model_name: (reference.kind == ComponentKind::Tool).then(|| reference.id.clone()),
++                hook_position: None,
++                exports: vec![],
++            })
++        })
++    }
++}
++
++#[derive(Default)]
++struct Policy {
++    // 0 allow; 1 target ownership; 2 deny lookup; 3 approve lookup; 4 deny execution; 5 approve execution.
++    mode: AtomicUsize,
++    lookups: AtomicUsize,
++    executions: Mutex<Vec<JsonObject>>,
++}
++impl PolicyPort for Policy {
++    fn authorize<'a>(
++        &'a self,
++        request: &'a PolicyRequest,
++        context: PolicyContext<'a>,
++    ) -> PortFuture<'a, PolicyDecision> {
++        Box::pin(async move {
++            match &request.action {
++                PolicyAction::ResolveSystemInput { .. } => {
++                    self.lookups.fetch_add(1, Ordering::SeqCst);
++                    match self.mode.load(Ordering::SeqCst) {
++                        2 => {
++                            return Ok(PolicyDecision::Deny {
++                                reason: id("lookup_denied"),
++                            });
++                        }
++                        3 => {
++                            return Ok(PolicyDecision::RequireApproval {
++                                reason: id("lookup_approval"),
++                            });
++                        }
++                        _ => {}
++                    }
++                }
++                PolicyAction::ExecuteTool { input } => {
++                    self.executions
++                        .lock()
++                        .unwrap()
++                        .push(input.execution_args().clone());
++                    match self.mode.load(Ordering::SeqCst) {
++                        1 => {
++                            // The Host resource catalog associates each real UUID with an owner.
++                            let target = input
++                                .execution_args()
++                                .get("workspace_id")
++                                .and_then(Value::as_str);
++                            let owner = match target {
++                                Some(OWNED) => Some(scope()),
++                                Some(OTHER) => Some(Scope {
++                                    tenant_id: id("foreign-tenant"),
++                                    ..scope()
++                                }),
++                                _ => None,
++                            };
++                            if owner.as_ref() != Some(context.scope) {
++                                return Ok(PolicyDecision::Deny {
++                                    reason: id("target_not_owned"),
++                                });
++                            }
++                        }
++                        4 => {
++                            return Ok(PolicyDecision::Deny {
++                                reason: id("revoked"),
++                            });
++                        }
++                        5 => {
++                            return Ok(PolicyDecision::RequireApproval {
++                                reason: id("execution_approval"),
++                            });
++                        }
++                        _ => {}
++                    }
++                }
++                _ => {}
++            }
++            Ok(PolicyDecision::Allow {})
++        })
++    }
++}
++
++struct Resolver {
++    value: Mutex<Option<ResolvedSystemInput>>,
++    calls: AtomicUsize,
++    requests: Mutex<Vec<SystemInputResolveRequest>>,
++    cancel: Mutex<Option<CancellationToken>>,
++    advance: Mutex<Option<Arc<FakeClock>>>,
++}
++impl Resolver {
++    fn new(value: Value) -> Self {
++        Self {
++            value: Mutex::new(Some(ResolvedSystemInput {
++                value,
++                revision: id("revision-1"),
++            })),
++            calls: AtomicUsize::new(0),
++            requests: Mutex::new(vec![]),
++            cancel: Mutex::new(None),
++            advance: Mutex::new(None),
++        }
++    }
++    fn set(&self, value: Value, revision: &str) {
++        *self.value.lock().unwrap() = Some(ResolvedSystemInput {
++            value,
++            revision: id(revision),
++        });
++    }
++}
++impl SystemInputResolver for Resolver {
++    fn resolve<'a>(
++        &'a self,
++        request: &'a SystemInputResolveRequest,
++        context: &'a SystemInputResolveContext,
++    ) -> PortFuture<'a, Option<ResolvedSystemInput>> {
++        Box::pin(async move {
++            assert_eq!(context.scope, scope());
++            self.calls.fetch_add(1, Ordering::SeqCst);
++            self.requests.lock().unwrap().push(request.clone());
++            if let Some(token) = self.cancel.lock().unwrap().as_ref() {
++                token.cancel();
++            }
++            if let Some(clock) = self.advance.lock().unwrap().as_ref() {
++                clock.advance(10_000);
++            }
++            Ok(self.value.lock().unwrap().clone())
++        })
++    }
++}
++fn resolver_registry() -> SystemInputRegistry {
++    SystemInputRegistry::new(vec![SystemInputDefinition {
++        key: id("current_workspace"),
++        version: id("1"),
++        value_schema: json!({"type":"string","format":"uuid"}),
++        source: SystemInputSource::Resolver {
++            resolver_ref: versioned("workspace_lookup"),
++        },
++    }])
++    .unwrap()
++}
++fn resolver_descriptor() -> ToolDescriptor {
++    let mut tool = descriptor();
++    tool.system_bindings = Some(BTreeMap::from([(
++        "workspace_id".into(),
++        id("current_workspace"),
++    )]));
++    tool
++}
++
++struct Fixture {
++    store: Arc<MemoryStateStore>,
++    clock: Arc<FakeClock>,
++    ids: Arc<Ids>,
++    lease: RunLease,
++    context: ExecutionContext,
++    registry: Arc<SystemInputRegistry>,
++    tool: CompiledTool,
++    policy: Arc<Policy>,
++}
++impl Fixture {
++    async fn new(
++        tool: ToolDescriptor,
++        registry: SystemInputRegistry,
++        supplied: Option<SystemInputs>,
++    ) -> Self {
++        let registry = Arc::new(registry);
++        let tool = SchemaCompiler::new().compile(tool, &registry).unwrap();
++        let fixed = RunSystemInputs::capture(scope(), supplied.clone(), &registry).unwrap();
++        let fixed_record = fixed.to_record(id("run-inputs"), 7);
++        let fixed_ref = fixed.snapshot_ref(fixed_record.reference()).unwrap();
++        let mut input = support::admission("run", "request", "session", "Read evidence", "1").await;
++        let mut profile = input.snapshot.profile.profile().clone();
++        profile.tools = vec![ToolBindingRef::Catalog(CatalogToolRef {
++            tool_id: tool.descriptor().tool.id.clone(),
++            version: tool.descriptor().tool.version.clone(),
++            bindings: None,
++            config: None,
++        })];
++        input.snapshot.profile = ProfileValidator::new(&Catalog)
++            .validate(&profile, &scope())
++            .await
++            .unwrap();
++        input.snapshot.system_inputs = Some(fixed_ref);
++        input.snapshot.request_digest = admission_digest(
++            &input.snapshot.request,
++            &input.snapshot.profile,
++            input.snapshot.system_inputs.as_ref(),
++        );
++        let RunEventPayload::RunStarted { profile_digest, .. } = &mut input.events[0].payload
++        else {
++            unreachable!()
++        };
++        *profile_digest = input.snapshot.profile.profile_digest().clone();
++        input.records.push(fixed_record);
++        let store = Arc::new(MemoryStateStore::new());
++        store.admit(&scope(), input).await.unwrap();
++        let lease = store
++            .acquire_lease(&scope(), &id("run"), &id("worker"), 0, 20_000)
++            .await
++            .unwrap();
++        let context = ExecutionContext::new(
++            ExecutionContextData {
++                scope: scope(),
++                principal_ref: id("user"),
++                capability_grant_ref: id("grant"),
++                trace_context: None,
++                system_inputs: supplied,
++            },
++            CancellationToken::new(),
++        );
++        Self {
++            store,
++            clock: Arc::new(FakeClock::default()),
++            ids: Arc::new(Ids::default()),
++            lease,
++            context,
++            registry,
++            tool,
++            policy: Arc::new(Policy::default()),
++        }
++    }
++    async fn plan(&self, call_id: &str, model_inputs: JsonObject) -> ToolCall {
++        let saved = self.store.load(&scope(), &id("run")).await.unwrap();
++        let call = ToolCall {
++            call_id: id(call_id),
++            model_request_id: id(&format!("request-{call_id}")),
++            provider_call_id: id(&format!("provider-{call_id}")),
++            tool_name: self.tool.descriptor().name.clone(),
++            model_inputs,
++            descriptor_digest: self.tool.descriptor_digest().clone(),
++            bound_input_ref: None,
++        };
++        let record = ProtectedRecord::new(
++            id(&format!("planned-{call_id}")),
++            1,
++            serde_json::to_value(&call).unwrap(),
++        );
++        let mut update = support::prepared(
++            &saved.snapshot,
++            self.lease.clone(),
++            self.clock.now().unwrap().utc_ms,
++        );
++        update.snapshot.phase = RunPhase::Tool;
++        update.snapshot.tool_ledger.push(ToolLedgerEntry {
++            call: call.clone(),
++            state: ToolCallState::Planned {},
++        });
++        update.snapshot.last_event_seq += 1;
++        update.events = vec![support::event(
++            &id("run"),
++            &id("session"),
++            &scope(),
++            update.snapshot.last_event_seq,
++            RunEventPayload::ToolPlanned {
++                call_ref: record.reference().clone(),
++            },
++        )];
++        update.messages = vec![Message {
++            message_id: id(&format!("call-message-{call_id}")),
++            run_id: id("run"),
++            sequence: (saved.session.transcript_revision + 1).try_into().unwrap(),
++            role: MessageRole::Assistant,
++            origin: MessageOrigin::Model,
++            visibility: Visibility::UserAndModel,
++            content: vec![ContentBlock::ToolCall { call: call.clone() }],
++        }];
++        update.records = vec![record];
++        self.store
++            .commit(&scope(), &id("run"), update)
++            .await
++            .unwrap();
++        call
++    }
++    async fn budget(&self, store: Arc<dyn StateStore>) -> RunBudget {
++        RunBudget::attach(
++            store,
++            self.clock.clone(),
++            self.ids.clone(),
++            scope(),
++            id("run"),
++            self.lease.clone(),
++            self.context.cancellation.clone(),
++        )
++        .await
++        .unwrap()
++    }
++    fn binder(&self, resolver: Option<Arc<dyn SystemInputResolver>>) -> InputBinder {
++        InputBinder::new(
++            self.registry.clone(),
++            resolver,
++            Arc::new(PolicyGate::new(self.policy.clone(), Duration::from_secs(1)).unwrap()),
++            self.ids.clone(),
++        )
++    }
++    async fn bind(
++        &self,
++        call_id: &str,
++        resolver: Option<Arc<dyn SystemInputResolver>>,
++    ) -> Result<ToolBindingResult, ContractError> {
++        self.binder(resolver)
++            .bind(
++                &self.tool,
++                &id(call_id),
++                &self.context,
++                &self.budget(self.store.clone()).await,
++            )
++            .await
++    }
++}
++
++#[test]
++fn run_capture_rejects_unregistered_keys_invalid_values_and_resolver_source_conflicts() {
++    let invalid_value = RunSystemInputs::capture(
++        scope(),
++        Some(inputs(json!({"workspace_id":"private-invalid-value"}))),
++        &registry(),
++    )
++    .unwrap_err();
++    assert_eq!(invalid_value.path, r#"system_inputs["workspace_id"]"#);
++    for value in [
++        json!({"unregistered":"x"}),
++        json!({"workspace_id":"not-a-uuid"}),
++        json!({"workspace_id":null}),
++    ] {
++        assert!(RunSystemInputs::capture(scope(), Some(inputs(value)), &registry()).is_err());
++    }
++    assert!(
++        RunSystemInputs::capture(
++            scope(),
++            Some(inputs(json!({"current_workspace":OWNED}))),
++            &resolver_registry()
++        )
++        .is_err()
++    );
++}
++
++#[test]
++fn restored_run_inputs_distinguish_omission_from_empty_or_changed_resume_values() {
++    let registry = registry();
++    let supplied = inputs(json!({"workspace_id":OWNED}));
++    let fixed = RunSystemInputs::capture(scope(), Some(supplied.clone()), &registry).unwrap();
++    let record = fixed.to_record(id("snapshot"), 1);
++    let reference = fixed.snapshot_ref(record.reference()).unwrap();
++    let restored = RunSystemInputs::restore(&record, &reference, &scope(), &registry).unwrap();
++    restored.validate_resume(None).unwrap();
++    restored.validate_resume(Some(&supplied)).unwrap();
++    assert!(
++        restored
++            .validate_resume(Some(&SystemInputs::default()))
++            .is_err()
++    );
++    assert!(
++        restored
++            .validate_resume(Some(&inputs(json!({"workspace_id":OTHER}))))
++            .is_err()
++    );
++    assert_eq!(restored.values(), &object(json!({"workspace_id":OWNED})));
++    let other_scope = Scope {
++        tenant_id: id("foreign"),
++        ..scope()
++    };
++    assert!(RunSystemInputs::restore(&record, &reference, &other_scope, &registry).is_err());
++    let mut changed_values = record.value().clone();
++    *changed_values
++        .get_mut("values")
++        .unwrap()
++        .get_mut("workspace_id")
++        .unwrap() = json!(OTHER);
++    let wrong_record = ProtectedRecord::new(id("snapshot"), 1, changed_values);
++    assert!(RunSystemInputs::restore(&wrong_record, &reference, &scope(), &registry).is_err());
++    let mut changed_definitions = fixed.definitions().values().cloned().collect::<Vec<_>>();
++    changed_definitions
++        .iter_mut()
++        .find(|definition| definition.key == id("workspace_id"))
++        .unwrap()
++        .version = id("2");
++    let changed_registry = SystemInputRegistry::new(changed_definitions).unwrap();
++    assert!(RunSystemInputs::restore(&record, &reference, &scope(), &changed_registry).is_err());
++}
++
++#[tokio::test]
++async fn binding_keeps_original_and_defaulted_model_inputs_separate_from_system_arguments() {
++    let fixture=Fixture::new(descriptor(),registry(),Some(inputs(json!({"workspace_id":OWNED,"query":"system query must not overwrite","user_id":"extra-registered-value"})))).await;
++    let original = object(json!({"query":"model query"}));
++    fixture.plan("call", original.clone()).await;
++    let bound = fixture.bind("call", None).await.unwrap();
++    assert_eq!(bound.input.original_model_inputs(), &original);
++    assert_eq!(
++        bound.input.normalized_model_inputs(),
++        &object(json!({"query":"model query","limit":10}))
++    );
++    assert_eq!(
++        bound.input.execution_args(),
++        &object(json!({"query":"model query","limit":10,"workspace_id":OWNED}))
++    );
++    assert_eq!(bound.decision, PolicyDecision::Allow {});
++    assert_eq!(
++        bound.input.system_inputs()["workspace_id"].definition_version,
++        id("1")
++    );
++    assert_eq!(
++        bound.input.system_inputs()["workspace_id"]
++            .resolved
++            .as_ref()
++            .unwrap()
++            .revision,
++        id("7")
++    );
++    let saved = fixture
++        .store
++        .load(&scope(), &id("run"))
++        .await
++        .unwrap()
++        .snapshot;
++    assert_eq!(saved.tool_ledger[0].call.model_inputs, original);
++    assert_eq!(
++        saved.tool_ledger[0].call.bound_input_ref.as_ref(),
++        Some(&bound.reference)
++    );
++    assert_eq!(saved.usage.tool_attempts, 0);
++    assert_eq!(
++        fixture.policy.executions.lock().unwrap().as_slice(),
++        &[object(
++            json!({"query":"model query","limit":10,"workspace_id":OWNED})
++        )]
++    );
++}
++
++#[tokio::test]
++async fn a_model_supplied_hidden_uuid_is_rejected_even_when_it_matches_the_saved_value() {
++    let fixture = Fixture::new(
++        descriptor(),
++        registry(),
++        Some(inputs(json!({"workspace_id":OWNED}))),
++    )
++    .await;
++    fixture
++        .plan("call", object(json!({"query":"x","workspace_id":OWNED})))
++        .await;
++    let before = fixture
++        .store
++        .load(&scope(), &id("run"))
++        .await
++        .unwrap()
++        .snapshot;
++    assert!(fixture.bind("call", None).await.is_err());
++    assert!(fixture.policy.executions.lock().unwrap().is_empty());
++    assert_eq!(
++        fixture
++            .store
++            .load(&scope(), &id("run"))
++            .await
++            .unwrap()
++            .snapshot,
++        before
++    );
++}
++
++#[tokio::test]
++async fn a_missing_required_system_value_is_not_filled_from_defaults_or_generated_ids() {
++    let mut tool = descriptor();
++    tool.input_schema["properties"]["workspace_id"]["default"] = json!(OWNED);
++    tool.system_bindings = Some(BTreeMap::from([(
++        "workspace_id".into(),
++        id("active_workspace_id"),
++    )]));
++    let registry = SystemInputRegistry::new(vec![definition(
++        "active_workspace_id",
++        json!({"type":"string","format":"uuid"}),
++    )])
++    .unwrap();
++    let fixture = Fixture::new(tool, registry, None).await;
++    fixture.plan("call", object(json!({"query":"x"}))).await;
++    let error = fixture.bind("call", None).await.unwrap_err();
++    assert_eq!(error.code, ErrorCode::SystemInputMissing);
++    assert_eq!(error.path, r#"system_inputs["active_workspace_id"]"#);
++    let saved = fixture
++        .store
++        .load(&scope(), &id("run"))
++        .await
++        .unwrap()
++        .snapshot;
++    assert!(saved.tool_ledger[0].call.bound_input_ref.is_none());
++    assert!(fixture.policy.executions.lock().unwrap().is_empty());
++}
++
++#[tokio::test]
++async fn optional_missing_system_inputs_are_omitted_and_explicit_null_follows_the_schema() {
++    for supplied in [None, Some(inputs(json!({"workspace_id":null})))] {
++        let mut tool = descriptor();
++        tool.input_schema["required"] = json!(["query"]);
++        tool.input_schema["properties"]["workspace_id"]["type"] = json!(["string", "null"]);
++        let registry = SystemInputRegistry::new(vec![definition(
++            "workspace_id",
++            json!({"type":["string","null"],"format":"uuid"}),
++        )])
++        .unwrap();
++        let is_null = supplied.is_some();
++        let fixture = Fixture::new(tool, registry, supplied).await;
++        fixture.plan("call", object(json!({"query":"x"}))).await;
++        let bound = fixture.bind("call", None).await.unwrap();
++        if is_null {
++            assert_eq!(
++                bound.input.execution_args().get("workspace_id"),
++                Some(&Value::Null)
++            );
++        } else {
++            assert!(!bound.input.execution_args().contains_key("workspace_id"));
++        }
++    }
++}
++
++#[tokio::test]
++async fn model_defaults_follow_local_references_but_do_not_invent_nested_fields() {
++    let mut tool = descriptor();
++    tool.input_schema["properties"]["limit"] = json!({"$ref":"#/$defs/Limit"});
++    tool.input_schema["$defs"] = json!({"Limit":{"type":"integer","minimum":1,"default":7}});
++    tool.input_schema["properties"]["query"] = json!({"type":"object","properties":{"sort":{"type":"string","default":"descending"}},"additionalProperties":false});
++    let fixture = Fixture::new(
++        tool,
++        registry(),
++        Some(inputs(json!({"workspace_id":OWNED}))),
++    )
++    .await;
++    fixture.plan("call", object(json!({"query":{}}))).await;
++    let bound = fixture.bind("call", None).await.unwrap();
++    assert_eq!(
++        bound.input.original_model_inputs(),
++        &object(json!({"query":{}}))
++    );
++    assert_eq!(
++        bound.input.normalized_model_inputs(),
++        &object(json!({"query":{},"limit":7}))
++    );
++}
++
++#[tokio::test]
++async fn a_valid_foreign_uuid_is_denied_using_the_actual_bound_target() {
++    for target in [OWNED, OTHER] {
++        let fixture = Fixture::new(
++            descriptor(),
++            registry(),
++            Some(inputs(json!({"workspace_id":target}))),
++        )
++        .await;
++        fixture.policy.mode.store(1, Ordering::SeqCst);
++        fixture.plan("call", object(json!({"query":"x"}))).await;
++        let bound = fixture.bind("call", None).await;
++        assert_eq!(bound.is_ok(), target == OWNED);
++        assert_eq!(
++            fixture.policy.executions.lock().unwrap()[0]["workspace_id"],
++            json!(target)
++        );
++        let saved = fixture
++            .store
++            .load(&scope(), &id("run"))
++            .await
++            .unwrap()
++            .snapshot;
++        assert_eq!(
++            saved.tool_ledger[0].call.bound_input_ref.is_some(),
++            target == OWNED
++        );
++    }
++}
++
++#[tokio::test]
++async fn one_resolver_key_is_resolved_once_per_binding_and_cached_calls_keep_the_old_target() {
++    let mut tool = resolver_descriptor();
++    tool.input_schema["properties"]["owner_workspace_id"] =
++        json!({"type":"string","format":"uuid"});
++    tool.input_schema["required"] = json!(["query", "workspace_id", "owner_workspace_id"]);
++    tool.system_bindings
++        .as_mut()
++        .unwrap()
++        .insert("owner_workspace_id".into(), id("current_workspace"));
++    let fixture = Fixture::new(tool, resolver_registry(), None).await;
++    fixture.plan("first", object(json!({"query":"x"}))).await;
++    let resolver = Arc::new(Resolver::new(json!(OWNED)));
++    let first = fixture.bind("first", Some(resolver.clone())).await.unwrap();
++    assert_eq!(resolver.calls.load(Ordering::SeqCst), 1);
++    assert_eq!(first.input.execution_args()["workspace_id"], json!(OWNED));
++    assert_eq!(
++        first.input.system_inputs()["workspace_id"]
++            .resolved
++            .as_ref()
++            .unwrap()
++            .revision,
++        id("revision-1")
++    );
++    assert_eq!(
++        first.input.execution_args()["owner_workspace_id"],
++        json!(OWNED)
++    );
++    resolver.set(json!(OTHER), "revision-2");
++    let cached = fixture.bind("first", Some(resolver.clone())).await.unwrap();
++    assert_eq!(resolver.calls.load(Ordering::SeqCst), 1);
++    assert_eq!(cached.reference, first.reference);
++    assert_eq!(cached.input.binding_digest(), first.input.binding_digest());
++    assert_eq!(cached.input.execution_args()["workspace_id"], json!(OWNED));
++    fixture.plan("second", object(json!({"query":"x"}))).await;
++    let second = fixture
++        .bind("second", Some(resolver.clone()))
++        .await
++        .unwrap();
++    assert_eq!(resolver.calls.load(Ordering::SeqCst), 2);
++    assert_eq!(second.input.execution_args()["workspace_id"], json!(OTHER));
++    assert_eq!(
++        second.input.system_inputs()["workspace_id"]
++            .resolved
++            .as_ref()
++            .unwrap()
++            .revision,
++        id("revision-2")
++    );
++    assert_ne!(second.input.binding_digest(), first.input.binding_digest());
++}
++
++#[tokio::test]
++async fn cached_bindings_still_recheck_current_permission_without_resolving_again() {
++    let fixture = Fixture::new(resolver_descriptor(), resolver_registry(), None).await;
++    fixture.plan("call", object(json!({"query":"x"}))).await;
++    let resolver = Arc::new(Resolver::new(json!(OWNED)));
++    let first = fixture.bind("call", Some(resolver.clone())).await.unwrap();
++    fixture.policy.mode.store(4, Ordering::SeqCst);
++    assert!(fixture.bind("call", Some(resolver.clone())).await.is_err());
++    assert_eq!(resolver.calls.load(Ordering::SeqCst), 1);
++    assert_eq!(fixture.policy.executions.lock().unwrap().len(), 2);
++    assert_eq!(
++        fixture
++            .store
++            .load(&scope(), &id("run"))
++            .await
++            .unwrap()
++            .snapshot
++            .tool_ledger[0]
++            .call
++            .bound_input_ref
++            .as_ref(),
++        Some(&first.reference)
++    );
++}
++
++#[tokio::test]
++async fn lookup_denial_or_approval_blocks_resolution_while_execution_approval_saves_a_fixed_candidate()
++ {
++    for mode in [2, 3, 5] {
++        let fixture = Fixture::new(resolver_descriptor(), resolver_registry(), None).await;
++        fixture.plan("call", object(json!({"query":"x"}))).await;
++        fixture.policy.mode.store(mode, Ordering::SeqCst);
++        let resolver = Arc::new(Resolver::new(json!(OWNED)));
++        let result = fixture.bind("call", Some(resolver.clone())).await;
++        let saved = fixture
++            .store
++            .load(&scope(), &id("run"))
++            .await
++            .unwrap()
++            .snapshot;
++        if mode == 5 {
++            let binding = result.unwrap();
++            assert!(matches!(
++                binding.decision,
++                PolicyDecision::RequireApproval { .. }
++            ));
++            assert_eq!(resolver.calls.load(Ordering::SeqCst), 1);
++            assert!(saved.tool_ledger[0].call.bound_input_ref.is_some());
++        } else {
++            assert!(result.is_err());
++            assert_eq!(resolver.calls.load(Ordering::SeqCst), 0);
++            assert!(saved.tool_ledger[0].call.bound_input_ref.is_none());
++        }
++    }
++}
++
++#[tokio::test]
++async fn cancellation_deadline_and_lease_loss_block_new_resolver_calls() {
++    for stop in [
++        ErrorCode::Cancelled,
++        ErrorCode::DeadlineExceeded,
++        ErrorCode::LeaseLost,
++    ] {
++        let fixture = Fixture::new(resolver_descriptor(), resolver_registry(), None).await;
++        fixture.plan("call", object(json!({"query":"x"}))).await;
++        let budget = fixture.budget(fixture.store.clone()).await;
++        match stop {
++            ErrorCode::Cancelled => fixture.context.cancellation.cancel(),
++            ErrorCode::DeadlineExceeded => fixture.clock.advance(10_000),
++            ErrorCode::LeaseLost => fixture
++                .store
++                .release_lease(&scope(), &id("run"), &fixture.lease, 0)
++                .await
++                .unwrap(),
++            _ => unreachable!(),
++        }
++        let resolver = Arc::new(Resolver::new(json!(OWNED)));
++        let result = fixture
++            .binder(Some(resolver.clone()))
++            .bind(&fixture.tool, &id("call"), &fixture.context, &budget)
++            .await;
++        assert_eq!(result.unwrap_err().code, stop);
++        assert_eq!(resolver.calls.load(Ordering::SeqCst), 0);
++        assert!(
++            fixture
++                .store
++                .load(&scope(), &id("run"))
++                .await
++                .unwrap()
++                .snapshot
++                .tool_ledger[0]
++                .call
++                .bound_input_ref
++                .is_none()
++        );
++    }
++}
++
++#[tokio::test]
++async fn a_stop_during_resolution_prevents_binding_persistence_and_final_authorization() {
++    for cancel in [true, false] {
++        let fixture = Fixture::new(resolver_descriptor(), resolver_registry(), None).await;
++        fixture.plan("call", object(json!({"query":"x"}))).await;
++        let resolver = Arc::new(Resolver::new(json!(OWNED)));
++        if cancel {
++            *resolver.cancel.lock().unwrap() = Some(fixture.context.cancellation.clone());
++        } else {
++            *resolver.advance.lock().unwrap() = Some(fixture.clock.clone());
++        }
++        let result = fixture.bind("call", Some(resolver.clone())).await;
++        assert!(result.is_err());
++        assert_eq!(resolver.calls.load(Ordering::SeqCst), 1);
++        assert!(fixture.policy.executions.lock().unwrap().is_empty());
++        assert!(
++            fixture
++                .store
++                .load(&scope(), &id("run"))
++                .await
++                .unwrap()
++                .snapshot
++                .tool_ledger[0]
++                .call
++                .bound_input_ref
++                .is_none()
++        );
++    }
++}
++
++struct FailingCommitStore {
++    inner: Arc<MemoryStateStore>,
++    commits: AtomicUsize,
++    persist_first: bool,
++}
++impl StateStore for FailingCommitStore {
++    fn capabilities(&self) -> StateStoreCapabilities {
++        self.inner.capabilities()
++    }
++    fn admit<'a>(&'a self, s: &'a Scope, input: AdmissionInput) -> PortFuture<'a, AdmissionResult> {
++        self.inner.admit(s, input)
++    }
++    fn load<'a>(&'a self, s: &'a Scope, r: &'a Id) -> PortFuture<'a, StoredRun> {
++        self.inner.load(s, r)
++    }
++    fn load_session<'a>(&'a self, s: &'a Scope, r: &'a Id) -> PortFuture<'a, SessionSnapshot> {
++        self.inner.load_session(s, r)
++    }
++    fn acquire_lease<'a>(
++        &'a self,
++        s: &'a Scope,
++        r: &'a Id,
++        o: &'a Id,
++        n: i64,
++        t: u64,
++    ) -> PortFuture<'a, RunLease> {
++        self.inner.acquire_lease(s, r, o, n, t)
++    }
++    fn check_lease<'a>(
++        &'a self,
++        s: &'a Scope,
++        r: &'a Id,
++        l: &'a RunLease,
++        n: i64,
++    ) -> PortFuture<'a, RunLease> {
++        self.inner.check_lease(s, r, l, n)
++    }
++    fn renew_lease<'a>(
++        &'a self,
++        s: &'a Scope,
++        r: &'a Id,
++        l: &'a RunLease,
++        n: i64,
++        t: u64,
++    ) -> PortFuture<'a, RunLease> {
++        self.inner.renew_lease(s, r, l, n, t)
++    }
++    fn release_lease<'a>(
++        &'a self,
++        s: &'a Scope,
++        r: &'a Id,
++        l: &'a RunLease,
++        n: i64,
++    ) -> PortFuture<'a, ()> {
++        self.inner.release_lease(s, r, l, n)
++    }
++    fn read_events<'a>(
++        &'a self,
++        s: &'a Scope,
++        r: &'a Id,
++        a: u64,
++        n: usize,
++    ) -> PortFuture<'a, EventPage> {
++        self.inner.read_events(s, r, a, n)
++    }
++    fn read_record<'a>(
++        &'a self,
++        s: &'a Scope,
++        r: &'a RecordRef,
++    ) -> PortFuture<'a, ProtectedRecord> {
++        self.inner.read_record(s, r)
++    }
++    fn commit<'a>(
++        &'a self,
++        scope: &'a Scope,
++        run_id: &'a Id,
++        input: CommitInput,
++    ) -> PortFuture<'a, StoredRun> {
++        Box::pin(async move {
++            self.commits.fetch_add(1, Ordering::SeqCst);
++            if self.persist_first {
++                self.inner.commit(scope, run_id, input).await?;
++            }
++            Err(ContractError::new(
++                ErrorCode::PersistenceUnavailable,
++                "binding.commit",
++            ))
++        })
++    }
++}
++
++#[tokio::test]
++async fn failed_storage_does_not_return_a_ready_binding_or_change_the_planned_call() {
++    let fixture = Fixture::new(resolver_descriptor(), resolver_registry(), None).await;
++    fixture.plan("call", object(json!({"query":"x"}))).await;
++    let original = fixture
++        .store
++        .load(&scope(), &id("run"))
++        .await
++        .unwrap()
++        .snapshot;
++    let store = Arc::new(FailingCommitStore {
++        inner: fixture.store.clone(),
++        commits: AtomicUsize::new(0),
++        persist_first: false,
++    });
++    let resolver = Arc::new(Resolver::new(json!(OWNED)));
++    let result = fixture
++        .binder(Some(resolver.clone()))
++        .bind(
++            &fixture.tool,
++            &id("call"),
++            &fixture.context,
++            &fixture.budget(store.clone()).await,
++        )
++        .await;
++    assert_eq!(result.unwrap_err().code, ErrorCode::PersistenceUnavailable);
++    assert_eq!(store.commits.load(Ordering::SeqCst), 1);
++    assert_eq!(resolver.calls.load(Ordering::SeqCst), 1);
++    assert_eq!(
++        fixture
++            .store
++            .load(&scope(), &id("run"))
++            .await
++            .unwrap()
++            .snapshot,
++        original
++    );
++}
++
++#[tokio::test]
++async fn a_lost_commit_ack_reuses_the_saved_binding_without_resolving_the_new_value() {
++    let fixture = Fixture::new(resolver_descriptor(), resolver_registry(), None).await;
++    fixture.plan("call", object(json!({"query":"x"}))).await;
++    let store = Arc::new(FailingCommitStore {
++        inner: fixture.store.clone(),
++        commits: AtomicUsize::new(0),
++        persist_first: true,
++    });
++    let resolver = Arc::new(Resolver::new(json!(OWNED)));
++    let first = fixture
++        .binder(Some(resolver.clone()))
++        .bind(
++            &fixture.tool,
++            &id("call"),
++            &fixture.context,
++            &fixture.budget(store.clone()).await,
++        )
++        .await;
++    assert_eq!(first.unwrap_err().code, ErrorCode::PersistenceUnavailable);
++    let saved = fixture
++        .store
++        .load(&scope(), &id("run"))
++        .await
++        .unwrap()
++        .snapshot;
++    let call = &saved.tool_ledger[0].call;
++    let reference = call
++        .bound_input_ref
++        .clone()
++        .expect("commit applied despite the lost acknowledgement");
++    let record = fixture
++        .store
++        .read_record(&scope(), &reference)
++        .await
++        .unwrap();
++    let committed = BoundToolInput::restore(
++        &record,
++        &fixture.tool,
++        &scope(),
++        &id("run"),
++        call,
++        saved.system_inputs.as_ref(),
++    )
++    .unwrap();
++    assert_eq!(committed.execution_args()["workspace_id"], json!(OWNED));
++    assert_eq!(
++        committed.system_inputs()["workspace_id"]
++            .resolved
++            .as_ref()
++            .unwrap()
++            .revision,
++        id("revision-1")
++    );
++
++    resolver.set(json!(OTHER), "revision-2");
++    let retried = fixture.bind("call", Some(resolver.clone())).await.unwrap();
++    assert_eq!(retried.reference, reference);
++    assert_eq!(retried.input.binding_digest(), committed.binding_digest());
++    assert_eq!(retried.input.execution_args()["workspace_id"], json!(OWNED));
++    assert_eq!(
++        retried.input.system_inputs()["workspace_id"]
++            .resolved
++            .as_ref()
++            .unwrap()
++            .revision,
++        id("revision-1")
++    );
++    assert_eq!(resolver.calls.load(Ordering::SeqCst), 1);
++    assert_eq!(store.commits.load(Ordering::SeqCst), 1);
++    assert_eq!(
++        fixture
++            .store
++            .load(&scope(), &id("run"))
++            .await
++            .unwrap()
++            .snapshot
++            .revision,
++        saved.revision
++    );
++}
++
++#[tokio::test]
++async fn restored_bound_inputs_require_the_original_record_call_scope_and_run() {
++    let fixture = Fixture::new(
++        descriptor(),
++        registry(),
++        Some(inputs(json!({"workspace_id":OWNED}))),
++    )
++    .await;
++    fixture.plan("call", object(json!({"query":"x"}))).await;
++    let bound = fixture.bind("call", None).await.unwrap();
++    let record = fixture
++        .store
++        .read_record(&scope(), &bound.reference)
++        .await
++        .unwrap();
++    let snapshot = fixture
++        .store
++        .load(&scope(), &id("run"))
++        .await
++        .unwrap()
++        .snapshot;
++    let call = &snapshot.tool_ledger[0].call;
++    let restored = BoundToolInput::restore(
++        &record,
++        &fixture.tool,
++        &scope(),
++        &id("run"),
++        call,
++        snapshot.system_inputs.as_ref(),
++    )
++    .unwrap();
++    assert_eq!(restored.execution_args(), bound.input.execution_args());
++    for (record_id, revision) in [
++        (id("another-record"), record.reference().revision),
++        (
++            record.reference().record_id.clone(),
++            record.reference().revision + 1,
++        ),
++    ] {
++        let relocated = ProtectedRecord::new(record_id, revision, record.value().clone());
++        assert!(
++            BoundToolInput::restore(
++                &relocated,
++                &fixture.tool,
++                &scope(),
++                &id("run"),
++                call,
++                snapshot.system_inputs.as_ref()
++            )
++            .is_err()
++        );
++    }
++    let foreign = Scope {
++        tenant_id: id("foreign"),
++        ..scope()
++    };
++    assert!(
++        BoundToolInput::restore(
++            &record,
++            &fixture.tool,
++            &foreign,
++            &id("run"),
++            call,
++            snapshot.system_inputs.as_ref()
++        )
++        .is_err()
++    );
++    assert!(
++        BoundToolInput::restore(
++            &record,
++            &fixture.tool,
++            &scope(),
++            &id("another-run"),
++            call,
++            snapshot.system_inputs.as_ref()
++        )
++        .is_err()
++    );
++    let mut changed_call = call.clone();
++    changed_call.model_inputs = object(json!({"query":"changed"}));
++    assert!(
++        BoundToolInput::restore(
++            &record,
++            &fixture.tool,
++            &scope(),
++            &id("run"),
++            &changed_call,
++            snapshot.system_inputs.as_ref()
++        )
++        .is_err()
++    );
++    let mut changed_values = record.value().clone();
++    let data = changed_values.get_mut("data").unwrap();
++    *data
++        .get_mut("execution_args")
++        .unwrap()
++        .get_mut("workspace_id")
++        .unwrap() = json!(OTHER);
++    *data
++        .get_mut("system_inputs")
++        .unwrap()
++        .get_mut("workspace_id")
++        .unwrap()
++        .get_mut("resolved")
++        .unwrap()
++        .get_mut("value")
++        .unwrap() = json!(OTHER);
++    let tampered = ProtectedRecord::new(
++        record.reference().record_id.clone(),
++        record.reference().revision,
++        changed_values,
++    );
++    assert!(
++        BoundToolInput::restore(
++            &tampered,
++            &fixture.tool,
++            &scope(),
++            &id("run"),
++            call,
++            snapshot.system_inputs.as_ref()
++        )
++        .is_err()
++    );
++    let mut changed_reference = snapshot.system_inputs.clone().unwrap();
++    changed_reference.values_digest = canonical_digest(&json!({"workspace_id":OTHER}));
++    assert!(
++        BoundToolInput::restore(
++            &record,
++            &fixture.tool,
++            &scope(),
++            &id("run"),
++            call,
++            Some(&changed_reference)
++        )
++        .is_err()
++    );
++}
++
++#[tokio::test]
++async fn only_direct_optional_defaults_are_applied_not_conditional_or_required_model_defaults() {
++    let mut required_default = descriptor();
++    required_default.input_schema["required"] = json!(["query", "limit", "workspace_id"]);
++    let fixture = Fixture::new(
++        required_default,
++        registry(),
++        Some(inputs(json!({"workspace_id":OWNED}))),
++    )
++    .await;
++    fixture.plan("call", object(json!({"query":"x"}))).await;
++    assert!(fixture.bind("call", None).await.is_err());
++
++    let mut conditional = descriptor();
++    conditional.agent_parameters.push("workspace_id".into());
++    conditional.input_schema["properties"]["limit"]
++        .as_object_mut()
++        .unwrap()
++        .remove("default");
++    conditional.input_schema["if"] = json!({"properties":{"query":{"const":"strict"}}});
++    conditional.input_schema["then"] = json!({"properties":{"limit":{"default":99}}});
++    let fixture = Fixture::new(conditional, SystemInputRegistry::new(vec![]).unwrap(), None).await;
++    let original = object(json!({"query":"strict","workspace_id":OWNED}));
++    fixture.plan("call", original.clone()).await;
++    let bound = fixture.bind("call", None).await.unwrap();
++    assert_eq!(bound.input.normalized_model_inputs(), &original);
++}
++
++#[tokio::test]
++async fn an_explicit_nullable_model_value_is_not_replaced_by_its_default() {
++    let mut tool = descriptor();
++    tool.input_schema["properties"]["limit"]["type"] = json!(["integer", "null"]);
++    let fixture = Fixture::new(
++        tool,
++        registry(),
++        Some(inputs(json!({"workspace_id":OWNED}))),
++    )
++    .await;
++    fixture
++        .plan("call", object(json!({"query":"x","limit":null})))
++        .await;
++    let bound = fixture.bind("call", None).await.unwrap();
++    assert_eq!(bound.input.original_model_inputs()["limit"], Value::Null);
++    assert_eq!(bound.input.normalized_model_inputs()["limit"], Value::Null);
++    assert_eq!(bound.input.execution_args()["limit"], Value::Null);
++}
++
++#[tokio::test]
++async fn zero_resolver_capacity_and_small_value_bounds_stop_before_unsafe_progress() {
++    let fixture = Fixture::new(resolver_descriptor(), resolver_registry(), None).await;
++    fixture.plan("call", object(json!({"query":"x"}))).await;
++    let resolver = Arc::new(Resolver::new(json!(OWNED)));
++    let binder = fixture
++        .binder(Some(resolver.clone()))
++        .with_limits(InputBindingLimits {
++            max_resolver_calls: 0,
++            ..InputBindingLimits::default()
++        })
++        .unwrap();
++    let budget = fixture.budget(fixture.store.clone()).await;
++    assert!(
++        binder
++            .bind(&fixture.tool, &id("call"), &fixture.context, &budget)
++            .await
++            .is_err()
++    );
++    assert_eq!(resolver.calls.load(Ordering::SeqCst), 0);
++
++    let fixture = Fixture::new(
++        descriptor(),
++        registry(),
++        Some(inputs(json!({"workspace_id":OWNED}))),
++    )
++    .await;
++    fixture.plan("call", object(json!({"query":"x"}))).await;
++    let binder = fixture
++        .binder(None)
++        .with_limits(InputBindingLimits {
++            max_value_bytes: 4,
++            ..InputBindingLimits::default()
++        })
++        .unwrap();
++    assert!(
++        binder
++            .bind(
++                &fixture.tool,
++                &id("call"),
++                &fixture.context,
++                &fixture.budget(fixture.store.clone()).await
++            )
++            .await
++            .is_err()
++    );
++    assert!(fixture.policy.executions.lock().unwrap().is_empty());
++    assert!(
++        fixture
++            .store
++            .load(&scope(), &id("run"))
++            .await
++            .unwrap()
++            .snapshot
++            .tool_ledger[0]
++            .call
++            .bound_input_ref
++            .is_none()
++    );
++}
+diff --git a/crates/wickle/tests/state.rs b/crates/wickle/tests/state.rs
+index 35eeca77ae025cf4cfb6da426b391d8fad5826e0..0d8eaf22b8605758a245d484da0981fc3cd53a19 100644
+--- a/crates/wickle/tests/state.rs
++++ b/crates/wickle/tests/state.rs
+@@ -363,14 +363,53 @@ async fn an_event_cannot_announce_a_wait_absent_from_the_committed_snapshot() {
+ 
+ #[tokio::test]
+ async fn uncertain_tool_effects_keep_the_original_attempt_and_idempotency_key() {
+-    let store = MemoryStateStore::new();
+-    store
+-        .admit(
+-            &scope(),
+-            admission("run", "request", "session", "input", "1").await,
+-        )
++    struct StationaryClock;
++    impl Clock for StationaryClock {
++        fn now(&self) -> Result<ClockReading, ContractError> {
++            Ok(ClockReading {
++                utc_ms: 102,
++                monotonic_ms: 0,
++            })
++        }
++        fn sleep_until<'a>(&'a self, _: u64) -> PortFuture<'a, ()> {
++            Box::pin(std::future::pending())
++        }
++    }
++    struct AllowPolicy;
++    impl PolicyPort for AllowPolicy {
++        fn authorize<'a>(
++            &'a self,
++            _: &'a PolicyRequest,
++            _: PolicyContext<'a>,
++        ) -> PortFuture<'a, PolicyDecision> {
++            Box::pin(async { Ok(PolicyDecision::Allow {}) })
++        }
++    }
++    let store = Arc::new(MemoryStateStore::new());
++    let registry = Arc::new(SystemInputRegistry::default());
++    let compiled = SchemaCompiler::new().compile(ToolDescriptor {
++        tool: VersionedRef { id: id("tool"), version: id("1") }, name: id("tool"), description: "Write a record".into(),
++        input_schema: json!({"type":"object","properties":{},"required":[],"additionalProperties":false}), agent_parameters: vec![], system_bindings: None,
++        output_schema: json!(true), side_effect: ToolSideEffect::Write, concurrency: ToolConcurrency::Serial, retry: ToolRetryPolicy::Never, reconcile: true, max_output_bytes: 1024.try_into().unwrap(),
++    }, &registry).unwrap();
++    let mut input = admission("run", "request", "session", "input", "1").await;
++    let mut profile = input.snapshot.profile.profile().clone();
++    profile.tools.push(ToolBindingRef::Catalog(CatalogToolRef {
++        tool_id: id("tool"),
++        version: id("1"),
++        bindings: None,
++        config: None,
++    }));
++    input.snapshot.profile = ProfileValidator::new(&Catalog { revision: "1" })
++        .validate(&profile, &scope())
+         .await
+         .unwrap();
++    input.snapshot.request_digest =
++        admission_digest(&input.snapshot.request, &input.snapshot.profile, None);
++    if let RunEventPayload::RunStarted { profile_digest, .. } = &mut input.events[0].payload {
++        *profile_digest = input.snapshot.profile.profile_digest().clone();
++    }
++    store.admit(&scope(), input).await.unwrap();
+     let before = store.load(&scope(), &id("run")).await.unwrap();
+     let lease = store
+         .acquire_lease(&scope(), &id("run"), &id("owner"), 100, 100)
+@@ -383,7 +422,7 @@ async fn uncertain_tool_effects_keep_the_original_attempt_and_idempotency_key()
+         provider_call_id: id("provider-call"),
+         tool_name: id("tool"),
+         model_inputs: Default::default(),
+-        descriptor_digest: canonical_digest(&json!("descriptor")),
++        descriptor_digest: compiled.descriptor_digest().clone(),
+         bound_input_ref: None,
+     };
+     let call_record =
+@@ -404,16 +443,53 @@ async fn uncertain_tool_effects_keep_the_original_attempt_and_idempotency_key()
+         },
+     ));
+     plan.records.push(call_record);
+-    let planned = store.commit(&scope(), &id("run"), plan).await.unwrap();
+-    let bound = ProtectedRecord::new(id("bound-input"), 1, json!({"target":"record"}));
++    store.commit(&scope(), &id("run"), plan).await.unwrap();
++    let context = ExecutionContext::new(
++        ExecutionContextData {
++            scope: scope(),
++            principal_ref: id("caller"),
++            capability_grant_ref: id("grant"),
++            trace_context: None,
++            system_inputs: None,
++        },
++        Default::default(),
++    );
++    let budget = RunBudget::attach(
++        store.clone(),
++        Arc::new(StationaryClock),
++        Arc::new(RandomIdSource),
++        scope(),
++        id("run"),
++        lease.clone(),
++        context.cancellation.clone(),
++    )
++    .await
++    .unwrap();
++    let binder = InputBinder::new(
++        registry,
++        None,
++        Arc::new(
++            PolicyGate::new(Arc::new(AllowPolicy), std::time::Duration::from_secs(1)).unwrap(),
++        ),
++        Arc::new(RandomIdSource),
++    );
++    binder
++        .bind(&compiled, &id("call"), &context, &budget)
++        .await
++        .unwrap();
++    let reservation = budget
++        .reserve(ReservationKind::Tool {
++            call_id: id("call"),
++        })
++        .await
++        .unwrap();
++    let planned = store.load(&scope(), &id("run")).await.unwrap();
+     let mut dispatch = prepared(&planned.snapshot, lease.clone(), 102);
+     dispatch.snapshot.phase = RunPhase::Tool;
+-    dispatch.snapshot.tool_ledger[0].call.bound_input_ref = Some(bound.reference().clone());
+     dispatch.snapshot.tool_ledger[0].state = ToolCallState::Dispatching {
+-        attempt_id: id("attempt-a"),
++        attempt_id: reservation.attempt_id.clone(),
+         idempotency_key: id("effect-key"),
+     };
+-    dispatch.records.push(bound);
+     let dispatched = store.commit(&scope(), &id("run"), dispatch).await.unwrap();
+     let mut lost = prepared(&dispatched.snapshot, lease.clone(), 103);
+     lost.snapshot.phase = RunPhase::Tool;
+@@ -432,12 +508,12 @@ async fn uncertain_tool_effects_keep_the_original_attempt_and_idempotency_key()
+     let mut lost = prepared(&dispatched.snapshot, lease, 103);
+     lost.snapshot.phase = RunPhase::Tool;
+     lost.snapshot.tool_ledger[0].state = ToolCallState::Unknown {
+-        attempt_id: id("attempt-a"),
++        attempt_id: reservation.attempt_id.clone(),
+         idempotency_key: id("effect-key"),
+     };
+     let saved = store.commit(&scope(), &id("run"), lost).await.unwrap();
+     assert!(
+-        matches!(&saved.snapshot.tool_ledger[0].state, ToolCallState::Unknown { attempt_id, idempotency_key } if attempt_id == &id("attempt-a") && idempotency_key == &id("effect-key"))
++        matches!(&saved.snapshot.tool_ledger[0].state, ToolCallState::Unknown { attempt_id, idempotency_key } if attempt_id == &reservation.attempt_id && idempotency_key == &id("effect-key"))
+     );
+ }
+ 
+diff --git a/crates/wickle/tests/support/mod.rs b/crates/wickle/tests/support/mod.rs
+index 6259c1cbb6426f9c1199e21484b86ca567caf127..a1a3dbab878115c01332f816fb25dc8863455f31 100644
+--- a/crates/wickle/tests/support/mod.rs
++++ b/crates/wickle/tests/support/mod.rs
+@@ -37,7 +37,7 @@ impl ProfileResolver for Catalog {
+                 capabilities: BTreeSet::new(),
+                 required_capabilities: BTreeSet::new(),
+                 required_connections: BTreeSet::new(),
+-                model_name: None,
++                model_name: (reference.kind == ComponentKind::Tool).then(|| reference.id.clone()),
+                 hook_position: None,
+                 exports: vec![],
+             })
+diff --git a/docs/contracts.md b/docs/contracts.md
+index 13bb1ad98cc921c6a7709b0c6d878d19d30fa1ec..b61de42097936412941dfd79d96e5ae8d9bd31f3 100644
+--- a/docs/contracts.md
++++ b/docs/contracts.md
+@@ -81,7 +81,8 @@ or scope and `ensure_same_resolution` to reject changed component metadata.
+ These checks do not replace authentication or the authoritative store.
+ 
+ Tool schemas and system input definitions are described in
+-[Compile tool input schemas](tool-inputs.md).
++[Compile tool input schemas](tool-inputs.md) and
++[Bind system tool inputs](input-binding.md).
+ 
+ ## Model calls and response assembly
+ 
+diff --git a/docs/env/README.md b/docs/env/README.md
+index ad4bdf49af21fd72910f2677135361668eef631e..ed9e616beb2319ff3f71604b24c598ec531919b6 100644
+--- a/docs/env/README.md
++++ b/docs/env/README.md
+@@ -2,7 +2,9 @@
+ 
+ 접근 가능한 프로바이더의 모델만 준비하면 됩니다. 인증 정보는 프로바이더별로 한 번 설정하고, 테스트할 모델·버전은 번호를 붙여 각각 추가합니다. 에이전트 검증에는 텍스트 응답과 Tool calling을 지원하는 모델을 준비합니다. 공급자를 켜는 별도 환경변수는 사용하지 않습니다.
+ 
+-이 문서는 연결 설정을 준비하기 위한 규약입니다. 실제 어댑터와 모델별 테스트는 구현 중이며, 모델 등록·버전 확인과 실제 호출 결과를 별도로 기록합니다.
++**이 `.env`와 모델 번호 변수는 Wickle의 실제 연결 테스트 전용입니다. 라이브러리 사용자의 런타임 설정 규약이 아닙니다.**
++
++이 문서는 테스트 연결 설정을 준비하기 위한 규약입니다. 실제 어댑터와 모델별 테스트는 구현 중이며, 모델 등록·버전 확인과 실제 호출 결과를 별도로 기록합니다.
+ 
+ ## 프로바이더별 가이드
+ 
+@@ -26,7 +28,7 @@ if [ ! -e .env ]; then
+ fi
+ ```
+ 
+-`.env`와 `.env.*`는 Git에서 제외됩니다. 실제 키나 credential JSON을 문서·커밋에 넣지 않습니다. Core 라이브러리는 `.env`를 직접 읽지 않고, Host나 테스트 실행기가 설정을 읽어 어댑터를 구성합니다.
++`.env`와 `.env.*`는 Git에서 제외됩니다. 실제 키나 credential JSON을 문서·커밋에 넣지 않습니다. 테스트 실행기가 `.env`를 읽어 모델별 어댑터를 구성합니다. Core 라이브러리는 파일을 읽거나 이 환경변수에 의존하지 않고 구성된 어댑터를 전달받습니다. `.env`와 `.env.example`은 배포용 `.crate` 패키지에도 포함하지 않습니다. 실제 서비스의 설정 방식은 Host 애플리케이션이 결정합니다.
+ 
+ ## 모델을 여러 개 추가하기
+ 
+diff --git a/docs/env/anthropic.md b/docs/env/anthropic.md
+index f80faa379447a71fa1c383fbaa671415d248bd2f..4e1f35a94e7c3745d1b42238c61bf08dc7e1ff63 100644
+--- a/docs/env/anthropic.md
++++ b/docs/env/anthropic.md
+@@ -2,7 +2,7 @@
+ 
+ [환경변수 안내](README.md) · [전체 예제](../../.env.example)
+ 
+-Claude Console에서 발급한 API 키와 직접 API의 모델 ID를 준비합니다. 아래 설정은 Host와 모델별 검사를 위한 규약입니다. Wickle 코어가 `.env`를 자동으로 읽지는 않으며, 제공 경로 어댑터와 실제 연결 검사 runner는 아직 완성되지 않았습니다.
++Claude Console에서 발급한 API 키와 직접 API의 모델 ID를 준비합니다. 아래 설정은 모델별 실제 연결 테스트 전용 규약입니다. Wickle 코어가 `.env`를 자동으로 읽지는 않으며, 제공 경로 어댑터와 실제 연결 검사 runner는 아직 완성되지 않았습니다.
+ 
+ ```dotenv
+ ANTHROPIC_API_KEY=
+diff --git a/docs/env/azure-openai.md b/docs/env/azure-openai.md
+index b4dc75ec405483135c8c5fd1f651286a75929d73..9717bb6c145d038316357770200aba1e24c0c38a 100644
+--- a/docs/env/azure-openai.md
++++ b/docs/env/azure-openai.md
+@@ -63,4 +63,4 @@ AZURE_OPENAI_API_KEY=
+ 
+ ID가 채워진 각 슬롯은 독립 테스트 대상입니다. 배포 이름도 함께 입력하고, 버전을 모르면 준비 중에만 비워둔 뒤 테스트 전에 Details에서 확인하세요. 다른 리소스·계정이나 다른 공통 API 설정을 사용할 때는 별도 `.env` 파일로 나눕니다.
+ 
+-이 문서는 연결 준비용 설정 규약이며 `.env` 저장만으로 호출이 실행되지 않습니다. 코어 라이브러리는 `.env`를 직접 읽지 않습니다. [공통 설정 안내](README.md)에서 준비 및 실행 범위를 확인하세요.
++이 문서는 모델별 실제 연결 테스트용 설정 규약이며 `.env` 저장만으로 호출이 실행되지 않습니다. 코어 라이브러리는 `.env`를 직접 읽지 않습니다. [공통 설정 안내](README.md)에서 준비 및 실행 범위를 확인하세요.
+diff --git a/docs/env/gemini.md b/docs/env/gemini.md
+index df5cedc488ad072e4f9980af4b90b0a5f688d686..51c5cda8a8ec61dc0764112ea1e8644f859285f2 100644
+--- a/docs/env/gemini.md
++++ b/docs/env/gemini.md
+@@ -2,7 +2,7 @@
+ 
+ [환경변수 안내](README.md) · [전체 예제](../../.env.example)
+ 
+-Google AI Studio에서 발급한 Gemini API 키와 해당 키로 사용할 모델을 준비합니다. 아래는 Host와 모델별 검사를 위한 설정 규약이며, Wickle의 Gemini 어댑터와 실제 연결 검사 runner는 아직 완성되지 않았습니다.
++Google AI Studio에서 발급한 Gemini API 키와 해당 키로 사용할 모델을 준비합니다. 아래는 모델별 실제 연결 테스트 전용 설정 규약이며, Wickle의 Gemini 어댑터와 실제 연결 검사 runner는 아직 완성되지 않았습니다.
+ 
+ ```dotenv
+ GEMINI_API_KEY=
+@@ -14,7 +14,7 @@ GEMINI_MODEL_1_VERSION=
+ ```
+ 
+ 1. [Google AI Studio API Keys](https://aistudio.google.com/apikey)에서 사용할 프로젝트를 선택하고 키를 생성합니다. 기존 프로젝트가 보이지 않으면 **Dashboard → Projects → Import projects**에서 가져옵니다. 키는 해당 Google Cloud 프로젝트의 사용량·결제 설정과 연결됩니다. [프로젝트와 키 준비](https://ai.google.dev/gemini-api/docs/api-key).
+-2. 새로 생성한 **auth key**를 `GEMINI_API_KEY`에 넣습니다. 공식 문서는 기존 Standard key의 전환을 안내하므로, 오래된 키를 재사용한다면 Key Type과 현재 제한 조건도 확인합니다. Google SDK는 `GOOGLE_API_KEY`가 함께 설정되면 이를 우선할 수 있어, Host는 선택한 `GEMINI_API_KEY`를 명시적으로 전달해야 합니다. [키 유형·환경변수 우선순위](https://ai.google.dev/gemini-api/docs/api-key).
++2. 새로 생성한 **auth key**를 `GEMINI_API_KEY`에 넣습니다. 공식 문서는 기존 Standard key의 전환을 안내하므로, 오래된 키를 재사용한다면 Key Type과 현재 제한 조건도 확인합니다. Google SDK는 `GOOGLE_API_KEY`가 함께 설정되면 이를 우선할 수 있어, 테스트 실행기는 선택한 `GEMINI_API_KEY`를 SDK 클라이언트에 명시적으로 전달해야 합니다. [키 유형·환경변수 우선순위](https://ai.google.dev/gemini-api/docs/api-key).
+ 3. AI Studio의 모델 선택 화면과 [Models API](https://ai.google.dev/api/models)에서 사용할 모델의 ID·버전·지원 작업을 확인합니다. `name`이 `models/…` 형식이면 `models/` 뒤의 정확한 모델 식별자를 `GEMINI_MODEL_1_ID`에 넣습니다. `supportedGenerationMethods`에 필요한 생성 방식이 있는지도 확인합니다.
+ 4. 공급자가 공개한 버전 정보를 `GEMINI_MODEL_1_VERSION`에 기록합니다. Models API의 `version` 값은 공급자 버전 metadata이며, 이 값만으로 ID가 고정 snapshot이라는 의미가 되지는 않습니다. 선택한 ID의 release·alias 의미를 함께 확인합니다. [모델 metadata](https://ai.google.dev/api/models#Model).
+ 
+diff --git a/docs/env/openai.md b/docs/env/openai.md
+index aa23d1775ac513766bbe397b284e94cd7be95fda..ce2f1b433c22a00194023c271474621b850dfce8 100644
+--- a/docs/env/openai.md
++++ b/docs/env/openai.md
+@@ -34,4 +34,4 @@ OPENAI_MODEL_2_VERSION=
+ 
+ ID가 채워진 슬롯마다 독립적인 테스트 대상이 됩니다. 사용하지 않는 슬롯은 ID를 비워둡니다. 버전이 아직 확인되지 않았다면 준비 중에는 `_VERSION`을 비워두고 실제 테스트 전에 확인하세요. 날짜나 버전을 임의로 만들지 않습니다. 다른 계정·프로젝트·endpoint 조합은 별도 `.env` 파일로 준비합니다.
+ 
+-이 문서는 연결 준비용 설정 규약입니다. `.env`를 저장하는 것만으로 호출이 실행되지 않으며, 코어 라이브러리가 파일을 직접 읽지 않습니다. 준비 및 실행 범위는 [공통 설정 안내](README.md)를 따릅니다.
++이 문서는 모델별 실제 연결 테스트용 설정 규약입니다. `.env`를 저장하는 것만으로 호출이 실행되지 않으며, 코어 라이브러리가 파일을 직접 읽지 않습니다. 준비 및 실행 범위는 [공통 설정 안내](README.md)를 따릅니다.
+diff --git a/docs/env/xai.md b/docs/env/xai.md
+index f97e1c4399e97a48d9246b0a48b079c1648d421e..7d35dad905ffc7eca016b79d756885171c6fdf37 100644
+--- a/docs/env/xai.md
++++ b/docs/env/xai.md
+@@ -37,4 +37,4 @@ XAI_MODEL_2_VERSION=
+ 
+ ID가 채워진 슬롯마다 독립 테스트 대상이 됩니다. 사용하지 않는 슬롯은 ID를 비워둡니다. 릴리스를 아직 확인하지 못했다면 준비 중에는 `_VERSION`을 비워두고 실제 테스트 전에 확인하세요. 별도 계정이나 endpoint를 사용할 때는 별도 `.env` 파일로 준비합니다.
+ 
+-이 문서는 연결 준비용 설정 규약입니다. `.env` 저장만으로 호출이 실행되지 않으며 코어 라이브러리가 파일을 직접 읽지 않습니다. 준비 및 실행 범위는 [공통 설정 안내](README.md)를 따릅니다.
++이 문서는 모델별 실제 연결 테스트용 설정 규약입니다. `.env` 저장만으로 호출이 실행되지 않으며 코어 라이브러리가 파일을 직접 읽지 않습니다. 준비 및 실행 범위는 [공통 설정 안내](README.md)를 따릅니다.
+diff --git a/docs/input-binding.md b/docs/input-binding.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..a16a672375405cc432326b1696999d74f6b8157b
+--- /dev/null
++++ b/docs/input-binding.md
+@@ -0,0 +1,97 @@
++# Bind system tool inputs
++
++`InputBinder` combines a saved model call with a compiled tool contract and
++Host-supplied system values. It saves immutable execution arguments before a
++Tool executor can use them. It does not invoke the Tool or make missing IDs up.
++
++For a tool exposing `query` and `limit`, a model can submit `{"query":"recent"}`.
++The binder can apply the optional model default `limit=10` and read the required
++`workspace_id` from the run's system snapshot. Its execution arguments contain
++exactly those three fields. Other registered run values are not merged in.
++
++## Capture run inputs
++
++`RunSystemInputs::capture(scope, supplied, &registry)` owns and validates the
++provided map, retaining the input definition metadata. Supplied keys must be
++registered, use the Run source, and pass their value schemas. A resolver-sourced
++key cannot also be supplied in that map. Missing values are checked when a Tool
++needs them, so registration does not require future resources to exist already.
++
++Use `to_record` and `snapshot_ref` to place the protected record and reference in
++the same StateStore admission transaction. Include that reference in
++`admission_digest`. The values, definition versions, and owning scope then remain
++fixed for the Run.
++
++On resume, omitted `ExecutionContextData.system_inputs` reuses the snapshot. Any
++explicit map, including an empty map, must match the original. Another approver's
++identity changes the current policy context, not the original system values.
++
++## Resolve and bind a saved call
++
++```rust
++let result = binder.bind(
++    &compiled_tool,
++    &call_id,
++    &execution_context,
++    &run_budget,
++).await?;
++```
++
++The call must already exist in the Run's Tool ledger. The binder validates its
++original model arguments, adds supported model defaults, and reads only the
++hidden keys selected by the compiled contract. Aliases of the same system key
++share one lookup, including a missing result.
++
++`SystemInputResolver` receives one registered key, its definition/resolver version,
++normalized model inputs, and current scope/actor/deadline/cancellation. It receives
++neither the complete system map nor credentials. It is a read-only lookup
++contract. `None` means missing; a returned JSON null is a value and must be allowed
++by the relevant schema.
++
++Default application is deliberately narrow: only missing optional top-level
++model parameters use a direct default or one reached through a supported local
++reference. Required, supplied, null, nested, and conditional values are not
++replaced or inferred. System defaults are never used. Both value schemas and the
++full execution schema must pass after assembly.
++
++## Enforce current policy
++
++`PolicyAction::ResolveSystemInput` authorizes a resolver lookup before it starts.
++A denied lookup performs no resolver call. A lookup that itself requires approval
++returns `SystemInputApprovalRequired`; no incomplete binding or fabricated target
++is saved. The Host must handle that permission before trying again.
++
++Once all values are known, `PolicyAction::ExecuteTool` receives the exact
++`ToolPolicyInput`. The Host policy checks actual target existence, ownership,
++and current permission. UUID format alone does not establish those facts.
++Deny/error prevents a new binding from being saved. Allow or a final approval
++requirement saves the complete candidate and returns its decision.
++
++`ToolBindingResult` is not a lasting dispatch permission. The execution boundary
++must still check the saved inputs, current policy, approval, cancellation, lease,
++and attempt budget immediately before performing the Tool operation.
++
++## Reuse frozen values
++
++`BoundToolInput` preserves original and normalized model inputs separately from
++execution arguments, with source revisions and descriptor/compiler/binding
++digests. The record and `ToolCall.bound_input_ref` are committed atomically.
++
++Binding the same call again reads that exact record, validates the compiled
++contract and original run inputs, and rechecks current policy. It does not query
++the resolver again. A new call can obtain a newer resolver value. If persistence
++succeeded but its acknowledgement was lost, the next bind still finds the saved
++target. If persistence never succeeded, no execution-ready binding was returned.
++
++The public restore method requires the saved call's exact record ID, revision,
++and digest. Debug output excludes values, and protected serialized inputs must
++not be copied into a model transcript or public trace.
++
++`InputBindingLimits` bounds distinct resolver keys, individual value bytes, and
++protected record bytes. Run deadline, cancellation, and lease checks apply to
++lookup, policy, and storage boundaries. Cancellation of a Future is not a claim
++that an external storage operation was rolled back.
++
++The [independent binding consumer](../tests/support/input_binding_consumer.rs)
++shows Run inputs, optional model defaults, unused-key exclusion, and a changing
++report resolver whose value stays fixed for an already-bound call.
+diff --git a/docs/provider-setup.md b/docs/provider-setup.md
+index dd4c3f8929d71ed6e6878a17a135c9ff3ed8601e..1e38f339d45e4e3018890438a93634ada3eb9a72 100644
+--- a/docs/provider-setup.md
++++ b/docs/provider-setup.md
+@@ -1,4 +1,4 @@
+-# Provider configuration
++# Live model test configuration
+ 
+ Prepare credentials and one environment-variable block per model/version using
+ [the model test `.env` guide](env/README.md). It links separate guides for OpenAI,
+@@ -9,5 +9,7 @@ and the first numbered model slot for each provider. Add further slots for more
+ models or versions. No provider enable-list variable is required.
+ 
+ Provider adapters and model-specific live tests are still being implemented.
+-Configuration files supply Host/test settings; Wickle core does not load `.env`
+-or put credentials into profiles, prompts, tool arguments, or run snapshots.
++These files and numbered model variables are test-harness conventions only.
++Wickle core accepts configured adapters and does not load `.env` or depend on
++these variables. The `.env` files and template are excluded from its `.crate`
++package. Production Host applications choose their own configuration mechanism.
+diff --git a/docs/tool-inputs.md b/docs/tool-inputs.md
+index c1b01a18498c5d919318145205b1c9724405c07f..1d7e0994d19c6c1ad055319cadffe6afeafb48a5 100644
+--- a/docs/tool-inputs.md
++++ b/docs/tool-inputs.md
+@@ -72,6 +72,9 @@ multiple fields are rejected instead of being silently removed. When every field
+ is model-owned, supported original root conditions remain in the projection.
+ Conditions entirely inside a selected object parameter remain model-owned.
+ 
++Actual value capture, lookup, and persistence are described in
++[Bind system tool inputs](input-binding.md).
++
+ ## Preserve a compiled definition
+ 
+ `CompiledTool` owns its validated descriptor, selected system definitions, and
+diff --git a/tests/support/input_binding_consumer.rs b/tests/support/input_binding_consumer.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..08f8f579cb80b3399634cfc3cf911cb3ee2c061a
+--- /dev/null
++++ b/tests/support/input_binding_consumer.rs
+@@ -0,0 +1,417 @@
++use serde_json::json;
++use std::{
++    collections::BTreeSet,
++    sync::{
++        Arc, Mutex,
++        atomic::{AtomicUsize, Ordering},
++    },
++    time::Duration,
++};
++use wickle::*;
++
++const WORKSPACE: &str = "11111111-1111-4111-8111-111111111111";
++const REPORT_A: &str = "22222222-2222-4222-8222-222222222222";
++const REPORT_B: &str = "33333333-3333-4333-8333-333333333333";
++fn id(value: &str) -> Id {
++    Id::new(value).expect("example identifier")
++}
++fn reference(value: &str) -> VersionedRef {
++    VersionedRef {
++        id: id(value),
++        version: id("1"),
++    }
++}
++
++struct Catalog;
++impl ProfileResolver for Catalog {
++    fn resolve<'a>(
++        &'a self,
++        r: &'a ComponentRef,
++        _: &'a Scope,
++    ) -> PortFuture<'a, ComponentMetadata> {
++        Box::pin(async move {
++            Ok(ComponentMetadata {
++                reference: ComponentRef {
++                    version: r.version.clone().or_else(|| Some(id("1"))),
++                    ..r.clone()
++                },
++                contract_version: 1,
++                manifest_digest: canonical_digest(&json!(r.id)),
++                config_schema: json!({"type":"object","additionalProperties":false}),
++                dependencies: vec![],
++                capabilities: BTreeSet::new(),
++                required_capabilities: BTreeSet::new(),
++                required_connections: BTreeSet::new(),
++                model_name: (r.kind == ComponentKind::Tool).then(|| r.id.clone()),
++                hook_position: None,
++                exports: vec![],
++            })
++        })
++    }
++}
++struct OwnedTargets;
++impl PolicyPort for OwnedTargets {
++    fn authorize<'a>(
++        &'a self,
++        request: &'a PolicyRequest,
++        _: PolicyContext<'a>,
++    ) -> PortFuture<'a, PolicyDecision> {
++        Box::pin(async move {
++            if let PolicyAction::ExecuteTool { input } = &request.action {
++                let args = input.execution_args();
++                let owned = match input.tool.id.as_str() {
++                    "search" => {
++                        args.get("workspace_id").and_then(|v| v.as_str()) == Some(WORKSPACE)
++                    }
++                    "read_report" => matches!(
++                        args.get("report_id").and_then(|v| v.as_str()),
++                        Some(REPORT_A | REPORT_B)
++                    ),
++                    _ => false,
++                };
++                if !owned {
++                    return Ok(PolicyDecision::Deny {
++                        reason: id("target_not_owned"),
++                    });
++                }
++            }
++            Ok(PolicyDecision::Allow {})
++        })
++    }
++}
++struct CurrentReport {
++    value: Mutex<ResolvedSystemInput>,
++    calls: AtomicUsize,
++}
++impl SystemInputResolver for CurrentReport {
++    fn resolve<'a>(
++        &'a self,
++        request: &'a SystemInputResolveRequest,
++        _: &'a SystemInputResolveContext,
++    ) -> PortFuture<'a, Option<ResolvedSystemInput>> {
++        assert_eq!(request.key, id("current_report_id"));
++        self.calls.fetch_add(1, Ordering::SeqCst);
++        let value = self.value.lock().unwrap().clone();
++        Box::pin(async move { Ok(Some(value)) })
++    }
++}
++fn tool(
++    name: &str,
++    input_schema: serde_json::Value,
++    agent_parameters: Vec<String>,
++) -> ToolDescriptor {
++    ToolDescriptor {
++        tool: reference(name),
++        name: id(name),
++        description: "Read authorized data".into(),
++        input_schema,
++        agent_parameters,
++        system_bindings: None,
++        output_schema: json!({"type":"string"}),
++        side_effect: ToolSideEffect::ReadOnly,
++        concurrency: ToolConcurrency::Serial,
++        retry: ToolRetryPolicy::Never,
++        reconcile: false,
++        max_output_bytes: 4096.try_into().unwrap(),
++    }
++}
++async fn plan(
++    store: &MemoryStateStore,
++    scope: &Scope,
++    run: &Id,
++    lease: &RunLease,
++    clock: &SystemClock,
++    call_id: &str,
++    compiled: &CompiledTool,
++    model_inputs: JsonObject,
++) -> Result<(), ContractError> {
++    let saved = store.load(scope, run).await?;
++    let mut snapshot = saved.snapshot;
++    let expected_revision = snapshot.revision;
++    snapshot.revision += 1;
++    snapshot.phase = RunPhase::Tool;
++    let call = ToolCall {
++        call_id: id(call_id),
++        model_request_id: id("model-request"),
++        provider_call_id: id(&format!("provider-{call_id}")),
++        tool_name: compiled.descriptor().name.clone(),
++        model_inputs,
++        descriptor_digest: compiled.descriptor_digest().clone(),
++        bound_input_ref: None,
++    };
++    snapshot.tool_ledger.push(ToolLedgerEntry {
++        call,
++        state: ToolCallState::Planned {},
++    });
++    store
++        .commit(
++            scope,
++            run,
++            CommitInput {
++                expected_revision,
++                lease: lease.clone(),
++                now_ms: clock.now()?.utc_ms,
++                snapshot,
++                messages: vec![],
++                events: vec![],
++                records: vec![],
++            },
++        )
++        .await?;
++    Ok(())
++}
++
++#[tokio::main(flavor = "current_thread")]
++async fn main() -> Result<(), Box<dyn std::error::Error>> {
++    let scope = Scope {
++        tenant_id: id("tenant"),
++        workspace_id: id("workspace"),
++        user_id: None,
++    };
++    let registry = Arc::new(SystemInputRegistry::new(vec![
++        SystemInputDefinition {
++            key: id("workspace_id"),
++            version: id("1"),
++            value_schema: json!({"type":"string","format":"uuid"}),
++            source: SystemInputSource::Run {},
++        },
++        SystemInputDefinition {
++            key: id("unused_key"),
++            version: id("1"),
++            value_schema: json!({"type":"string"}),
++            source: SystemInputSource::Run {},
++        },
++        SystemInputDefinition {
++            key: id("current_report_id"),
++            version: id("1"),
++            value_schema: json!({"type":"string","format":"uuid"}),
++            source: SystemInputSource::Resolver {
++                resolver_ref: reference("current-report"),
++            },
++        },
++    ])?);
++    let search = SchemaCompiler::new().compile(tool("search", json!({"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer","default":10},"workspace_id":{"type":"string","format":"uuid"}},"required":["query","workspace_id"],"additionalProperties":false}), vec!["query".into(),"limit".into()]), &registry)?;
++    let mut report = tool(
++        "read_report",
++        json!({"type":"object","properties":{"report_id":{"type":"string","format":"uuid"}},"required":["report_id"],"additionalProperties":false}),
++        vec![],
++    );
++    report.system_bindings = Some(std::collections::BTreeMap::from([(
++        "report_id".into(),
++        id("current_report_id"),
++    )]));
++    let report = SchemaCompiler::new().compile(report, &registry)?;
++    let values = SystemInputs::new(JsonObject::from([
++        ("workspace_id".into(), json!(WORKSPACE)),
++        ("unused_key".into(), json!("not a tool argument")),
++    ]));
++    let captured = RunSystemInputs::capture(scope.clone(), Some(values.clone()), &registry)?;
++    let input_record = captured.to_record(id("run-inputs"), 1);
++    let input_ref = captured.snapshot_ref(input_record.reference())?;
++    let profile = AgentProfile::from_json(
++        r#"{
++      "schema_version":"wickle.agent-profile.v1","agent_id":"assistant","version":"1",
++      "name":"Assistant","description":"Binding example","instructions":{"text":"Use available evidence"},"model_binding":"primary",
++      "tools":[{"tool_id":"search","version":"1"},{"tool_id":"read_report","version":"1"}],"skills":[],"connectors":[],"context_policy":{"strategy":"bounded"},"output_contract":{"type":"text"},
++      "limits":{"max_model_calls":4,"max_tool_attempts":4,"max_repair_attempts":0,"max_recovery_attempts":0,"max_elapsed_ms":30000}
++    }"#,
++    )?;
++    let profile = ProfileValidator::new(&Catalog)
++        .validate(&profile, &scope)
++        .await?;
++    let request = RunRequest {
++        request_id: id("request"),
++        session_id: id("session"),
++        input: vec![InputContent::Text {
++            text: "Read recent results".into(),
++        }],
++        trigger: RunTrigger::User {},
++        output_contract: None,
++    };
++    let request_record =
++        ProtectedRecord::new(id("request-data"), 1, serde_json::to_value(&request)?);
++    let prompt = ProtectedRecord::new(
++        id("prompt"),
++        1,
++        json!({"instructions":"Use available evidence"}),
++    );
++    let clock = Arc::new(SystemClock::new());
++    let now = clock.now()?.utc_ms;
++    let run = id("run");
++    let snapshot = RunSnapshot {
++        schema_version: RunSnapshotSchemaVersion::V1,
++        run_id: run.clone(),
++        request_digest: admission_digest(&request, &profile, Some(&input_ref)),
++        request: request.clone(),
++        scope: scope.clone(),
++        limits: profile.profile().limits.clone(),
++        profile,
++        status: RunStatus::Running,
++        phase: RunPhase::Admission,
++        model_step_id: None,
++        usage: BudgetUsage::default(),
++        timing: RunTiming::new(now, 30000)?,
++        reservations: vec![],
++        model_ledger: vec![],
++        tool_ledger: vec![],
++        system_inputs: Some(input_ref.clone()),
++        wait: None,
++        outcome: None,
++        assembly_ref: None,
++        context_batches: vec![],
++        source_states: vec![],
++        revision: 0,
++        last_event_seq: 1,
++    };
++    let started = RunEvent {
++        schema_version: RunEventSchemaVersion::V1,
++        event_id: id("started"),
++        scope: scope.clone(),
++        run_id: run.clone(),
++        session_id: request.session_id.clone(),
++        seq: 1.try_into()?,
++        timestamp_ms: now,
++        payload: RunEventPayload::RunStarted {
++            request_ref: request_record.reference().clone(),
++            profile_digest: snapshot.profile.profile_digest().clone(),
++        },
++    };
++    let store = Arc::new(MemoryStateStore::new());
++    store
++        .admit(
++            &scope,
++            AdmissionInput {
++                snapshot,
++                prompt_snapshot: prompt.reference().clone(),
++                messages: vec![Message {
++                    message_id: id("user-message"),
++                    run_id: run.clone(),
++                    sequence: 1.try_into()?,
++                    role: MessageRole::User,
++                    content: vec![ContentBlock::Content {
++                        content: request.input[0].clone(),
++                    }],
++                    origin: MessageOrigin::User,
++                    visibility: Visibility::UserAndModel,
++                }],
++                events: vec![started],
++                records: vec![request_record, prompt, input_record.clone()],
++                require_durable: false,
++            },
++        )
++        .await?;
++    let lease = store
++        .acquire_lease(&scope, &run, &id("worker"), now, 30000)
++        .await?;
++    let mut context = ExecutionContext::new(
++        ExecutionContextData {
++            scope: scope.clone(),
++            principal_ref: id("caller"),
++            capability_grant_ref: id("grant"),
++            trace_context: None,
++            system_inputs: Some(values),
++        },
++        Default::default(),
++    );
++    let budget = RunBudget::attach(
++        store.clone(),
++        clock.clone(),
++        Arc::new(RandomIdSource),
++        scope.clone(),
++        run.clone(),
++        lease.clone(),
++        context.cancellation.clone(),
++    )
++    .await?;
++    let resolver = Arc::new(CurrentReport {
++        value: Mutex::new(ResolvedSystemInput {
++            value: json!(REPORT_A),
++            revision: id("revision-1"),
++        }),
++        calls: AtomicUsize::new(0),
++    });
++    let binder = InputBinder::new(
++        registry.clone(),
++        Some(resolver.clone()),
++        Arc::new(PolicyGate::new(
++            Arc::new(OwnedTargets),
++            Duration::from_secs(1),
++        )?),
++        Arc::new(RandomIdSource),
++    );
++    plan(
++        &store,
++        &scope,
++        &run,
++        &lease,
++        &clock,
++        "search-call",
++        &search,
++        JsonObject::from([("query".into(), json!("recent results"))]),
++    )
++    .await?;
++    let search_result = binder
++        .bind(&search, &id("search-call"), &context, &budget)
++        .await?;
++    assert_eq!(
++        serde_json::to_value(search_result.input.execution_args())?,
++        json!({"query":"recent results","limit":10,"workspace_id":WORKSPACE})
++    );
++    assert_eq!(
++        serde_json::to_value(search_result.input.original_model_inputs())?,
++        json!({"query":"recent results"})
++    );
++    assert_eq!(resolver.calls.load(Ordering::SeqCst), 0);
++    context.data.system_inputs = None;
++    plan(
++        &store,
++        &scope,
++        &run,
++        &lease,
++        &clock,
++        "report-first",
++        &report,
++        JsonObject::new(),
++    )
++    .await?;
++    let first = binder
++        .bind(&report, &id("report-first"), &context, &budget)
++        .await?;
++    *resolver.value.lock().unwrap() = ResolvedSystemInput {
++        value: json!(REPORT_B),
++        revision: id("revision-2"),
++    };
++    let cached = binder
++        .bind(&report, &id("report-first"), &context, &budget)
++        .await?;
++    assert_eq!(cached.reference, first.reference);
++    assert_eq!(cached.input.execution_args()["report_id"], json!(REPORT_A));
++    assert_eq!(resolver.calls.load(Ordering::SeqCst), 1);
++    plan(
++        &store,
++        &scope,
++        &run,
++        &lease,
++        &clock,
++        "report-next",
++        &report,
++        JsonObject::new(),
++    )
++    .await?;
++    let next = binder
++        .bind(&report, &id("report-next"), &context, &budget)
++        .await?;
++    assert_eq!(next.input.execution_args()["report_id"], json!(REPORT_B));
++    assert_eq!(resolver.calls.load(Ordering::SeqCst), 2);
++    let restored = RunSystemInputs::restore(&input_record, &input_ref, &scope, &registry)?;
++    restored.validate_resume(None)?;
++    assert!(
++        restored
++            .validate_resume(Some(&SystemInputs::default()))
++            .is_err()
++    );
++    println!(
++        "input binding consumer: model query + default limit + Host workspace; unused key omitted; cached target fixed; new call resolves the new report; omitted resume inputs reuse the snapshot"
++    );
++    Ok(())
++}

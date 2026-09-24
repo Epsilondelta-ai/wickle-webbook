@@ -1,0 +1,2055 @@
+diff --git a/crates/wickle/src/agent.rs b/crates/wickle/src/agent.rs
+index c2a042e1e4d2fd65c82b045470711ab0f93e7e40..1d82948bf508660a8fe87df50f2c762291f38b47 100644
+--- a/crates/wickle/src/agent.rs
++++ b/crates/wickle/src/agent.rs
+@@ -19,6 +19,7 @@ mod components;
+ mod control;
+ mod driver;
+ mod hooks;
++mod inspection;
+ mod interruption;
+ mod persistence;
+ pub use persistence::{PersistenceFailure, UnconfirmedToolEffect};
+diff --git a/crates/wickle/src/agent/inspection.rs b/crates/wickle/src/agent/inspection.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..434f93bf8daf2e13e2a5327a2240c7427623ce6d
+--- /dev/null
++++ b/crates/wickle/src/agent/inspection.rs
+@@ -0,0 +1,423 @@
++use super::*;
++use crate::inspection::{StoredInspection, compose};
++use serde::de::DeserializeOwned;
++
++impl Agent {
++    /// Inspect saved composition under current permission. This performs only
++    /// policy checks and storage reads; it never prepares or executes a step.
++    pub async fn inspect_step(
++        &self,
++        run_id: &Id,
++        step: StepRef,
++        context: &ExecutionContext,
++        options: InspectionOptions,
++    ) -> Result<Guarded<CompositionReport>, ContractError> {
++        self.check_scope(context)?;
++        let timeout = Duration::from_millis(self.inner.bindings.settings.start_timeout_ms);
++        let deadline = tokio::time::Instant::now() + timeout;
++        let mut request = PolicyRequest {
++            owner_scope: self.inner.bindings.scope.clone(),
++            resource_id: run_id.clone(),
++            action: PolicyAction::InspectStep {
++                step: step.clone(),
++                options,
++                context_fragments: vec![],
++            },
++        };
++        if let Guarded::ApprovalRequired(challenge) = self
++            .inner
++            .bindings
++            .policy
++            .guard(&request, context, Some(deadline), None, || async { Ok(()) })
++            .await?
++        {
++            return Ok(Guarded::ApprovalRequired(challenge));
++        }
++        let (report, context_fragments) = caller_read(
++            context,
++            Some(timeout),
++            crate::future::boxed(|| self.inspect_records(run_id, step, context, options, deadline)),
++        )
++        .await?;
++        if let PolicyAction::InspectStep {
++            context_fragments: included,
++            ..
++        } = &mut request.action
++        {
++            *included = context_fragments;
++        }
++        self.inner
++            .bindings
++            .policy
++            .guard(&request, context, Some(deadline), None, || async {
++                Ok(report)
++            })
++            .await
++    }
++
++    async fn inspect_records(
++        &self,
++        run_id: &Id,
++        step: StepRef,
++        context: &ExecutionContext,
++        options: InspectionOptions,
++        deadline: tokio::time::Instant,
++    ) -> Result<(CompositionReport, Vec<InspectionFragmentRef>), ContractError> {
++        let bindings = &self.inner.bindings;
++        let saved = match bindings.state.load(&bindings.scope, run_id).await {
++            Ok(saved) => saved,
++            Err(error) if missing_reason(error.code).is_some() => {
++                return Ok((unavailable(run_id, step, error.code, "run", None), vec![]));
++            }
++            Err(error) => return Err(error),
++        };
++        if saved.snapshot.scope != bindings.scope || saved.snapshot.run_id != *run_id {
++            return Err(fail(ErrorCode::InvalidSnapshot, "inspection.run"));
++        }
++        let mut lookup_gaps = vec![];
++        let mut selected = None;
++        for reference in &saved.snapshot.prepared_steps {
++            if matches!(&step, StepRef::Prepared { record_id } if *record_id != reference.record_id)
++            {
++                continue;
++            }
++            let root: Option<PreparedStepRecord> = self
++                .inspection_record(reference, "preparation", &mut lookup_gaps)
++                .await?;
++            let Some(root) = root else { continue };
++            if root.scope != bindings.scope
++                || root.run_id != *run_id
++                || root.profile_digest != *saved.snapshot.profile.profile_digest()
++            {
++                return Err(fail(ErrorCode::InvalidSnapshot, "inspection.preparation"));
++            }
++            let matched = match &step {
++                StepRef::Prepared { record_id } => *record_id == reference.record_id,
++                StepRef::Logical {
++                    model_step_id,
++                    purpose,
++                    projection_revision,
++                } => {
++                    root.model_step_id == *model_step_id
++                        && root.purpose == *purpose
++                        && root.projection_revision == *projection_revision
++                }
++            };
++            if matched {
++                selected = Some((reference.clone(), root));
++                break;
++            }
++        }
++        let Some((reference, root)) = selected else {
++            let status = if lookup_gaps.is_empty() {
++                InspectionStatus::NotFound
++            } else if matches!(step, StepRef::Prepared { .. })
++                && lookup_gaps.iter().any(|gap| gap.reason == "expired")
++            {
++                InspectionStatus::Expired
++            } else if matches!(step, StepRef::Prepared { .. }) {
++                InspectionStatus::NotFound
++            } else {
++                InspectionStatus::Partial
++            };
++            return Ok((
++                CompositionReport {
++                    schema_version: "wickle.composition-report.v1",
++                    run_id: run_id.clone(),
++                    step,
++                    status,
++                    composition: None,
++                    unresolved: lookup_gaps,
++                },
++                vec![],
++            ));
++        };
++        let mut unresolved = vec![UnresolvedInspectionField {
++            field: "estimator".into(),
++            record_id: None,
++            reason: "not_recorded".into(),
++        }];
++        #[derive(serde::Deserialize)]
++        #[serde(deny_unknown_fields)]
++        struct ConfigurationRecord {
++            route: ResolvedModelRoute,
++            configuration: ModelConfiguration,
++        }
++        let config: Option<ConfigurationRecord> = self
++            .inspection_record(
++                &root.model_configuration,
++                "model_configuration",
++                &mut unresolved,
++            )
++            .await?;
++        let projection: Option<PreparedModelProjection> = self
++            .inspection_record(&root.context_projection, "projection", &mut unresolved)
++            .await?;
++        if projection.as_ref().is_some_and(|projection| {
++            projection.scope != bindings.scope
++                || projection.run_id != *run_id
++                || projection.request.request_id != root.model_step_id
++                || projection.request.purpose != root.purpose
++                || projection.fingerprint() != root.projection_fingerprint
++        }) {
++            return Err(fail(ErrorCode::InvalidSnapshot, "inspection.projection"));
++        }
++        if let (Some(config), Some(projection)) = (&config, &projection) {
++            if config.route != projection.request.route
++                || config.configuration.effective != projection.request.options
++                || config.configuration.max_output_tokens != projection.request.max_output_tokens
++            {
++                return Err(fail(ErrorCode::InvalidSnapshot, "inspection.configuration"));
++            }
++        }
++        let route = config
++            .as_ref()
++            .map(|record| record.route.clone())
++            .or_else(|| {
++                projection
++                    .as_ref()
++                    .map(|projection| projection.request.route.clone())
++            });
++        let tool_set: Option<ResolvedToolSet> = self
++            .inspection_record(&root.tool_set, "tool_set", &mut unresolved)
++            .await?;
++        let mut tools = vec![];
++        if let Some(tool_set) = tool_set {
++            if tool_set.scope != bindings.scope
++                || tool_set.run_id != *run_id
++                || tool_set.entries.len() != root.compiled_tools.len()
++            {
++                return Err(fail(ErrorCode::InvalidSnapshot, "inspection.tool_set"));
++            }
++            for (entry, reference) in tool_set.entries.into_iter().zip(&root.compiled_tools) {
++                let value = self
++                    .inspection_record::<serde_json::Value>(
++                        reference,
++                        "tool_compilation",
++                        &mut unresolved,
++                    )
++                    .await?;
++                let compiled = value.map(CompiledToolContract::inspection).transpose()?;
++                if let Some(compiled) = &compiled {
++                    if compiled.tool != entry.manifest.tool
++                        || compiled.canonical_name != entry.manifest.model_tool.name
++                        || compiled.canonical_schema_digest != entry.manifest.model_schema_digest
++                        || route.as_ref().is_some_and(|route| {
++                            compiled.target.provider != route.provider
++                                || compiled.target.api_contract != route.api_contract
++                                || compiled.target.capability_revision != route.capability_revision
++                        })
++                    {
++                        return Err(fail(
++                            ErrorCode::InvalidSnapshot,
++                            "inspection.tool_compilation",
++                        ));
++                    }
++                }
++                tools.push((entry.manifest, compiled));
++            }
++        }
++        let mut attempts = vec![];
++        for invocation in &saved.snapshot.model_ledger {
++            if invocation.prepared_step_ref.as_ref() != Some(&reference) {
++                continue;
++            }
++            if invocation.model_step_id != root.model_step_id
++                || invocation.purpose != root.purpose
++                || invocation.run_id != *run_id
++            {
++                return Err(fail(ErrorCode::InvalidSnapshot, "inspection.invocation"));
++            }
++            let mut observed = matches!(invocation.state, ModelAttemptState::Completed {})
++                || invocation.provider_request_id.is_some()
++                || invocation.reported_model_id.is_some()
++                || invocation.reported_model_version.is_some()
++                || invocation
++                    .usage
++                    .as_ref()
++                    .is_some_and(|usage| usage.measurement == UsageMeasurement::Reported);
++            if let Some(response_ref) = &invocation.response_ref {
++                let response: Option<StoredModelResponse> = self
++                    .inspection_record(response_ref, "response", &mut unresolved)
++                    .await?;
++                if let Some(response) = response {
++                    if response.request_id != invocation.attempt_id
++                        || response.route_digest != invocation.route.digest()
++                    {
++                        return Err(fail(ErrorCode::InvalidSnapshot, "inspection.response"));
++                    }
++                    observed |= match response.outcome {
++                        ModelExchangeOutcome::Completed { .. } => true,
++                        ModelExchangeOutcome::Failed { failure } => {
++                            !failure.partial_text().is_empty()
++                                || failure.metadata.provider_request_id.is_some()
++                                || failure.metadata.reported_model_id.is_some()
++                                || failure.metadata.reported_model_version.is_some()
++                                || failure.metadata.usage.as_ref().is_some_and(|usage| {
++                                    usage.measurement == UsageMeasurement::Reported
++                                })
++                        }
++                    };
++                }
++            }
++            attempts.push((invocation.clone(), observed));
++        }
++        let mut disclosure = BTreeMap::new();
++        let mut context_fragments = vec![];
++        let mut displayed_bytes = 0usize;
++        if let Some(projection) = &projection {
++            for fragment in &projection.provenance.fragments {
++                if fragment.identity.scope != bindings.scope {
++                    return Err(fail(
++                        ErrorCode::InvalidSnapshot,
++                        "inspection.fragment_scope",
++                    ));
++                }
++                let display = match &fragment.value {
++                    FragmentValue::Item { item } if options.include_context_content => {
++                        let request = PolicyRequest {
++                            owner_scope: bindings.scope.clone(),
++                            resource_id: run_id.clone(),
++                            action: PolicyAction::InspectContextFragment {
++                                identity: Box::new(fragment.identity.clone()),
++                                core_revision: fragment.core_revision,
++                                content_digest: fragment.content_digest.clone(),
++                            },
++                        };
++                        match bindings
++                            .policy
++                            .check(&request, context, Some(deadline), None)
++                            .await?
++                        {
++                            PolicyDecision::Allow {} => {
++                                let bytes = serde_json::to_vec(&item.content)
++                                    .map_err(|_| {
++                                        fail(ErrorCode::InvalidSnapshot, "inspection.fragment")
++                                    })?
++                                    .len();
++                                if bytes > 65_536usize.saturating_sub(displayed_bytes) {
++                                    ContextDisclosure::Redacted {
++                                        reason: "display_limit".into(),
++                                    }
++                                } else {
++                                    displayed_bytes += bytes;
++                                    ContextDisclosure::Included {
++                                        content: item.content.clone(),
++                                    }
++                                }
++                            }
++                            PolicyDecision::Deny { .. } => ContextDisclosure::Redacted {
++                                reason: "access_denied".into(),
++                            },
++                            PolicyDecision::RequireApproval { .. } => ContextDisclosure::Redacted {
++                                reason: "approval_required".into(),
++                            },
++                        }
++                    }
++                    FragmentValue::Item { .. } => ContextDisclosure::Redacted {
++                        reason: "not_requested".into(),
++                    },
++                    _ => ContextDisclosure::NotApplicable,
++                };
++                if matches!(display, ContextDisclosure::Included { .. }) {
++                    context_fragments.push(InspectionFragmentRef {
++                        identity: fragment.identity.clone(),
++                        core_revision: fragment.core_revision,
++                        content_digest: fragment.content_digest.clone(),
++                    });
++                }
++                disclosure.insert(crate::inspection::disclosure_key(fragment), display);
++            }
++        }
++        Ok((
++            compose(
++                step,
++                StoredInspection {
++                    reference,
++                    root,
++                    route,
++                    configuration: config.map(|record| record.configuration),
++                    tools,
++                    projection,
++                    attempts,
++                    disclosure,
++                    limits: saved.snapshot.limits,
++                    status: saved.snapshot.status,
++                    revision: saved.snapshot.revision,
++                    outcome: saved.snapshot.outcome,
++                    unresolved,
++                },
++            ),
++            context_fragments,
++        ))
++    }
++
++    async fn inspection_record<T: DeserializeOwned>(
++        &self,
++        reference: &RecordRef,
++        field: &str,
++        unresolved: &mut Vec<UnresolvedInspectionField>,
++    ) -> Result<Option<T>, ContractError> {
++        match self
++            .inner
++            .bindings
++            .state
++            .read_record(&self.inner.bindings.scope, reference)
++            .await
++        {
++            Ok(record) => {
++                if record.reference() != reference {
++                    return Err(fail(
++                        ErrorCode::InvalidSnapshot,
++                        "inspection.record_identity",
++                    ));
++                }
++                serde_json::from_value(record.value().clone())
++                    .map(Some)
++                    .map_err(|_| fail(ErrorCode::InvalidSnapshot, "inspection.record"))
++            }
++            Err(error) if missing_reason(error.code).is_some() => {
++                unresolved.push(UnresolvedInspectionField {
++                    field: field.into(),
++                    record_id: Some(reference.record_id.clone()),
++                    reason: missing_reason(error.code)
++                        .expect("matched missing code")
++                        .into(),
++                });
++                Ok(None)
++            }
++            Err(error) => Err(error),
++        }
++    }
++}
++fn missing_reason(code: ErrorCode) -> Option<&'static str> {
++    match code {
++        ErrorCode::StateNotFound => Some("not_found"),
++        ErrorCode::RecordExpired => Some("expired"),
++        _ => None,
++    }
++}
++fn unavailable(
++    run_id: &Id,
++    step: StepRef,
++    code: ErrorCode,
++    field: &str,
++    record_id: Option<Id>,
++) -> CompositionReport {
++    CompositionReport {
++        schema_version: "wickle.composition-report.v1",
++        run_id: run_id.clone(),
++        step,
++        status: if code == ErrorCode::RecordExpired {
++            InspectionStatus::Expired
++        } else {
++            InspectionStatus::NotFound
++        },
++        composition: None,
++        unresolved: vec![UnresolvedInspectionField {
++            field: field.into(),
++            record_id,
++            reason: missing_reason(code).unwrap_or("not_found").into(),
++        }],
++    }
++}
+diff --git a/crates/wickle/src/error.rs b/crates/wickle/src/error.rs
+index 704661d0a0c2d8e1bf62877c88f861c58da45588..8795d05ec9d1bc1faf3c6dfb9957171bdfbfc85c 100644
+--- a/crates/wickle/src/error.rs
++++ b/crates/wickle/src/error.rs
+@@ -125,6 +125,8 @@ pub enum ErrorCode {
+     InvalidSnapshot,
+     /// The requested run, session, or protected record is absent in this exact scope.
+     StateNotFound,
++    /// A protected record was deliberately expired by the storage retention policy.
++    RecordExpired,
+     /// An existing request identity was reused with different logical input.
+     RequestConflict,
+     /// The session already has a running or waiting run.
+diff --git a/crates/wickle/src/inspection.rs b/crates/wickle/src/inspection.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..1ce3c29ee333a6b7c41ebf539fb8e99b83481dae
+--- /dev/null
++++ b/crates/wickle/src/inspection.rs
+@@ -0,0 +1,592 @@
++//! Read-only composition reports derived from stored evidence.
++use crate::*;
++use serde::{Deserialize, Serialize};
++use serde_json::Value;
++use std::{collections::BTreeMap, num::NonZeroU64};
++
++/// Identify persisted preparation without supplying runtime objects.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
++pub enum StepRef {
++    /// Exact logical input revision and purpose.
++    Logical {
++        /// Logical model step.
++        model_step_id: Id,
++        /// Agent, verification, or compaction.
++        purpose: ModelPurpose,
++        /// Frozen projection revision.
++        projection_revision: NonZeroU64,
++    },
++    /// A preparation record belonging to this Run.
++    Prepared {
++        /// Record ID, resolved against the Run's saved reference list.
++        record_id: Id,
++    },
++}
++/// Display options, never execution or credential-disclosure permission.
++#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct InspectionOptions {
++    /// Request source fragment content; each item still needs current permission.
++    #[serde(default)]
++    pub include_context_content: bool,
++}
++/// Exact saved content set covered by the final diagnostic authorization.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct InspectionFragmentRef {
++    /// Scoped producer and native fragment identity.
++    pub identity: FragmentIdentity,
++    /// Exact core observation.
++    pub core_revision: NonZeroU64,
++    /// Original content identity.
++    pub content_digest: JsonDigest,
++}
++/// Whether persisted evidence was available, without recreating it.
++#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(rename_all = "snake_case")]
++pub enum InspectionStatus {
++    /// Selected preparation and its required records were available.
++    Found,
++    /// Some referenced evidence is absent or explicitly expired.
++    Partial,
++    /// No matching preparation or record exists.
++    NotFound,
++    /// The store explicitly classified the selected record as expired.
++    Expired,
++}
++/// Why one report field cannot be populated.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++pub struct UnresolvedInspectionField {
++    /// Safe field/category name, not a storage error payload.
++    pub field: String,
++    /// Missing record identity when known.
++    pub record_id: Option<Id>,
++    /// `not_found`, `expired`, or `not_recorded`.
++    pub reason: String,
++}
++/// Facts a stored record supports; none asserts business success.
++#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(rename_all = "snake_case")]
++pub enum InspectionEvidence {
++    /// A model input was prepared and saved.
++    Prepared,
++    /// A physical call budget was reserved, not proof of transmission.
++    DispatchReserved,
++    /// A response record was observed and saved.
++    ResponseObserved,
++    /// No saved response proves whether transmission occurred.
++    TransmissionUnknown,
++}
++/// Public report, with protected runtime inputs excluded by construction.
++#[derive(Debug, Clone, PartialEq, Serialize)]
++pub struct CompositionReport {
++    /// Stable report encoding.
++    pub schema_version: &'static str,
++    /// Authorized Run identity.
++    pub run_id: Id,
++    /// Original selector.
++    pub step: StepRef,
++    /// Lookup/retention result.
++    pub status: InspectionStatus,
++    /// Available saved preparation, never a newly generated projection.
++    pub composition: Option<StepComposition>,
++    /// Explicit gaps; unknown values are not guessed.
++    pub unresolved: Vec<UnresolvedInspectionField>,
++}
++/// Composition of one exact prepared input.
++#[derive(Debug, Clone, PartialEq, Serialize)]
++pub struct StepComposition {
++    /// Selected preparation record identity.
++    pub prepared_record_id: Id,
++    /// Logical model step.
++    pub model_step_id: Id,
++    /// Invocation purpose.
++    pub purpose: ModelPurpose,
++    /// Exact frozen revision.
++    pub projection_revision: NonZeroU64,
++    /// Original unredacted execution fingerprint; never recomputed from this DTO.
++    pub fingerprint: JsonDigest,
++    /// Pinned assembler identity.
++    pub assembler: VersionedRef,
++    /// Saved reason for this projection revision.
++    pub change_reason: Id,
++    /// Preparation evidence, independent of physical transmission.
++    pub evidence: Vec<InspectionEvidence>,
++    /// Safe model and option metadata.
++    pub model: Option<ModelComposition>,
++    /// Model-owned schemas; hidden execution contracts are excluded.
++    pub tools: Vec<ToolComposition>,
++    /// Fragments in their original saved order.
++    pub fragments: Vec<FragmentComposition>,
++    /// Context selection evidence, distinct from display redaction.
++    pub selection: Option<SelectionComposition>,
++    /// Physical reservations and observed response facts.
++    pub attempts: Vec<AttemptComposition>,
++    /// Saved input estimate, not actual provider usage.
++    pub estimated_input_tokens: Option<u64>,
++    /// Estimator identity, if it was recorded; older preparations have none.
++    pub estimator: Option<VersionedRef>,
++    /// Immutable Run limits.
++    pub run_limits: RunLimits,
++    /// Current saved Run status; inspection does not decide an outcome.
++    pub recorded_run_status: RunStatus,
++    /// Snapshot revision at which this Run status was read.
++    pub recorded_run_revision: u64,
++    /// Saved Run outcome metadata, without business output or inferred success.
++    pub recorded_run_outcome: Option<OutcomeComposition>,
++    /// Paths hidden only for display, not removed from the saved projection.
++    pub redacted_paths: Vec<String>,
++}
++/// Authoritative Run outcome metadata associated with the inspected snapshot.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
++pub struct OutcomeComposition {
++    /// Saved status, not an inspector verdict.
++    pub status: RunStatus,
++    /// Exact settlement revision.
++    pub checkpoint_revision: u64,
++    /// Present only when the saved Run succeeded; turn-ended is not verified business success.
++    pub completion_basis: Option<CompletionBasis>,
++}
++/// Model metadata with connection references and target configuration omitted.
++#[derive(Debug, Clone, PartialEq, Serialize)]
++pub struct ModelComposition {
++    /// Selected provider.
++    pub provider: Id,
++    /// Requested model/alias.
++    pub requested_model: Id,
++    /// Resolved model name.
++    pub model_id: Id,
++    /// Opaque model release.
++    pub model_version: Id,
++    /// Whether the target is pinned or mutable.
++    pub version_semantics: VersionSemantics,
++    /// Adapter implementation identity.
++    pub adapter: VersionedRef,
++    /// Operation and API version.
++    pub api_contract: ApiContract,
++    /// Capability metadata revision.
++    pub capability_revision: Id,
++    /// Original route identity, without exposing its protected fields.
++    pub route_digest: JsonDigest,
++    /// Requested/effective inference options and origins, with sensitive fields redacted.
++    pub configuration: Option<ModelConfiguration>,
++}
++/// Safe schema and compiler evidence for an advertised Tool.
++#[derive(Debug, Clone, PartialEq, Serialize)]
++pub struct ToolComposition {
++    /// Exact catalog Tool version.
++    pub tool: VersionedRef,
++    /// Model-facing canonical name.
++    pub canonical_name: Id,
++    /// Canonical model-only schema, with display redaction.
++    pub canonical_schema: Value,
++    /// Original canonical schema identity.
++    pub canonical_schema_digest: JsonDigest,
++    /// Saved provider name, when its compilation record is available.
++    pub provider_name: Option<Id>,
++    /// Provider model-only schema, with display redaction.
++    pub provider_schema: Option<Value>,
++    /// Pinned compiler identity.
++    pub compiler: Option<VersionedRef>,
++    /// Saved compilation identity.
++    pub compiled_digest: Option<JsonDigest>,
++    /// Identity of the saved argument decoding plan; not execution arguments.
++    pub decode_plan_digest: Option<JsonDigest>,
++    /// Constraint explanation metadata; text can contain schema annotations and is omitted.
++    pub constraints: Vec<ConstraintComposition>,
++    /// Saved native/context/core enforcement classifications.
++    pub enforcement: Vec<ToolConstraintEnforcement>,
++}
++/// Source and identity of trusted compiler-generated constraint text.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
++pub struct ConstraintComposition {
++    /// Fragment identity.
++    pub fragment_id: Id,
++    /// Original explanation digest.
++    pub digest: JsonDigest,
++    /// Compiler that generated the text.
++    pub source: VersionedRef,
++}
++/// Display disclosure, independent of inclusion in model input.
++#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
++#[serde(tag = "type", rename_all = "snake_case")]
++pub enum ContextDisclosure {
++    /// Explicitly authorized content, bounded to a finite report size.
++    Included {
++        /// Source context only; never model messages or system execution inputs.
++        content: Vec<InputContent>,
++    },
++    /// Content withheld from the display.
++    Redacted {
++        /// `not_requested`, `access_denied`, `approval_required`, or `display_limit`.
++        reason: String,
++    },
++    /// Selection/tombstone metadata has no source text to disclose.
++    NotApplicable,
++}
++/// Stable observation metadata; source revision can legitimately be unknown.
++#[derive(Debug, Clone, PartialEq, Serialize)]
++pub struct FragmentComposition {
++    /// Producer identity; scope and Host execution values are not copied here.
++    pub producer_id: Id,
++    /// Native fragment identity.
++    pub fragment_id: Id,
++    /// Core-issued revision.
++    pub core_revision: NonZeroU64,
++    /// Original observation digest.
++    pub content_digest: JsonDigest,
++    /// Opaque external revision, if known.
++    pub source_revision: Option<Id>,
++    /// Origin classification.
++    pub origin: ContextOrigin,
++    /// Zero-based order in the saved preparation.
++    pub order: usize,
++    /// `included`, `excluded`, `tombstone`, `selection`, or `unresolved`.
++    pub selection: String,
++    /// Saved reason, or `not_recorded` when the preparation lacks the detail.
++    pub selection_reason: String,
++    /// Separately authorized display data.
++    pub disclosure: ContextDisclosure,
++}
++/// Selection lists refer to saved inputs, not redaction decisions.
++#[derive(Debug, Clone, PartialEq, Serialize)]
++pub struct SelectionComposition {
++    /// Transcript boundary used for preparation.
++    pub through_sequence: u64,
++    /// Selected original messages, without contents or opaque continuations.
++    pub included_messages: Vec<Id>,
++    /// Dropped messages; historical records do not record individual reasons.
++    pub excluded_messages: Vec<Id>,
++    /// Selected context item identities.
++    pub included_context: Vec<Id>,
++    /// Dropped context identities.
++    pub excluded_context: Vec<Id>,
++}
++/// Reservation/response evidence for a physical model attempt.
++#[derive(Debug, Clone, PartialEq, Serialize)]
++pub struct AttemptComposition {
++    /// Physical attempt identity.
++    pub attempt_id: Id,
++    /// Saved ledger state.
++    pub state: ModelAttemptState,
++    /// A response or local collector-failure record was saved; not proof of remote response.
++    pub result_recorded: bool,
++    /// Reservation alone always leaves transmission unconfirmed.
++    pub evidence: Vec<InspectionEvidence>,
++    /// Model identity actually reported, never filled from the route.
++    pub reported_model_id: Option<Id>,
++    /// Version actually reported.
++    pub reported_model_version: Option<Id>,
++    /// Actual reported usage, if observed.
++    pub usage: Option<ModelUsage>,
++}
++
++#[derive(Clone, Serialize, Deserialize)]
++pub(crate) struct SavedToolInspection {
++    pub tool: VersionedRef,
++    pub canonical_name: Id,
++    pub canonical_schema_digest: JsonDigest,
++    pub compiler: VersionedRef,
++    pub target: ProviderToolTarget,
++    pub wire_tool: ModelTool,
++    pub decode_plan_digest: JsonDigest,
++    pub digest: JsonDigest,
++    pub fragments: Vec<ToolConstraintFragment>,
++    pub enforcement: Vec<ToolConstraintEnforcement>,
++}
++#[derive(Serialize, Deserialize)]
++pub(crate) struct StoredInspection {
++    pub reference: RecordRef,
++    pub root: PreparedStepRecord,
++    pub route: Option<ResolvedModelRoute>,
++    pub configuration: Option<ModelConfiguration>,
++    pub tools: Vec<(PinnedPromptTool, Option<SavedToolInspection>)>,
++    pub projection: Option<PreparedModelProjection>,
++    pub attempts: Vec<(ModelInvocationRecord, bool)>,
++    pub disclosure: BTreeMap<String, ContextDisclosure>,
++    pub limits: RunLimits,
++    pub status: RunStatus,
++    pub revision: u64,
++    pub outcome: Option<RunOutcome>,
++    pub unresolved: Vec<UnresolvedInspectionField>,
++}
++
++/// Pure conversion: no ports, clocks, policy callbacks or mutable runtime objects.
++pub(crate) fn compose(step: StepRef, saved: StoredInspection) -> CompositionReport {
++    let mut redacted_paths = vec![];
++    let model = saved.route.map(|route| {
++        let configuration = saved.configuration.map(|mut config| {
++            for (name, options) in [
++                ("requested", &mut config.requested),
++                ("effective", &mut config.effective),
++            ] {
++                for (key, value) in options.iter_mut() {
++                    let path = format!("model.configuration.{name}.{key}");
++                    if sensitive(key) {
++                        *value = Value::Null;
++                        redacted_paths.push(path);
++                    } else {
++                        scrub(value, &path, &mut redacted_paths);
++                    }
++                }
++            }
++            config
++        });
++        ModelComposition {
++            route_digest: route.digest(),
++            provider: route.provider,
++            requested_model: route.requested_model,
++            model_id: route.model_id,
++            model_version: route.model_version,
++            version_semantics: route.version_semantics,
++            adapter: route.adapter,
++            api_contract: route.api_contract,
++            capability_revision: route.capability_revision,
++            configuration,
++        }
++    });
++    let tools = saved
++        .tools
++        .into_iter()
++        .enumerate()
++        .map(|(index, (manifest, compiled))| {
++            let mut canonical_schema = manifest.model_tool.model_input_schema;
++            scrub(
++                &mut canonical_schema,
++                &format!("tools.{index}.canonical_schema"),
++                &mut redacted_paths,
++            );
++            let mut report = ToolComposition {
++                tool: manifest.tool,
++                canonical_name: manifest.model_tool.name,
++                canonical_schema,
++                canonical_schema_digest: manifest.model_schema_digest,
++                provider_name: None,
++                provider_schema: None,
++                compiler: None,
++                compiled_digest: None,
++                decode_plan_digest: None,
++                constraints: vec![],
++                enforcement: vec![],
++            };
++            if let Some(compiled) = compiled {
++                let mut schema = compiled.wire_tool.model_input_schema;
++                scrub(
++                    &mut schema,
++                    &format!("tools.{index}.provider_schema"),
++                    &mut redacted_paths,
++                );
++                report.provider_name = Some(compiled.wire_tool.name);
++                report.provider_schema = Some(schema);
++                report.constraints = compiled
++                    .fragments
++                    .into_iter()
++                    .map(|fragment| ConstraintComposition {
++                        fragment_id: fragment.id,
++                        digest: fragment.digest,
++                        source: compiled.compiler.clone(),
++                    })
++                    .collect();
++                report.compiler = Some(compiled.compiler);
++                report.compiled_digest = Some(compiled.digest);
++                report.decode_plan_digest = Some(compiled.decode_plan_digest);
++                report.enforcement = compiled.enforcement;
++            }
++            report
++        })
++        .collect();
++    let fragments = saved
++        .projection
++        .as_ref()
++        .map(|projection| {
++            projection
++                .provenance
++                .fragments
++                .iter()
++                .enumerate()
++                .map(|(order, fragment)| {
++                    let (selection, reason) = match &fragment.value {
++                        FragmentValue::Item { item }
++                            if projection
++                                .provenance
++                                .selected_context_ids
++                                .contains(&item.item_id) =>
++                        {
++                            ("included".into(), "selected".into())
++                        }
++                        FragmentValue::Item { item }
++                            if projection
++                                .provenance
++                                .dropped_context_ids
++                                .contains(&item.item_id) =>
++                        {
++                            ("excluded".into(), "not_recorded".into())
++                        }
++                        FragmentValue::Item { .. } => ("unresolved".into(), "not_recorded".into()),
++                        FragmentValue::Tombstone { reason } => {
++                            ("tombstone".into(), reason.to_string())
++                        }
++                        FragmentValue::Selection { status, .. } => {
++                            ("selection".into(), status.to_string())
++                        }
++                    };
++                    FragmentComposition {
++                        producer_id: fragment.identity.producer_id.clone(),
++                        fragment_id: fragment.identity.fragment_id.clone(),
++                        core_revision: fragment.core_revision,
++                        content_digest: fragment.content_digest.clone(),
++                        source_revision: fragment.source_revision.clone(),
++                        origin: fragment.origin,
++                        order,
++                        selection,
++                        selection_reason: reason,
++                        disclosure: saved
++                            .disclosure
++                            .get(&disclosure_key(fragment))
++                            .cloned()
++                            .unwrap_or_else(|| ContextDisclosure::Redacted {
++                                reason: "not_requested".into(),
++                            }),
++                    }
++                })
++                .collect()
++        })
++        .unwrap_or_default();
++    let selection = saved
++        .projection
++        .as_ref()
++        .map(|projection| SelectionComposition {
++            through_sequence: projection.provenance.through_sequence,
++            included_messages: projection.provenance.selected_message_ids.clone(),
++            excluded_messages: projection.provenance.dropped_message_ids.clone(),
++            included_context: projection.provenance.selected_context_ids.clone(),
++            excluded_context: projection.provenance.dropped_context_ids.clone(),
++        });
++    let attempts = saved
++        .attempts
++        .into_iter()
++        .map(|(attempt, response_observed)| AttemptComposition {
++            evidence: vec![
++                InspectionEvidence::DispatchReserved,
++                if response_observed {
++                    InspectionEvidence::ResponseObserved
++                } else {
++                    InspectionEvidence::TransmissionUnknown
++                },
++            ],
++            result_recorded: attempt.response_ref.is_some(),
++            attempt_id: attempt.attempt_id,
++            state: attempt.state,
++            reported_model_id: attempt.reported_model_id,
++            reported_model_version: attempt.reported_model_version,
++            usage: attempt.usage,
++        })
++        .collect();
++    let status = if saved
++        .unresolved
++        .iter()
++        .any(|field| field.reason != "not_recorded")
++    {
++        InspectionStatus::Partial
++    } else {
++        InspectionStatus::Found
++    };
++    CompositionReport {
++        schema_version: "wickle.composition-report.v1",
++        run_id: saved.root.run_id.clone(),
++        step,
++        status,
++        composition: Some(StepComposition {
++            prepared_record_id: saved.reference.record_id,
++            model_step_id: saved.root.model_step_id,
++            purpose: saved.root.purpose,
++            projection_revision: saved.root.projection_revision,
++            fingerprint: saved.root.projection_fingerprint,
++            assembler: saved.root.assembler,
++            change_reason: saved.root.change_reason,
++            evidence: vec![InspectionEvidence::Prepared],
++            model,
++            tools,
++            fragments,
++            selection,
++            attempts,
++            estimated_input_tokens: saved
++                .projection
++                .as_ref()
++                .map(|projection| projection.input_tokens),
++            estimator: None,
++            run_limits: saved.limits,
++            recorded_run_status: saved.status,
++            recorded_run_revision: saved.revision,
++            recorded_run_outcome: saved.outcome.map(|outcome| OutcomeComposition {
++                status: outcome.result.status(),
++                checkpoint_revision: outcome.checkpoint_revision,
++                completion_basis: match outcome.result {
++                    OutcomeResult::Succeeded { completion_basis } => Some(completion_basis),
++                    _ => None,
++                },
++            }),
++            redacted_paths,
++        }),
++        unresolved: saved.unresolved,
++    }
++}
++fn sensitive(key: &str) -> bool {
++    let normalized: String = key
++        .chars()
++        .filter(|c| c.is_alphanumeric())
++        .flat_map(char::to_lowercase)
++        .collect();
++    [
++        "password",
++        "secret",
++        "apikey",
++        "credential",
++        "authorization",
++        "accesstoken",
++        "refreshtoken",
++        "connection",
++        "endpoint",
++        "executionargs",
++        "systeminputs",
++        "opaque",
++    ]
++    .iter()
++    .any(|word| normalized.contains(word))
++}
++fn scrub(value: &mut Value, path: &str, redacted: &mut Vec<String>) {
++    match value {
++        Value::Object(values) => {
++            for (key, value) in values {
++                let child = format!("{path}.{key}");
++                if sensitive(key)
++                    || matches!(
++                        key.as_str(),
++                        "description" | "examples" | "default" | "$comment"
++                    )
++                {
++                    *value = Value::Null;
++                    redacted.push(child);
++                } else {
++                    scrub(value, &child, redacted);
++                }
++            }
++        }
++        Value::Array(values) => {
++            for (index, value) in values.iter_mut().enumerate() {
++                scrub(value, &format!("{path}.{index}"), redacted);
++            }
++        }
++        _ => {}
++    }
++}
++
++pub(crate) fn disclosure_key(fragment: &ContextFragment) -> String {
++    format!(
++        "{}:{}:{}",
++        fragment.identity.key(),
++        fragment.core_revision,
++        fragment.content_digest
++    )
++}
+diff --git a/crates/wickle/src/lib.rs b/crates/wickle/src/lib.rs
+index 93a5a51adb5280aba72e14adb00f36c76be07a4e..429021aebfdf3e964d00f2ed1d15fa90d62acaca 100644
+--- a/crates/wickle/src/lib.rs
++++ b/crates/wickle/src/lib.rs
+@@ -52,11 +52,18 @@ mod serialization;
+ pub use canonical::{
+     CanonicalizationVersion, JsonTextLimits, canonicalize_json_text, versioned_digest_json,
+ };
++mod inspection;
+ mod skills;
+ mod state;
+ mod tool_execution;
+ mod tool_schema;
+ mod views;
++pub use inspection::{
++    AttemptComposition, CompositionReport, ConstraintComposition, ContextDisclosure,
++    FragmentComposition, InspectionEvidence, InspectionFragmentRef, InspectionOptions,
++    InspectionStatus, ModelComposition, OutcomeComposition, SelectionComposition, StepComposition,
++    StepRef, ToolComposition, UnresolvedInspectionField,
++};
+ 
+ pub use agent::{
+     Agent, AgentBindings, AgentSettings, CancelReceipt, ComponentReleaseView, HookObservationView,
+diff --git a/crates/wickle/src/policy.rs b/crates/wickle/src/policy.rs
+index ddc012c33cad56ed8de2a82a0018b7e6cbd03e91..b701d2fed4c67dfd69f73178c149b3b5342d754d 100644
+--- a/crates/wickle/src/policy.rs
++++ b/crates/wickle/src/policy.rs
+@@ -132,6 +132,25 @@ pub enum PolicyAction {
+     ReadRun {},
+     /// Read the protected checkpoint, separately from the public view.
+     ReadRunDetails {},
++    /// Inspect one saved model preparation without executing it.
++    InspectStep {
++        /// Caller-selected saved identity.
++        step: crate::StepRef,
++        /// Requested display scope; this never grants secret-input access.
++        options: crate::InspectionOptions,
++        /// Final raw-content set. Allow must authorize the whole set against one current ACL view.
++        /// Empty for the initial metadata/intent check.
++        context_fragments: Vec<crate::InspectionFragmentRef>,
++    },
++    /// Read content of one exact source fragment for diagnostic display.
++    InspectContextFragment {
++        /// Scoped original producer and fragment identity.
++        identity: Box<crate::FragmentIdentity>,
++        /// Core observation revision.
++        core_revision: std::num::NonZeroU64,
++        /// Exact saved content identity.
++        content_digest: JsonDigest,
++    },
+     /// Resume a recorded wait or interruption.
+     ResumeRun {
+         /// Exact command, so authorization distinguishes approving, denying,
+diff --git a/crates/wickle/src/provider_tool_schema.rs b/crates/wickle/src/provider_tool_schema.rs
+index 7aa52dbe647c2498ff6ae0375159fdc808d843f3..39dd9503b81d09eb489811d83380cd1d8b2207da 100644
+--- a/crates/wickle/src/provider_tool_schema.rs
++++ b/crates/wickle/src/provider_tool_schema.rs
+@@ -318,6 +318,35 @@ impl CompiledToolContract {
+         }
+         Ok(rebuilt)
+     }
++    pub(crate) fn inspection(
++        value: Value,
++    ) -> Result<crate::inspection::SavedToolInspection, ContractError> {
++        #[derive(Deserialize)]
++        #[serde(deny_unknown_fields)]
++        struct Saved {
++            data: ContractData,
++            digest: JsonDigest,
++        }
++        let saved: Saved =
++            serde_json::from_value(value).map_err(|_| invalid("provider_tool.record"))?;
++        if saved.data.schema_version != "wickle.provider-tool-contract.v1"
++            || data_digest(&saved.data) != saved.digest
++        {
++            return Err(invalid("provider_tool.identity"));
++        }
++        Ok(crate::inspection::SavedToolInspection {
++            tool: saved.data.tool,
++            canonical_name: saved.data.canonical_name,
++            canonical_schema_digest: saved.data.canonical_schema_digest,
++            compiler: saved.data.compiler,
++            target: saved.data.target,
++            wire_tool: saved.data.wire_tool,
++            decode_plan_digest: data_digest(&saved.data.decode_plan),
++            digest: saved.digest,
++            fragments: saved.data.fragments,
++            enforcement: saved.data.enforcement,
++        })
++    }
+     /// Original model-facing Tool name to restore after provider name mapping.
+     pub fn canonical_name(&self) -> &Id {
+         &self.data.canonical_name
+diff --git a/crates/wickle/tests/agent_inspection.rs b/crates/wickle/tests/agent_inspection.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..bba664989b615fd54824f3a00f5ba7387100b346
+--- /dev/null
++++ b/crates/wickle/tests/agent_inspection.rs
+@@ -0,0 +1,713 @@
++//! Stored diagnostics disclose evidence without preparing or executing another step.
++#[path = "support/agent.rs"]
++#[allow(dead_code)]
++mod agent_support;
++#[path = "support/agent_hooks.rs"]
++#[allow(dead_code)]
++mod hooks_support;
++#[path = "support/agent_resume.rs"]
++#[allow(dead_code)]
++mod resume_support;
++#[path = "support/context_sources.rs"]
++#[allow(dead_code, unused_imports)]
++mod source_support;
++use agent_support::*;
++use std::{
++    sync::{
++        Arc,
++        atomic::{AtomicUsize, Ordering},
++    },
++    time::Duration,
++};
++use wickle::*;
++
++struct InspectionPolicy {
++    mode: AtomicUsize,
++    content: AtomicUsize,
++    fragment_checks: AtomicUsize,
++    pause_fragment: AtomicUsize,
++    fragment_entered: tokio::sync::Notify,
++    fragment_release: tokio::sync::Semaphore,
++}
++impl Default for InspectionPolicy {
++    fn default() -> Self {
++        Self {
++            mode: AtomicUsize::new(0),
++            content: AtomicUsize::new(0),
++            fragment_checks: AtomicUsize::new(0),
++            pause_fragment: AtomicUsize::new(0),
++            fragment_entered: tokio::sync::Notify::new(),
++            fragment_release: tokio::sync::Semaphore::new(0),
++        }
++    }
++}
++impl PolicyPort for InspectionPolicy {
++    fn authorize<'a>(
++        &'a self,
++        request: &'a PolicyRequest,
++        _: PolicyContext<'a>,
++    ) -> PortFuture<'a, PolicyDecision> {
++        Box::pin(async move {
++            let mode = match &request.action {
++                PolicyAction::InspectStep {
++                    context_fragments, ..
++                } => {
++                    let mode = self.mode.load(Ordering::SeqCst);
++                    if mode == 0 && !context_fragments.is_empty() {
++                        self.content.load(Ordering::SeqCst)
++                    } else {
++                        mode
++                    }
++                }
++                PolicyAction::InspectContextFragment { .. } => {
++                    let number = self.fragment_checks.fetch_add(1, Ordering::SeqCst) + 1;
++                    if number == self.pause_fragment.load(Ordering::SeqCst) {
++                        self.fragment_entered.notify_one();
++                        self.fragment_release.acquire().await.unwrap().forget();
++                    }
++                    self.content.load(Ordering::SeqCst)
++                }
++                _ => 0,
++            };
++            Ok(match mode {
++                1 => PolicyDecision::Deny {
++                    reason: id("revoked"),
++                },
++                2 => PolicyDecision::RequireApproval {
++                    reason: id("review"),
++                },
++                _ => PolicyDecision::Allow {},
++            })
++        })
++    }
++}
++struct NoExecution;
++impl ModelPort for NoExecution {
++    fn binding(&self) -> ModelPortBinding {
++        panic!("inspection must not resolve a model")
++    }
++    fn generate<'a>(
++        &'a self,
++        _: &'a ModelRequest,
++        _: &'a ModelCallContext,
++    ) -> PortStream<'a, ModelEvent> {
++        panic!("inspection must not invoke a model")
++    }
++    fn tool_schema_compiler(&self) -> Arc<dyn ProviderToolSchemaCompiler> {
++        panic!("inspection must not compile Tool schemas")
++    }
++}
++impl ModelTokenEstimator for NoExecution {
++    fn estimate(&self, _: &ModelRequest) -> Result<u64, ContractError> {
++        panic!("inspection must not estimate again")
++    }
++}
++impl ComponentRuntime for NoExecution {
++    fn resolve<'a>(
++        &'a self,
++        _: &'a ResolvedProfile,
++        _: &'a ComponentResolveContext,
++    ) -> PortFuture<'a, ResolvedAssembly> {
++        panic!("inspection must not resolve adapter factories")
++    }
++    fn bind<'a>(
++        &'a self,
++        _: &'a ResolvedAssembly,
++        _: &'a ComponentBindContext,
++    ) -> PortFuture<'a, BoundCapabilities> {
++        panic!("inspection must not open adapter factories")
++    }
++}
++fn reader(
++    profile: AgentProfile,
++    mut bindings: AgentBindings,
++    policy: Arc<InspectionPolicy>,
++) -> Agent {
++    bindings.policy = Arc::new(PolicyGate::new(policy, Duration::from_secs(2)).unwrap());
++    bindings.model_exchange = Arc::new(ModelExchange::new(
++        Arc::new(NoExecution),
++        bindings.policy.clone(),
++    ));
++    bindings.token_estimator = Arc::new(NoExecution);
++    if bindings.tools.is_none() && bindings.context_sources.is_none() {
++        bindings.components = Some(Arc::new(NoExecution));
++    }
++    create_agent(profile, bindings).unwrap()
++}
++async fn reference(store: &dyn StateStore, run: &Id) -> (StepRef, PreparedStepRecord) {
++    let saved = store.load(&scope(), run).await.unwrap();
++    let record = store
++        .read_record(&scope(), saved.snapshot.prepared_steps.last().unwrap())
++        .await
++        .unwrap();
++    (
++        StepRef::Prepared {
++            record_id: record.reference().record_id.clone(),
++        },
++        serde_json::from_value(record.value().clone()).unwrap(),
++    )
++}
++async fn report(agent: &Agent, run: &Id, step: StepRef, raw: bool) -> CompositionReport {
++    completed(
++        agent
++            .inspect_step(
++                run,
++                step,
++                &context(),
++                InspectionOptions {
++                    include_context_content: raw,
++                },
++            )
++            .await
++            .unwrap(),
++    )
++}
++
++#[tokio::test]
++async fn inspection_is_reproducible_preserves_fingerprints_and_has_no_execution_or_storage_writes()
++{
++    let fixture = Fixture::new(Response::Text, false);
++    let mut profile = profile();
++    profile.model_options = [("effort".into(), serde_json::json!("low"))].into();
++    let running = create_agent(profile.clone(), fixture.bindings()).unwrap();
++    let mut input = request("inspection");
++    input.model_options = [("effort".into(), serde_json::json!("high"))].into();
++    let handle = completed(running.start(input, context()).await.unwrap());
++    completed(handle.outcome(&context()).await.unwrap());
++    let (step, root) = reference(fixture.store.as_ref(), handle.run_id()).await;
++    let reader = reader(
++        profile,
++        fixture.bindings(),
++        Arc::new(InspectionPolicy::default()),
++    );
++    let before = fixture.store.export_checkpoint(&scope()).unwrap();
++    let counters = (
++        fixture.model.calls.load(Ordering::SeqCst),
++        fixture.catalog.calls.load(Ordering::SeqCst),
++        fixture.router.queries.load(Ordering::SeqCst),
++    );
++    let first = report(&reader, handle.run_id(), step.clone(), false).await;
++    let second = report(
++        &reader,
++        handle.run_id(),
++        StepRef::Logical {
++            model_step_id: root.model_step_id.clone(),
++            purpose: root.purpose,
++            projection_revision: root.projection_revision,
++        },
++        false,
++    )
++    .await;
++    assert_eq!(first.composition, second.composition);
++    assert_eq!(first.status, InspectionStatus::Found);
++    let composition = first.composition.as_ref().unwrap();
++    assert_eq!(composition.fingerprint, root.projection_fingerprint);
++    assert_eq!(composition.evidence, vec![InspectionEvidence::Prepared]);
++    assert_eq!(
++        composition
++            .recorded_run_outcome
++            .as_ref()
++            .unwrap()
++            .completion_basis,
++        Some(CompletionBasis::TurnEnded)
++    );
++    assert_eq!(composition.attempts.len(), 1);
++    assert!(
++        composition.attempts[0]
++            .evidence
++            .contains(&InspectionEvidence::ResponseObserved)
++    );
++    let options = composition
++        .model
++        .as_ref()
++        .unwrap()
++        .configuration
++        .as_ref()
++        .unwrap();
++    assert_eq!(
++        options.effective.get("effort"),
++        Some(&serde_json::json!("high"))
++    );
++    assert_eq!(options.sources.get("effort"), Some(&ModelOptionSource::Run));
++    assert!(composition.estimated_input_tokens.unwrap() > 0);
++    assert!(composition.estimator.is_none());
++    assert!(
++        first
++            .unresolved
++            .iter()
++            .any(|field| field.field == "estimator" && field.reason == "not_recorded")
++    );
++    assert_eq!(
++        fixture.store.export_checkpoint(&scope()).unwrap().digest(),
++        before.digest()
++    );
++    assert_eq!(
++        (
++            fixture.model.calls.load(Ordering::SeqCst),
++            fixture.catalog.calls.load(Ordering::SeqCst),
++            fixture.router.queries.load(Ordering::SeqCst)
++        ),
++        counters
++    );
++}
++
++#[tokio::test]
++async fn tool_report_contains_model_schemas_but_no_bound_uuid_values_or_connection_details() {
++    let mut fixture = resume_support::Fixture::new(resume_support::Mode::Approval);
++    let mut registrations = vec![];
++    for name in ["before", "target", "after"] {
++        let registered = fixture.registry.get(&id(name)).unwrap();
++        let mut descriptor = registered.compiled.descriptor().clone();
++        if name == "target" {
++            descriptor.description = "private-description-sentinel".into();
++            descriptor.input_schema["properties"]["query"]["default"] =
++                serde_json::json!("private-default-sentinel");
++        }
++        registrations.push(ToolRegistration {
++            compiled: SchemaCompiler::new()
++                .compile(descriptor, &fixture.inputs)
++                .unwrap(),
++            executor: registered.executor.clone(),
++        });
++    }
++    fixture.registry = Arc::new(ToolRegistry::new(scope(), registrations).unwrap());
++    let handle = fixture.started(&fixture.agent()).await;
++    fixture.outcome(&handle).await;
++    let (step, _) = reference(fixture.base.store.as_ref(), handle.run_id()).await;
++    let agent = reader(
++        fixture.profile.clone(),
++        fixture.bindings(),
++        Arc::new(InspectionPolicy::default()),
++    );
++    let calls = fixture.resolver.calls.load(Ordering::SeqCst);
++    let result = report(&agent, handle.run_id(), step, true).await;
++    let composition = result.composition.as_ref().unwrap();
++    assert_eq!(composition.tools.len(), 3);
++    let target = composition
++        .tools
++        .iter()
++        .find(|tool| tool.canonical_name == id("target"))
++        .unwrap();
++    assert!(target.canonical_schema["properties"].get("query").is_some());
++    assert!(
++        target.canonical_schema["properties"]
++            .get("workspace_id")
++            .is_none()
++    );
++    assert!(target.provider_schema.is_some());
++    assert!(target.decode_plan_digest.is_some());
++    assert!(
++        composition
++            .redacted_paths
++            .iter()
++            .any(|path| path.ends_with("query.default"))
++    );
++    assert!(target.canonical_schema["properties"]["query"]["default"].is_null());
++    let encoded = serde_json::to_string(&result).unwrap();
++    for private in [
++        resume_support::WORKSPACE,
++        resume_support::RECORD,
++        "execution_args",
++        "system_bindings",
++        "connection_ref",
++        "private-description-sentinel",
++        "private-default-sentinel",
++    ] {
++        assert!(!encoded.contains(private), "disclosed {private}");
++    }
++    assert_eq!(fixture.resolver.calls.load(Ordering::SeqCst), calls);
++    assert_eq!(fixture.tools[1].calls.load(Ordering::SeqCst), 0);
++}
++
++#[tokio::test]
++async fn preparation_only_and_an_unconfirmed_reserved_attempt_have_distinct_evidence() {
++    for reserved in [false, true] {
++        let fixture = Fixture::new(Response::Text, false);
++        let mut bindings = fixture.bindings();
++        if reserved {
++            bindings.state = Arc::new(FinalCommitStore::new(
++                fixture.store.clone(),
++                FinalCommitMode::RejectModelResult,
++            ));
++        } else {
++            fixture.policy.deny.store(10, Ordering::SeqCst);
++        }
++        let owner = create_agent(profile(), bindings).unwrap();
++        let handle = fixture.started(&owner, "evidence").await;
++        let _ = handle.outcome(&context()).await;
++        let (step, _) = reference(fixture.store.as_ref(), handle.run_id()).await;
++        let agent = reader(
++            profile(),
++            fixture.bindings(),
++            Arc::new(InspectionPolicy::default()),
++        );
++        let result = report(&agent, handle.run_id(), step, false).await;
++        let composition = result.composition.unwrap();
++        assert_eq!(composition.evidence, vec![InspectionEvidence::Prepared]);
++        assert_eq!(composition.attempts.len(), usize::from(reserved));
++        if reserved {
++            assert_eq!(
++                composition.attempts[0].evidence,
++                vec![
++                    InspectionEvidence::DispatchReserved,
++                    InspectionEvidence::TransmissionUnknown
++                ]
++            );
++            assert_ne!(composition.recorded_run_status, RunStatus::Succeeded);
++        }
++        assert_eq!(
++            fixture.model.calls.load(Ordering::SeqCst),
++            usize::from(reserved)
++        );
++    }
++}
++
++#[tokio::test]
++async fn missing_and_expired_records_remain_structured_gaps_without_repreparation() {
++    let fixture = Fixture::new(Response::Text, false);
++    let handle = fixture.started(&fixture.agent(), "retention").await;
++    completed(handle.outcome(&context()).await.unwrap());
++    let (step, root) = reference(fixture.store.as_ref(), handle.run_id()).await;
++    let StepRef::Prepared { record_id } = &step else {
++        unreachable!()
++    };
++    let store = Arc::new(FinalCommitStore::new(
++        fixture.store.clone(),
++        FinalCommitMode::PassThrough,
++    ));
++    let mut bindings = fixture.bindings();
++    bindings.state = store.clone();
++    let agent = reader(profile(), bindings, Arc::new(InspectionPolicy::default()));
++    for (code, status) in [
++        (ErrorCode::StateNotFound, InspectionStatus::NotFound),
++        (ErrorCode::RecordExpired, InspectionStatus::Expired),
++    ] {
++        *store.record_fault.lock().unwrap() = Some((record_id.clone(), code));
++        let result = report(&agent, handle.run_id(), step.clone(), false).await;
++        assert_eq!(result.status, status);
++        assert!(result.composition.is_none());
++    }
++    *store.record_fault.lock().unwrap() =
++        Some((root.context_projection.record_id, ErrorCode::RecordExpired));
++    let partial = report(&agent, handle.run_id(), step, false).await;
++    assert_eq!(partial.status, InspectionStatus::Partial);
++    assert!(
++        partial
++            .composition
++            .unwrap()
++            .estimated_input_tokens
++            .is_none()
++    );
++    assert!(
++        partial
++            .unresolved
++            .iter()
++            .any(|field| field.field == "projection" && field.reason == "expired")
++    );
++    *store.record_fault.lock().unwrap() = None;
++    assert_eq!(
++        report(
++            &agent,
++            handle.run_id(),
++            StepRef::Prepared {
++                record_id: id("unknown-record")
++            },
++            false
++        )
++        .await
++        .status,
++        InspectionStatus::NotFound
++    );
++    assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 1);
++}
++
++#[tokio::test]
++async fn approval_and_denial_do_not_read_the_store_or_create_a_wait_and_late_revocation_is_respected()
++ {
++    let fixture = Fixture::new(Response::Text, false);
++    let handle = fixture.started(&fixture.agent(), "authorization").await;
++    completed(handle.outcome(&context()).await.unwrap());
++    let (step, _) = reference(fixture.store.as_ref(), handle.run_id()).await;
++    let store = Arc::new(FinalCommitStore::new(
++        fixture.store.clone(),
++        FinalCommitMode::PassThrough,
++    ));
++    let mut bindings = fixture.bindings();
++    bindings.state = store.clone();
++    let policy = Arc::new(InspectionPolicy::default());
++    let agent = reader(profile(), bindings, policy.clone());
++    let before = fixture.store.export_checkpoint(&scope()).unwrap();
++    policy.mode.store(2, Ordering::SeqCst);
++    assert!(matches!(
++        agent
++            .inspect_step(
++                handle.run_id(),
++                step.clone(),
++                &context(),
++                Default::default()
++            )
++            .await
++            .unwrap(),
++        Guarded::ApprovalRequired(_)
++    ));
++    policy.mode.store(1, Ordering::SeqCst);
++    assert_eq!(
++        agent
++            .inspect_step(
++                handle.run_id(),
++                step.clone(),
++                &context(),
++                Default::default()
++            )
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::AccessDenied
++    );
++    assert_eq!(store.load_calls.load(Ordering::SeqCst), 0);
++    policy.mode.store(0, Ordering::SeqCst);
++    store.block_read.store(5, Ordering::SeqCst);
++    let run = handle.run_id().clone();
++    let querying = tokio::spawn(async move {
++        agent
++            .inspect_step(&run, step, &context(), Default::default())
++            .await
++    });
++    tokio::time::timeout(Duration::from_secs(2), store.read_entered.notified())
++        .await
++        .unwrap();
++    policy.mode.store(1, Ordering::SeqCst);
++    store.release.add_permits(1);
++    assert_eq!(
++        querying.await.unwrap().unwrap_err().code,
++        ErrorCode::AccessDenied
++    );
++    assert_eq!(
++        fixture.store.export_checkpoint(&scope()).unwrap().digest(),
++        before.digest()
++    );
++}
++
++#[tokio::test]
++async fn fragment_content_requires_opt_in_and_current_permission_without_source_callbacks() {
++    let mut fixture = source_support::Fixture::new();
++    let source = fixture.add(
++        "search",
++        ContextTrigger::RunStart,
++        true,
++        vec![source_support::Reply::Ready],
++    );
++    let handle = fixture.start(&fixture.agent()).await;
++    fixture.outcome(&handle).await;
++    let (step, root) = reference(fixture.store.inner.as_ref(), handle.run_id()).await;
++    let policy = Arc::new(InspectionPolicy::default());
++    let agent = reader(fixture.profile(), fixture.agent_bindings(), policy.clone());
++    let calls = (
++        source.calls.load(Ordering::SeqCst),
++        source.uses.load(Ordering::SeqCst),
++        fixture.estimator.calls.load(Ordering::SeqCst),
++        fixture.model.inner.calls.load(Ordering::SeqCst),
++    );
++    let hidden = report(&agent, handle.run_id(), step.clone(), false).await;
++    assert!(hidden.composition.as_ref().unwrap().fragments.iter().any(|fragment| matches!(&fragment.disclosure, ContextDisclosure::Redacted { reason } if reason == "not_requested")));
++    let shown = report(&agent, handle.run_id(), step.clone(), true).await;
++    assert!(
++        shown
++            .composition
++            .as_ref()
++            .unwrap()
++            .fragments
++            .iter()
++            .any(|fragment| matches!(fragment.disclosure, ContextDisclosure::Included { .. }))
++    );
++    policy.content.store(1, Ordering::SeqCst);
++    let denied = report(&agent, handle.run_id(), step, true).await;
++    assert!(
++        denied
++            .composition
++            .as_ref()
++            .unwrap()
++            .fragments
++            .iter()
++            .all(|fragment| !matches!(fragment.disclosure, ContextDisclosure::Included { .. }))
++    );
++    assert_eq!(
++        denied.composition.unwrap().fingerprint,
++        root.projection_fingerprint
++    );
++    assert_eq!(
++        (
++            source.calls.load(Ordering::SeqCst),
++            source.uses.load(Ordering::SeqCst),
++            fixture.estimator.calls.load(Ordering::SeqCst),
++            fixture.model.inner.calls.load(Ordering::SeqCst)
++        ),
++        calls
++    );
++}
++
++struct EmptyResponse {
++    binding: ModelPortBinding,
++    empty: bool,
++}
++impl ModelPort for EmptyResponse {
++    fn binding(&self) -> ModelPortBinding {
++        self.binding.clone()
++    }
++    fn generate<'a>(
++        &'a self,
++        _: &'a ModelRequest,
++        _: &'a ModelCallContext,
++    ) -> PortStream<'a, ModelEvent> {
++        if self.empty {
++            Box::pin(futures_util::stream::empty())
++        } else {
++            Box::pin(futures_util::stream::once(async {
++                Err(ContractError::new(
++                    ErrorCode::ModelUnavailable,
++                    "local.transport",
++                ))
++            }))
++        }
++    }
++}
++#[tokio::test]
++async fn local_empty_stream_or_transport_failure_is_not_proof_of_a_provider_response() {
++    for empty in [false, true] {
++        let fixture = Fixture::new(Response::TransportFailure, false);
++        let mut bindings = fixture.bindings();
++        bindings.model_exchange = Arc::new(
++            ModelExchange::new(
++                Arc::new(EmptyResponse {
++                    binding: fixture.model.binding(),
++                    empty,
++                }),
++                bindings.policy.clone(),
++            )
++            .with_route_inspector(fixture.inspector.clone(), Duration::from_secs(1))
++            .unwrap(),
++        );
++        let owner = create_agent(profile(), bindings).unwrap();
++        let handle = fixture.started(&owner, "local-failure").await;
++        assert_eq!(
++            completed(handle.outcome(&context()).await.unwrap())
++                .result
++                .status(),
++            RunStatus::Failed
++        );
++        let (step, _) = reference(fixture.store.as_ref(), handle.run_id()).await;
++        let reader = reader(
++            profile(),
++            fixture.bindings(),
++            Arc::new(InspectionPolicy::default()),
++        );
++        let report = report(&reader, handle.run_id(), step, false).await;
++        let attempt = &report.composition.unwrap().attempts[0];
++        assert!(attempt.result_recorded);
++        assert!(
++            attempt
++                .evidence
++                .contains(&InspectionEvidence::TransmissionUnknown)
++        );
++        assert!(
++            !attempt
++                .evidence
++                .contains(&InspectionEvidence::ResponseObserved)
++        );
++    }
++}
++
++#[tokio::test]
++async fn raw_fragment_set_is_reauthorized_after_later_fragment_checks_revoke_earlier_access() {
++    let mut fixture = source_support::Fixture::new();
++    fixture.add(
++        "first",
++        ContextTrigger::RunStart,
++        true,
++        vec![source_support::Reply::Ready],
++    );
++    fixture.add(
++        "second",
++        ContextTrigger::RunStart,
++        true,
++        vec![source_support::Reply::Ready],
++    );
++    let handle = fixture.start(&fixture.agent()).await;
++    fixture.outcome(&handle).await;
++    let (step, _) = reference(fixture.store.inner.as_ref(), handle.run_id()).await;
++    let policy = Arc::new(InspectionPolicy::default());
++    policy.pause_fragment.store(2, Ordering::SeqCst);
++    let agent = reader(fixture.profile(), fixture.agent_bindings(), policy.clone());
++    let run = handle.run_id().clone();
++    let pending = tokio::spawn(async move {
++        agent
++            .inspect_step(
++                &run,
++                step,
++                &context(),
++                InspectionOptions {
++                    include_context_content: true,
++                },
++            )
++            .await
++    });
++    tokio::time::timeout(Duration::from_secs(2), policy.fragment_entered.notified())
++        .await
++        .unwrap();
++    policy.content.store(1, Ordering::SeqCst);
++    policy.fragment_release.add_permits(1);
++    assert_eq!(
++        pending.await.unwrap().unwrap_err().code,
++        ErrorCode::AccessDenied
++    );
++}
++
++#[tokio::test]
++async fn a_step_must_belong_to_the_requested_run_and_scope_and_opaque_data_is_never_disclosed() {
++    let fixture = Fixture::new(Response::WithContinuation, false);
++    let owner = fixture.agent();
++    let first = fixture.started(&owner, "first").await;
++    completed(first.outcome(&context()).await.unwrap());
++    let (step, _) = reference(fixture.store.as_ref(), first.run_id()).await;
++    let first_saved = fixture.store.load(&scope(), first.run_id()).await.unwrap();
++    let response_ref = first_saved.snapshot.model_ledger[0]
++        .response_ref
++        .as_ref()
++        .unwrap();
++    let protected = fixture
++        .store
++        .read_record(&scope(), response_ref)
++        .await
++        .unwrap();
++    assert!(protected.value().to_string().contains("fixture-signature"));
++    let second = fixture.started(&owner, "second").await;
++    completed(second.outcome(&context()).await.unwrap());
++    let agent = reader(
++        profile(),
++        fixture.bindings(),
++        Arc::new(InspectionPolicy::default()),
++    );
++    let visible = report(&agent, first.run_id(), step.clone(), true).await;
++    assert!(
++        !serde_json::to_string(&visible)
++            .unwrap()
++            .contains("fixture-signature")
++    );
++    assert_eq!(
++        report(&agent, second.run_id(), step.clone(), false)
++            .await
++            .status,
++        InspectionStatus::NotFound
++    );
++    let mut foreign = context();
++    foreign.data.scope.workspace_id = id("foreign");
++    assert_eq!(
++        agent
++            .inspect_step(first.run_id(), step, &foreign, Default::default())
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::AccessDenied
++    );
++    assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 2);
++}
+diff --git a/crates/wickle/tests/support/agent.rs b/crates/wickle/tests/support/agent.rs
+index 08fd6ffa4c53e508eb5692b4e8a2ae5493e2ba91..e03d7cef8fd1d4492c8674b798d1d461860ec276 100644
+--- a/crates/wickle/tests/support/agent.rs
++++ b/crates/wickle/tests/support/agent.rs
+@@ -143,6 +143,7 @@ impl ProfileResolver for Catalog {
+ pub struct Policy {
+     pub calls: AtomicUsize,
+     pub deny: AtomicUsize,
++    pub model_checks: AtomicUsize,
+ }
+ impl PolicyPort for Policy {
+     fn authorize<'a>(
+@@ -162,6 +163,10 @@ impl PolicyPort for Policy {
+                 2 => matches!(request.action, PolicyAction::CancelRun {}),
+                 3 => matches!(request.action, PolicyAction::StartRun {}),
+                 4 => matches!(request.action, PolicyAction::ResumeRun { .. }),
++                10 => {
++                    matches!(request.action, PolicyAction::InvokeModel { .. })
++                        && self.model_checks.fetch_add(1, Ordering::SeqCst) > 0
++                }
+                 _ => false,
+             };
+             Ok(if deny {
+@@ -472,6 +477,8 @@ pub struct FinalCommitStore {
+     paused_empty_page: AtomicBool,
+     pub block_read: AtomicUsize,
+     pub read_entered: Notify,
++    pub record_fault: Mutex<Option<(Id, ErrorCode)>>,
++    pub load_calls: AtomicUsize,
+ }
+ impl FinalCommitStore {
+     pub fn new(inner: Arc<MemoryStateStore>, mode: FinalCommitMode) -> Self {
+@@ -488,6 +495,8 @@ impl FinalCommitStore {
+             paused_empty_page: AtomicBool::new(false),
+             block_read: AtomicUsize::new(0),
+             read_entered: Notify::new(),
++            record_fault: Mutex::new(None),
++            load_calls: AtomicUsize::new(0),
+         }
+     }
+ }
+@@ -518,6 +527,7 @@ impl StateStore for FinalCommitStore {
+     }
+     fn load<'a>(&'a self, s: &'a Scope, r: &'a Id) -> PortFuture<'a, StoredRun> {
+         Box::pin(async move {
++            self.load_calls.fetch_add(1, Ordering::SeqCst);
+             if self.block_read.load(Ordering::SeqCst) == 4 {
+                 return Err(ContractError::new(
+                     ErrorCode::PersistenceUnavailable,
+@@ -618,7 +628,23 @@ impl StateStore for FinalCommitStore {
+         s: &'a Scope,
+         r: &'a RecordRef,
+     ) -> PortFuture<'a, ProtectedRecord> {
+-        self.inner.read_record(s, r)
++        Box::pin(async move {
++            if let Some((id, code)) = self.record_fault.lock().unwrap().as_ref() {
++                if *id == r.record_id {
++                    return Err(ContractError::new(*code, "record.retention"));
++                }
++            }
++            let record = self.inner.read_record(s, r).await?;
++            if self
++                .block_read
++                .compare_exchange(5, 0, Ordering::SeqCst, Ordering::SeqCst)
++                .is_ok()
++            {
++                self.read_entered.notify_one();
++                self.release.acquire().await.unwrap().forget();
++            }
++            Ok(record)
++        })
+     }
+     fn commit<'a>(
+         &'a self,
+diff --git a/docs/step-inspection.md b/docs/step-inspection.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..de581862b21c25826a4cc6561758f1a87e2c30d3
+--- /dev/null
++++ b/docs/step-inspection.md
+@@ -0,0 +1,83 @@
++# Inspecting a saved model step
++
++`Agent::inspect_step` reads persisted preparation and invocation records. It does
++not run a model, Tool, source, hook, resolver, factory, compiler or tokenizer. It
++also does not acquire a lease or write a checkpoint. The result is a
++`Guarded<CompositionReport>`; approval requirements do not create a Run wait.
++
++Select a preparation by its saved record ID, or by logical step, purpose and
++projection revision:
++
++```rust,ignore
++let step = StepRef::Prepared { record_id: prepared_record_id };
++let result = agent
++    .inspect_step(&run_id, step, &context, InspectionOptions::default())
++    .await?;
++
++match result {
++    Guarded::Completed(report) => {
++        // Check report.status and report.unresolved before displaying fields.
++        // report.composition contains only saved evidence.
++    }
++    Guarded::ApprovalRequired(challenge) => {
++        // Ask the Host's authorization workflow; inspection did not pause the Run.
++    }
++}
++```
++
++The authorized checkpoint exposes preparation IDs in `prepared_steps`. A Host
++that already records those IDs can query directly without obtaining internal
++runtime objects. A selector for another Run does not read that preparation.
++
++## Evidence and missing data
++
++The report identifies the selected model, adapter and API versions, canonical and
++provider model-owned schemas, compiler and decoding-plan digests, constraint text
++origins/digests, requested/effective inference options and their origins, ordered
++context revisions, selection lists, token estimates and original fingerprint.
++Run status and outcome metadata are tied to the snapshot revision that was read.
++
++- `Prepared` proves a saved input exists.
++- `DispatchReserved` proves a physical-call budget reservation exists.
++- `ResponseObserved` needs a completed normalized response, partial response text,
++  or actually reported metadata. It does not assert business success.
++- `TransmissionUnknown` remains when stored evidence does not prove a response.
++  A saved local transport or empty-stream failure is insufficient evidence.
++
++`result_recorded` distinguishes a saved result/failure record from response
++observation. Reservation alone does not prove transmission. Inspecting a failed
++or incomplete attempt never retries it or changes the Run's outcome.
++
++`InspectionStatus` distinguishes found, partial, not-found and expired evidence.
++Storage implementations should return `ErrorCode::RecordExpired` only for explicit
++retention expiry; an ordinary missing record remains not-found. A logical lookup
++with missing preparation records is partial because the missing record's step
++identity is unknown. Missing child records remain listed in `unresolved`.
++
++If the saved format lacks an estimator identity or an individual exclusion reason,
++the report says `not_recorded`. It does not call today's estimator or reconstruct
++a reason using current configuration. Display redaction never changes the original
++fingerprint or schema/constraint digests.
++
++## Disclosure and current permission
++
++Default reports omit system inputs, assembled execution arguments, connection
++references/targets, credentials, opaque continuation, model messages, output text
++and context source content. Tool descriptions and schema annotations such as
++examples/defaults are omitted or masked for display. Sensitive option keys are
++masked recursively. `redacted_paths` marks display changes; it is separate from
++context items actually excluded from the model projection.
++
++Set `include_context_content: true` to request source fragment content. Each item
++requires `InspectContextFragment` permission; denied or approval-gated items stay
++redacted. Content is capped at 64 KiB for the whole report, without partial slices.
++The final `InspectStep` authorization carries **all included `context_fragments`**,
++with scope, identity, core revision and content digest. A Host policy must authorize
++that entire set against one current ACL view before returning Allow. This prevents
++an earlier item permission from becoming stale during later item checks. Metadata
++permission alone does not authorize the final content set.
++
++Neither raw-content opt-in nor an approval grants access to system execution
++arguments or connection credentials. No source authorization callback or external
++retrieval is run during inspection; the Host's current PolicyPort owns diagnostic
++access decisions.
+diff --git a/tests/support/agent_consumer.rs b/tests/support/agent_consumer.rs
+index bb0c2bf75d9d2196d0de6a16b7c013672c68fc0e..40311b221126c798c0a74425e1e80f9854a5927f 100644
+--- a/tests/support/agent_consumer.rs
++++ b/tests/support/agent_consumer.rs
+@@ -443,8 +443,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+     assert_eq!(SqliteStateStore::open(&database)?.load(&scope, stopped.run_id()).await?, before_read);
+     assert_eq!(completed(agent.submit_control_command(stopped.run_id().clone(), cancellation, context.clone()).await?)?, receipt);
+     assert_eq!(first.calls.load(Ordering::SeqCst), 2);
++    let prepared_id = restored.snapshot.prepared_steps.last().ok_or("missing saved preparation")?.record_id.clone();
++    let inspection = completed(agent.inspect_step(&run_id, StepRef::Prepared { record_id: prepared_id }, &context, InspectionOptions::default()).await?)?;
++    assert_eq!(inspection.status, InspectionStatus::Found);
++    let composition = inspection.composition.as_ref().ok_or("missing composition")?;
++    assert_eq!(composition.recorded_run_revision, restored.snapshot.revision);
++    assert_eq!(composition.recorded_run_outcome.as_ref().and_then(|outcome| outcome.completion_basis), Some(CompletionBasis::TurnEnded));
++    assert!(composition.attempts.iter().any(|attempt| attempt.evidence.contains(&InspectionEvidence::ResponseObserved)));
++    assert_eq!(composition.model.as_ref().and_then(|model| model.configuration.as_ref()).and_then(|configuration| configuration.effective.get("reasoning_effort")), Some(&json!("high")));
++    let encoded = serde_json::to_value(&inspection)?;
++    assert!(encoded["composition"]["model"].get("connection_ref").is_none());
++    assert!(encoded["composition"]["model"].get("target").is_none());
++    assert_eq!(SqliteStateStore::open(&database)?.load(&scope, &run_id).await?, restored);
++    assert_eq!(first.calls.load(Ordering::SeqCst), 2);
++    assert_eq!(second.calls.load(Ordering::SeqCst), 1);
+     println!(
+-        "agent consumer: pure construction, detached execution after observer drop, fallback under shared budgets, stored outcome and event replay, duplicate request without new model calls, SQLite reopen, recoverable host stop and durable replay"
++        "agent consumer: pure construction, detached execution after observer drop, fallback under shared budgets, stored outcome and event replay, duplicate request without new model calls, SQLite reopen, recoverable host stop, durable replay and read-only stored composition inspection"
+     );
+     Ok(())
+ }

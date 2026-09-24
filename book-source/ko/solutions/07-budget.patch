@@ -1,0 +1,2247 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 57c8c3ecd43cf5f9d66ce5359ad4b9dbda3c3d2d..56ac6e12ac4924b1343ef509e2f3ffc4363da2e1 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -872,6 +872,7 @@ name = "wickle"
+ version = "0.1.0"
+ dependencies = [
+  "futures-util",
++ "getrandom",
+  "jsonschema",
+  "serde",
+  "serde_json",
+diff --git a/Cargo.toml b/Cargo.toml
+index 8b49623caf10eda108ce52e95b686e85062f9f2f..74257ede5149a4d27a82523862a19b9a8205ff86 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -10,6 +10,7 @@ rust-version = "1.85"
+ repository = "https://github.com/Epsilondelta-ai/wickle"
+ 
+ [workspace.dependencies]
++getrandom = { version = "=0.3.4", default-features = false }
+ futures-util = { version = "=0.3.34", default-features = false, features = ["std", "async-await"] }
+ jsonschema = { version = "=0.56.0", default-features = false }
+ serde = { version = "=1.0.229", features = ["derive"] }
+diff --git a/crates/wickle/Cargo.toml b/crates/wickle/Cargo.toml
+index 0642f83e87e43dff8c36ba74077163b648e79454..e7b14775a459e0932860ac0df08b0b170fe5c2e2 100644
+--- a/crates/wickle/Cargo.toml
++++ b/crates/wickle/Cargo.toml
+@@ -9,6 +9,7 @@ publish = false
+ include = ["Cargo.toml", "src/**"]
+ 
+ [dependencies]
++getrandom.workspace = true
+ futures-util.workspace = true
+ jsonschema.workspace = true
+ serde.workspace = true
+diff --git a/crates/wickle/src/budget.rs b/crates/wickle/src/budget.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..b6e54a318a9b72998df321bb66606ccba5b09fe1
+--- /dev/null
++++ b/crates/wickle/src/budget.rs
+@@ -0,0 +1,450 @@
++use std::{
++    collections::BTreeSet,
++    future::Future,
++    sync::{Arc, Mutex},
++};
++
++use serde::{Deserialize, Serialize};
++use tokio_util::sync::CancellationToken;
++
++use crate::{
++    BudgetKind, BudgetUsage, Clock, CommitInput, ContractError, ErrorCode, Id, IdSource,
++    ModelPurpose, RunLease, RunLimits, RunSnapshot, RunStatus, Scope, StateStore,
++};
++
++/// Persisted time anchors. Within an execution segment, elapsed time comes from
++/// the monotonic clock; UTC is used only to attach a new segment to saved progress.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct RunTiming {
++    /// Original admission UTC milliseconds; immutable across waiting and resume.
++    pub started_at_ms: i64,
++    /// Original finite UTC deadline; immutable across waiting and resume.
++    pub deadline_at_ms: i64,
++    /// Admission time plus saved elapsed time, preserving the monotonic high-water mark.
++    pub last_observed_at_ms: i64,
++}
++
++impl RunTiming {
++    /// Establish a finite deadline at admission without reading a clock implicitly.
++    pub fn new(started_at_ms: i64, max_elapsed_ms: u64) -> Result<Self, ContractError> {
++        let duration = i64::try_from(max_elapsed_ms)
++            .ok()
++            .filter(|ms| *ms > 0)
++            .ok_or_else(|| failure(ErrorCode::InvalidContract, "timing.duration"))?;
++        let deadline_at_ms = started_at_ms
++            .checked_add(duration)
++            .ok_or_else(|| failure(ErrorCode::InvalidContract, "timing.deadline"))?;
++        Ok(Self {
++            started_at_ms,
++            deadline_at_ms,
++            last_observed_at_ms: started_at_ms,
++        })
++    }
++}
++
++/// The counter charged by one saved reservation.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
++pub enum ReservationKind {
++    /// One physical model call. All purposes share the model-call limit.
++    Model {
++        /// Agent, verification, or compaction purpose for accounting.
++        purpose: ModelPurpose,
++    },
++    /// One physical tool dispatch, associated with a previously planned call.
++    Tool {
++        /// Stable logical tool call identity; not a generated business foreign key.
++        call_id: Id,
++    },
++    /// One candidate-repair decision; any resulting model call is charged separately.
++    Repair {},
++    /// One recovery decision; any resulting external call is charged separately.
++    Recovery {},
++}
++
++impl ReservationKind {
++    /// Counter whose capacity this reservation consumes.
++    pub fn budget_kind(&self) -> BudgetKind {
++        match self {
++            Self::Model { .. } => BudgetKind::ModelCalls,
++            Self::Tool { .. } => BudgetKind::ToolAttempts,
++            Self::Repair {} => BudgetKind::RepairAttempts,
++            Self::Recovery {} => BudgetKind::RecoveryAttempts,
++        }
++    }
++}
++
++/// An immutable charged reservation saved before constructing an external call.
++/// It is not a success claim or proof that an external effect occurred. Result
++/// settlement belongs to the corresponding model/tool ledger; reservations are
++/// never automatically refunded after errors, cancellation, or Future drop.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct AttemptReservation {
++    /// New physical attempt or decision identity from the Host identifier source.
++    pub attempt_id: Id,
++    /// Charged operation and its accounting purpose.
++    pub kind: ReservationKind,
++    /// Effective UTC time at the reservation boundary, based on monotonic progress.
++    pub reserved_at_ms: i64,
++}
++
++/// Budget and cancellation boundaries for one execution segment of a saved run.
++/// This helper does not spawn a driver, retry operations, authorize business data,
++/// or reconcile external effects. The driver owns its Future independently of
++/// presentation handles. Dropping this value or its waiter does not cancel the run.
++pub struct RunBudget {
++    store: Arc<dyn StateStore>,
++    clock: Arc<dyn Clock>,
++    ids: Arc<dyn IdSource>,
++    scope: Scope,
++    run_id: Id,
++    lease: RunLease,
++    cancellation: CancellationToken,
++    timing: RunTiming,
++    anchor_monotonic_ms: u64,
++    anchor_elapsed_ms: u64,
++    last_monotonic_ms: Mutex<u64>,
++}
++
++impl RunBudget {
++    /// Attach to the original saved time budget and usage. A resumed UTC clock
++    /// behind the saved high-water mark is rejected instead of extending time.
++    /// A waiting run may attach a deadline observer, but cannot reserve new work.
++    #[allow(clippy::too_many_arguments)]
++    pub async fn attach(
++        store: Arc<dyn StateStore>,
++        clock: Arc<dyn Clock>,
++        ids: Arc<dyn IdSource>,
++        scope: Scope,
++        run_id: Id,
++        lease: RunLease,
++        cancellation: CancellationToken,
++    ) -> Result<Self, ContractError> {
++        if lease.scope != scope || lease.run_id != run_id {
++            return Err(failure(ErrorCode::AccessDenied, "scope"));
++        }
++        let saved = store.load(&scope, &run_id).await?;
++        saved.snapshot.validate()?;
++        if saved.snapshot.status.is_terminal() {
++            return Err(failure(ErrorCode::InvalidTransition, "run.status"));
++        }
++        let reading = clock.now()?;
++        let downtime = reading
++            .utc_ms
++            .checked_sub(saved.snapshot.timing.last_observed_at_ms)
++            .filter(|delta| *delta >= 0)
++            .ok_or_else(|| failure(ErrorCode::ClockRegression, "clock.resume"))?
++            as u64;
++        let anchor_elapsed_ms = saved
++            .snapshot
++            .usage
++            .elapsed_ms
++            .checked_add(downtime)
++            .ok_or_else(|| failure(ErrorCode::ClockUnavailable, "clock.elapsed"))?;
++        Ok(Self {
++            store,
++            clock,
++            ids,
++            scope,
++            run_id,
++            lease,
++            cancellation,
++            timing: saved.snapshot.timing,
++            anchor_monotonic_ms: reading.monotonic_ms,
++            anchor_elapsed_ms,
++            last_monotonic_ms: Mutex::new(reading.monotonic_ms),
++        })
++    }
++
++    /// Monotonic elapsed time in this segment, including the saved duration and
++    /// downtime observed when attaching. Wall-clock jumps during the segment do
++    /// not reset or distort this elapsed value.
++    pub fn elapsed_ms(&self) -> Result<u64, ContractError> {
++        // Serialize local clock readings so concurrent callers cannot observe them
++        // out of order. The guard is released before any asynchronous work.
++        let mut last = self
++            .last_monotonic_ms
++            .lock()
++            .map_err(|_| failure(ErrorCode::ClockUnavailable, "clock.monotonic"))?;
++        let now = self.clock.now()?.monotonic_ms;
++        if now < *last {
++            return Err(failure(ErrorCode::ClockRegression, "clock.monotonic"));
++        }
++        *last = now;
++        let delta = now
++            .checked_sub(self.anchor_monotonic_ms)
++            .ok_or_else(|| failure(ErrorCode::ClockRegression, "clock.monotonic"))?;
++        self.anchor_elapsed_ms
++            .checked_add(delta)
++            .ok_or_else(|| failure(ErrorCode::ClockUnavailable, "clock.elapsed"))
++    }
++
++    /// Recheck current cancellation, deadline, run status, and the store's
++    /// authoritative lease. Counter limits are checked individually at reservation.
++    pub async fn check_boundary(&self) -> Result<(), ContractError> {
++        self.check_cancelled()?;
++        let saved = self.store.load(&self.scope, &self.run_id).await?;
++        self.validate_running(&saved.snapshot)?;
++        let (_, now_ms) = self.progress(saved.snapshot.usage.elapsed_ms)?;
++        let current_lease = self
++            .store
++            .check_lease(&self.scope, &self.run_id, &self.lease, now_ms)
++            .await?;
++        // The store operation may itself have waited while cancellation or time changed.
++        let (_, after_check_ms) = self.progress(saved.snapshot.usage.elapsed_ms)?;
++        if after_check_ms >= current_lease.expires_at_ms {
++            return Err(failure(ErrorCode::LeaseLost, "lease"));
++        }
++        Ok(())
++    }
++
++    /// Save one new attempt and increment its counter atomically under the lease
++    /// and expected revision. A CAS failure reserves nothing and is not retried here.
++    /// The returned record is not a dispatch permit: use execute, or recheck the
++    /// boundary immediately before a separately managed external call.
++    pub async fn reserve(
++        &self,
++        kind: ReservationKind,
++    ) -> Result<AttemptReservation, ContractError> {
++        self.check_cancelled()?;
++        let saved = self.store.load(&self.scope, &self.run_id).await?;
++        self.validate_running(&saved.snapshot)?;
++        let mut snapshot = saved.snapshot;
++        self.progress(snapshot.usage.elapsed_ms)?;
++        charge(&mut snapshot.usage, &snapshot.limits, &kind)?;
++        let attempt_id = self.ids.next_id()?;
++        let (elapsed_ms, now_ms) = self.progress(snapshot.usage.elapsed_ms)?;
++        let reservation = AttemptReservation {
++            attempt_id,
++            kind,
++            reserved_at_ms: now_ms,
++        };
++        let expected_revision = snapshot.revision;
++        snapshot.revision = snapshot
++            .revision
++            .checked_add(1)
++            .ok_or_else(|| failure(ErrorCode::RevisionConflict, "revision"))?;
++        snapshot.usage.elapsed_ms = elapsed_ms;
++        snapshot.timing.last_observed_at_ms = now_ms;
++        snapshot.reservations.push(reservation.clone());
++        self.store
++            .commit(
++                &self.scope,
++                &self.run_id,
++                CommitInput {
++                    expected_revision,
++                    lease: self.lease.clone(),
++                    now_ms,
++                    snapshot,
++                    messages: Vec::new(),
++                    events: Vec::new(),
++                    records: Vec::new(),
++                },
++            )
++            .await?;
++        Ok(reservation)
++    }
++
++    /// Reserve, then recheck cancellation/time/lease before constructing the call.
++    /// Cancellation or timeout while awaiting a dispatched call leaves its charged
++    /// reservation intact; the external effect may require reconciliation. This
++    /// method performs no policy, schema, or result-settlement validation.
++    /// The closure represents one already-prepared operation. Further external
++    /// calls or retries require their own reservation and boundary check.
++    pub async fn execute<T, F, Fut>(
++        &self,
++        kind: ReservationKind,
++        operation: F,
++    ) -> Result<T, ContractError>
++    where
++        F: FnOnce(AttemptReservation) -> Fut,
++        Fut: Future<Output = Result<T, ContractError>>,
++    {
++        let reservation = self.reserve(kind).await?;
++        self.check_boundary().await?;
++        let operation = operation(reservation);
++        tokio::pin!(operation);
++        tokio::select! {
++            biased;
++            stopped = self.wait_for_cancellation_or_deadline() => {
++                stopped?;
++                Err(failure(ErrorCode::DeadlineExceeded, "budget.elapsed"))
++            }
++            result = &mut operation => {
++                self.progress(0)?;
++                result
++            }
++        }
++    }
++
++    /// Observe cancellation or the original deadline without consuming call budget.
++    /// Dropping this Future only stops observation; it never changes cancellation.
++    pub async fn wait_for_cancellation_or_deadline(&self) -> Result<(), ContractError> {
++        loop {
++            self.progress(0)?;
++            let duration = self
++                .timing
++                .deadline_at_ms
++                .checked_sub(self.timing.started_at_ms)
++                .and_then(|duration| u64::try_from(duration).ok())
++                .ok_or_else(|| failure(ErrorCode::ClockUnavailable, "timing.deadline"))?;
++            let remaining = duration
++                .checked_sub(self.anchor_elapsed_ms)
++                .ok_or_else(|| failure(ErrorCode::DeadlineExceeded, "budget.elapsed"))?;
++            let deadline = self
++                .anchor_monotonic_ms
++                .checked_add(remaining)
++                .ok_or_else(|| failure(ErrorCode::ClockUnavailable, "clock.deadline"))?;
++            tokio::select! {
++                biased;
++                _ = self.cancellation.cancelled() => return Err(failure(ErrorCode::Cancelled, "budget")),
++                result = self.clock.sleep_until(deadline) => { result?; }
++            }
++        }
++    }
++
++    fn check_cancelled(&self) -> Result<(), ContractError> {
++        if self.cancellation.is_cancelled() {
++            Err(failure(ErrorCode::Cancelled, "budget"))
++        } else {
++            Ok(())
++        }
++    }
++
++    fn validate_running(&self, snapshot: &RunSnapshot) -> Result<(), ContractError> {
++        if snapshot.status != RunStatus::Running {
++            return Err(failure(ErrorCode::InvalidTransition, "run.status"));
++        }
++        if snapshot.timing.started_at_ms != self.timing.started_at_ms
++            || snapshot.timing.deadline_at_ms != self.timing.deadline_at_ms
++        {
++            return Err(failure(ErrorCode::InvalidSnapshot, "timing"));
++        }
++        Ok(())
++    }
++
++    fn progress(&self, saved_elapsed_ms: u64) -> Result<(u64, i64), ContractError> {
++        self.check_cancelled()?;
++        let elapsed_ms = self.elapsed_ms()?.max(saved_elapsed_ms);
++        let elapsed = i64::try_from(elapsed_ms)
++            .map_err(|_| failure(ErrorCode::ClockUnavailable, "clock.elapsed"))?;
++        let now_ms = self
++            .timing
++            .started_at_ms
++            .checked_add(elapsed)
++            .ok_or_else(|| failure(ErrorCode::ClockUnavailable, "clock.elapsed"))?;
++        if now_ms >= self.timing.deadline_at_ms {
++            return Err(failure(ErrorCode::DeadlineExceeded, "budget.elapsed"));
++        }
++        Ok((elapsed_ms, now_ms))
++    }
++}
++
++fn failure(code: ErrorCode, path: &str) -> ContractError {
++    ContractError::new(code, path)
++}
++
++fn charge(
++    usage: &mut BudgetUsage,
++    limits: &RunLimits,
++    kind: &ReservationKind,
++) -> Result<(), ContractError> {
++    let (counter, limit, path) = match kind {
++        ReservationKind::Model { .. } => (
++            &mut usage.model_calls,
++            limits.max_model_calls.get(),
++            "budget.model_calls",
++        ),
++        ReservationKind::Tool { .. } => (
++            &mut usage.tool_attempts,
++            limits.max_tool_attempts,
++            "budget.tool_attempts",
++        ),
++        ReservationKind::Repair {} => (
++            &mut usage.repair_attempts,
++            limits.max_repair_attempts,
++            "budget.repair_attempts",
++        ),
++        ReservationKind::Recovery {} => (
++            &mut usage.recovery_attempts,
++            limits.max_recovery_attempts,
++            "budget.recovery_attempts",
++        ),
++    };
++    if *counter >= limit {
++        return Err(failure(ErrorCode::BudgetExceeded, path));
++    }
++    *counter += 1;
++    Ok(())
++}
++
++pub(crate) fn validate_budget(snapshot: &RunSnapshot) -> Result<(), ContractError> {
++    let invalid = || failure(ErrorCode::InvalidSnapshot, "budget");
++    let expected = RunTiming::new(
++        snapshot.timing.started_at_ms,
++        snapshot.limits.max_elapsed_ms.get(),
++    )
++    .map_err(|_| invalid())?;
++    let elapsed = i64::try_from(snapshot.usage.elapsed_ms).map_err(|_| invalid())?;
++    if snapshot.timing.deadline_at_ms != expected.deadline_at_ms
++        || snapshot.timing.last_observed_at_ms
++            != snapshot
++                .timing
++                .started_at_ms
++                .checked_add(elapsed)
++                .ok_or_else(invalid)?
++        || snapshot.usage.model_calls > snapshot.limits.max_model_calls.get()
++        || snapshot.usage.tool_attempts > snapshot.limits.max_tool_attempts
++        || snapshot.usage.repair_attempts > snapshot.limits.max_repair_attempts
++        || snapshot.usage.recovery_attempts > snapshot.limits.max_recovery_attempts
++    {
++        return Err(invalid());
++    }
++    let mut attempts = BTreeSet::new();
++    let mut counts = BudgetUsage::default();
++    for reservation in &snapshot.reservations {
++        if !attempts.insert(&reservation.attempt_id)
++            || reservation.reserved_at_ms < snapshot.timing.started_at_ms
++            || reservation.reserved_at_ms >= snapshot.timing.deadline_at_ms
++            || reservation.reserved_at_ms > snapshot.timing.last_observed_at_ms
++        {
++            return Err(invalid());
++        }
++        charge(&mut counts, &snapshot.limits, &reservation.kind).map_err(|_| invalid())?;
++    }
++    if counts.model_calls != snapshot.usage.model_calls
++        || counts.tool_attempts != snapshot.usage.tool_attempts
++        || counts.repair_attempts != snapshot.usage.repair_attempts
++        || counts.recovery_attempts != snapshot.usage.recovery_attempts
++    {
++        return Err(invalid());
++    }
++    Ok(())
++}
++
++pub(crate) fn validate_budget_transition(
++    previous: &RunSnapshot,
++    next: &RunSnapshot,
++) -> Result<(), ContractError> {
++    let invalid = || failure(ErrorCode::InvalidTransition, "budget");
++    if previous.timing.started_at_ms != next.timing.started_at_ms
++        || previous.timing.deadline_at_ms != next.timing.deadline_at_ms
++        || !next.reservations.starts_with(&previous.reservations)
++    {
++        return Err(invalid());
++    }
++    let mut expected = previous.usage.clone();
++    for added in &next.reservations[previous.reservations.len()..] {
++        charge(&mut expected, &previous.limits, &added.kind).map_err(|_| invalid())?;
++    }
++    if expected.model_calls != next.usage.model_calls
++        || expected.tool_attempts != next.usage.tool_attempts
++        || expected.repair_attempts != next.usage.repair_attempts
++        || expected.recovery_attempts != next.usage.recovery_attempts
++    {
++        return Err(invalid());
++    }
++    Ok(())
++}
+diff --git a/crates/wickle/src/clock.rs b/crates/wickle/src/clock.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..9e48f7bb727af6166097d9ed6ef1303b568fc342
+--- /dev/null
++++ b/crates/wickle/src/clock.rs
+@@ -0,0 +1,94 @@
++use std::time::{Duration, SystemTime, UNIX_EPOCH};
++
++use crate::{ContractError, ErrorCode, Id, PortFuture};
++
++/// One wall-clock and monotonic reading from a Host-injected clock.
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub struct ClockReading {
++    /// Current UTC milliseconds for admission and cross-process recovery.
++    pub utc_ms: i64,
++    /// Milliseconds on this clock instance's monotonic time axis.
++    pub monotonic_ms: u64,
++}
++
++/// Time source and timer, injectable independently of storage and execution.
++pub trait Clock: Send + Sync {
++    /// Read local UTC and monotonic time without external I/O. Monotonic values
++    /// must never regress; concurrent calls must produce consistent readings.
++    fn now(&self) -> Result<ClockReading, ContractError>;
++    /// Wait until an absolute point on this clock's monotonic time axis.
++    fn sleep_until<'a>(&'a self, monotonic_ms: u64) -> PortFuture<'a, ()>;
++}
++
++/// UTC system time and a Tokio-compatible monotonic clock.
++pub struct SystemClock {
++    origin: tokio::time::Instant,
++}
++
++impl SystemClock {
++    /// Create a clock without creating an asynchronous runtime.
++    pub fn new() -> Self {
++        Self {
++            origin: tokio::time::Instant::now(),
++        }
++    }
++}
++
++impl Default for SystemClock {
++    fn default() -> Self {
++        Self::new()
++    }
++}
++
++impl Clock for SystemClock {
++    fn now(&self) -> Result<ClockReading, ContractError> {
++        let utc_ms = SystemTime::now()
++            .duration_since(UNIX_EPOCH)
++            .ok()
++            .and_then(|elapsed| i64::try_from(elapsed.as_millis()).ok())
++            .ok_or_else(|| ContractError::new(ErrorCode::ClockUnavailable, "clock.utc"))?;
++        let monotonic_ms = u64::try_from(self.origin.elapsed().as_millis())
++            .map_err(|_| ContractError::new(ErrorCode::ClockUnavailable, "clock.monotonic"))?;
++        Ok(ClockReading {
++            utc_ms,
++            monotonic_ms,
++        })
++    }
++
++    fn sleep_until<'a>(&'a self, monotonic_ms: u64) -> PortFuture<'a, ()> {
++        Box::pin(async move {
++            if tokio::runtime::Handle::try_current().is_err() {
++                return Err(ContractError::new(
++                    ErrorCode::RuntimeUnavailable,
++                    "clock.timer",
++                ));
++            }
++            let deadline = self
++                .origin
++                .checked_add(Duration::from_millis(monotonic_ms))
++                .ok_or_else(|| ContractError::new(ErrorCode::ClockUnavailable, "clock.timer"))?;
++            tokio::time::sleep_until(deadline).await;
++            Ok(())
++        })
++    }
++}
++
++/// Source of new internal run, attempt, or event identities.
++/// It never supplies missing business foreign keys or tool system-input values.
++pub trait IdSource: Send + Sync {
++    /// Generate an opaque identifier; the store still rejects identity collisions.
++    fn next_id(&self) -> Result<Id, ContractError>;
++}
++
++/// Internal identifiers made from 128 bits of operating-system randomness.
++#[derive(Debug, Clone, Copy, Default)]
++pub struct RandomIdSource;
++
++impl IdSource for RandomIdSource {
++    fn next_id(&self) -> Result<Id, ContractError> {
++        let mut bytes = [0; 16];
++        getrandom::fill(&mut bytes)
++            .map_err(|_| ContractError::new(ErrorCode::IdGenerationFailed, "identifier"))?;
++        Id::new(format!("{:032x}", u128::from_be_bytes(bytes)))
++    }
++}
+diff --git a/crates/wickle/src/error.rs b/crates/wickle/src/error.rs
+index c797eb5f8c26b68fbf097502804c2ea908e62c93..347fce4e00280a37b775461430f0d2a055d31bfc 100644
+--- a/crates/wickle/src/error.rs
++++ b/crates/wickle/src/error.rs
+@@ -15,6 +15,14 @@ pub enum ErrorCode {
+     Cancelled,
+     /// The Host has not supplied the required asynchronous runtime.
+     RuntimeUnavailable,
++    /// A configured call, repair, or recovery budget has no remaining capacity.
++    BudgetExceeded,
++    /// A required time reading or timer could not be obtained.
++    ClockUnavailable,
++    /// A monotonic reading regressed or a resumed UTC clock predates saved progress.
++    ClockRegression,
++    /// The Host identifier source could not generate an internal execution identifier.
++    IdGenerationFailed,
+     /// Input is not unambiguous, finite JSON.
+     InvalidJson,
+     /// Input does not match a data contract.
+diff --git a/crates/wickle/src/lib.rs b/crates/wickle/src/lib.rs
+index 4d154e65ab6195c50ce81995f115e5e410ad780f..d0c8576b84f396720d9428b0dab70f27b0a22a20 100644
+--- a/crates/wickle/src/lib.rs
++++ b/crates/wickle/src/lib.rs
+@@ -11,6 +11,8 @@
+ //! use wickle::serialization::canonical_digest;
+ //! ```
+ 
++mod budget;
++mod clock;
+ mod context;
+ mod error;
+ mod message;
+@@ -23,6 +25,8 @@ mod serialization;
+ mod state;
+ mod views;
+ 
++pub use budget::{AttemptReservation, ReservationKind, RunBudget, RunTiming};
++pub use clock::{Clock, ClockReading, IdSource, RandomIdSource, SystemClock};
+ pub use policy::{
+     ApprovalChallenge, Guarded, PolicyAction, PolicyContext, PolicyDecision, PolicyGate,
+     PolicyPort, PolicyRequest, ToolPolicyInput,
+diff --git a/crates/wickle/src/run.rs b/crates/wickle/src/run.rs
+index 0f052131dbe27cb1cf64d3c60f0407cb4389ddb0..ab804007c95eca58a149ac9891877a2e3288954d 100644
+--- a/crates/wickle/src/run.rs
++++ b/crates/wickle/src/run.rs
+@@ -1,7 +1,7 @@
+ use crate::{
+-    ArtifactRef, CompletionPolicy, ContractError, ErrorCode, Failure, Id, InputContent, JsonDigest,
+-    ModelInvocationRecord, RecordRef, ResolvedProfile, RunLimits, Scope, ToolCall, ToolResult,
+-    VersionedRef,
++    ArtifactRef, AttemptReservation, CompletionPolicy, ContractError, ErrorCode, Failure, Id,
++    InputContent, JsonDigest, ModelInvocationRecord, RecordRef, ResolvedProfile, RunLimits,
++    RunTiming, Scope, ToolCall, ToolResult, VersionedRef,
+     serialization::{data_digest, decode, optional},
+ };
+ use serde::{Deserialize, Serialize};
+@@ -588,6 +588,10 @@ pub struct RunSnapshot {
+     pub limits: RunLimits,
+     /// Saved usage/reservations.
+     pub usage: BudgetUsage,
++    /// Original admission/deadline and persisted monotonic elapsed-time anchor.
++    pub timing: RunTiming,
++    /// Append-only charged attempt reservations, preserved across errors and resume.
++    pub reservations: Vec<AttemptReservation>,
+     /// Physical model attempt records.
+     pub model_ledger: Vec<ModelInvocationRecord>,
+     /// Saved tool plans and states.
+@@ -641,6 +645,7 @@ impl RunSnapshot {
+     /// Check static checkpoint invariants without performing recovery or authorization.
+     pub fn validate(&self) -> Result<(), ContractError> {
+         let invalid = |path| ContractError::new(ErrorCode::InvalidSnapshot, path);
++        crate::budget::validate_budget(self)?;
+         if &self.scope != self.profile.scope()
+             || self.request_digest
+                 != admission_digest(&self.request, &self.profile, self.system_inputs.as_ref())
+diff --git a/crates/wickle/src/state.rs b/crates/wickle/src/state.rs
+index f94945561a507ce8f2eac61c4a2757631385dc3f..7e96e39aa92736f455645234aea94534ef7c1f49 100644
+--- a/crates/wickle/src/state.rs
++++ b/crates/wickle/src/state.rs
+@@ -9,11 +9,11 @@ use serde::de::DeserializeOwned;
+ use serde_json::Value;
+ 
+ use crate::{
+-    ApprovalTarget, ContentBlock, ContractError, ErrorCode, Id, Message, ModelAttemptState,
+-    ModelInvocationRecord, OutcomeResult, PortFuture, RecordRef, ResumeAction, ResumeCommand,
+-    RunEvent, RunEventPayload, RunPhase, RunSnapshot, RunStatus, Scope, SessionSchemaVersion,
+-    SessionSnapshot, ToolCall, ToolCallState, ToolResult, VerificationSummary, WaitState,
+-    WaitTarget, admission_digest, canonical_digest,
++    ApprovalTarget, BudgetUsage, ContentBlock, ContractError, ErrorCode, Id, Message,
++    ModelAttemptState, ModelInvocationRecord, OutcomeResult, PortFuture, RecordRef, ResumeAction,
++    ResumeCommand, RunEvent, RunEventPayload, RunPhase, RunSnapshot, RunStatus, Scope,
++    SessionSchemaVersion, SessionSnapshot, ToolCall, ToolCallState, ToolResult,
++    VerificationSummary, WaitState, WaitTarget, admission_digest, canonical_digest,
+ };
+ 
+ /// Guarantees offered by a state-store implementation.
+@@ -189,6 +189,15 @@ pub trait StateStore: Send + Sync {
+         scope: &'a Scope,
+         session_id: &'a Id,
+     ) -> PortFuture<'a, SessionSnapshot>;
++    /// Validate owner/generation against the current stored expiry without renewing.
++    /// Return the latest lease metadata, including any concurrent heartbeat renewal.
++    fn check_lease<'a>(
++        &'a self,
++        scope: &'a Scope,
++        run_id: &'a Id,
++        lease: &'a RunLease,
++        now_ms: i64,
++    ) -> PortFuture<'a, RunLease>;
+     /// Acquire a new generation after any previous lease has expired or been released.
+     fn acquire_lease<'a>(
+         &'a self,
+@@ -337,6 +346,8 @@ impl StateStore for MemoryStateStore {
+                 || input.snapshot.phase != RunPhase::Admission
+                 || !input.snapshot.model_ledger.is_empty()
+                 || !input.snapshot.tool_ledger.is_empty()
++                || !input.snapshot.reservations.is_empty()
++                || input.snapshot.usage != BudgetUsage::default()
+             {
+                 return Err(error(ErrorCode::InvalidSnapshot, "admission"));
+             }
+@@ -440,6 +451,24 @@ impl StateStore for MemoryStateStore {
+         })
+     }
+ 
++    fn check_lease<'a>(
++        &'a self,
++        scope: &'a Scope,
++        run_id: &'a Id,
++        lease: &'a RunLease,
++        now_ms: i64,
++    ) -> PortFuture<'a, RunLease> {
++        Box::pin(async move {
++            let scopes = self.lock()?;
++            let run = namespace(&scopes, scope)?
++                .runs
++                .get(run_id)
++                .ok_or_else(not_found)?;
++            validate_lease(run, scope, run_id, lease, now_ms)?;
++            Ok(run.lease.as_ref().expect("validated lease").clone())
++        })
++    }
++
+     fn acquire_lease<'a>(
+         &'a self,
+         scope: &'a Scope,
+@@ -1038,6 +1067,7 @@ fn validate_transition(previous: &RunSnapshot, next: &RunSnapshot) -> Result<(),
+         return Err(error(ErrorCode::InvalidTransition, "run.status"));
+     }
+     next.validate()?;
++    crate::budget::validate_budget_transition(previous, next)?;
+     if previous.run_id != next.run_id
+         || previous.request != next.request
+         || previous.request_digest != next.request_digest
+diff --git a/crates/wickle/tests/budget.rs b/crates/wickle/tests/budget.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..5e42b8d27e2557043044d8701a58119bb6c14dd4
+--- /dev/null
++++ b/crates/wickle/tests/budget.rs
+@@ -0,0 +1,722 @@
++//! Reservations and stop boundaries exercised against a real state store.
++
++use std::sync::{
++    Arc, Mutex,
++    atomic::{AtomicUsize, Ordering},
++};
++use tokio::sync::{Barrier, Notify, Semaphore};
++use tokio_util::sync::CancellationToken;
++use wickle::*;
++
++#[allow(dead_code)]
++mod support;
++use support::{admission, id, scope};
++
++#[derive(Default)]
++struct FakeClock {
++    reading: Mutex<(i64, u64)>,
++    changed: Notify,
++}
++impl FakeClock {
++    fn set(&self, utc_ms: i64, monotonic_ms: u64) {
++        *self.reading.lock().unwrap() = (utc_ms, monotonic_ms);
++        self.changed.notify_waiters();
++    }
++}
++impl Clock for FakeClock {
++    fn now(&self) -> Result<ClockReading, ContractError> {
++        let (utc_ms, monotonic_ms) = *self.reading.lock().unwrap();
++        Ok(ClockReading {
++            utc_ms,
++            monotonic_ms,
++        })
++    }
++    fn sleep_until<'a>(&'a self, deadline: u64) -> PortFuture<'a, ()> {
++        Box::pin(async move {
++            loop {
++                let changed = self.changed.notified();
++                tokio::pin!(changed);
++                changed.as_mut().enable();
++                if self.now()?.monotonic_ms >= deadline {
++                    return Ok(());
++                }
++                changed.await;
++            }
++        })
++    }
++}
++#[derive(Default)]
++struct FixedIds(AtomicUsize);
++impl IdSource for FixedIds {
++    fn next_id(&self) -> Result<Id, ContractError> {
++        Ok(id(&format!(
++            "attempt-{}",
++            self.0.fetch_add(1, Ordering::SeqCst)
++        )))
++    }
++}
++struct RepeatedId;
++impl IdSource for RepeatedId {
++    fn next_id(&self) -> Result<Id, ContractError> {
++        Ok(id("same-attempt"))
++    }
++}
++
++enum CommitControl {
++    Race(Barrier),
++    Pause { entered: Notify, release: Semaphore },
++    Fail,
++    ExpireDuringLeaseRead(Arc<FakeClock>),
++}
++struct ControlledStore {
++    inner: Arc<MemoryStateStore>,
++    control: CommitControl,
++}
++impl StateStore for ControlledStore {
++    fn capabilities(&self) -> StateStoreCapabilities {
++        self.inner.capabilities()
++    }
++    fn admit<'a>(&'a self, s: &'a Scope, input: AdmissionInput) -> PortFuture<'a, AdmissionResult> {
++        self.inner.admit(s, input)
++    }
++    fn load<'a>(&'a self, s: &'a Scope, r: &'a Id) -> PortFuture<'a, StoredRun> {
++        self.inner.load(s, r)
++    }
++    fn load_session<'a>(&'a self, s: &'a Scope, r: &'a Id) -> PortFuture<'a, SessionSnapshot> {
++        self.inner.load_session(s, r)
++    }
++    fn check_lease<'a>(
++        &'a self,
++        s: &'a Scope,
++        r: &'a Id,
++        lease: &'a RunLease,
++        now: i64,
++    ) -> PortFuture<'a, RunLease> {
++        Box::pin(async move {
++            let current = self.inner.check_lease(s, r, lease, now).await?;
++            if let CommitControl::ExpireDuringLeaseRead(clock) = &self.control {
++                clock.set(current.expires_at_ms, current.expires_at_ms as u64);
++            }
++            Ok(current)
++        })
++    }
++    fn acquire_lease<'a>(
++        &'a self,
++        s: &'a Scope,
++        r: &'a Id,
++        owner: &'a Id,
++        now: i64,
++        ttl: u64,
++    ) -> PortFuture<'a, RunLease> {
++        self.inner.acquire_lease(s, r, owner, now, ttl)
++    }
++    fn renew_lease<'a>(
++        &'a self,
++        s: &'a Scope,
++        r: &'a Id,
++        lease: &'a RunLease,
++        now: i64,
++        ttl: u64,
++    ) -> PortFuture<'a, RunLease> {
++        self.inner.renew_lease(s, r, lease, now, ttl)
++    }
++    fn release_lease<'a>(
++        &'a self,
++        s: &'a Scope,
++        r: &'a Id,
++        lease: &'a RunLease,
++        now: i64,
++    ) -> PortFuture<'a, ()> {
++        self.inner.release_lease(s, r, lease, now)
++    }
++    fn read_events<'a>(
++        &'a self,
++        s: &'a Scope,
++        r: &'a Id,
++        after: u64,
++        limit: usize,
++    ) -> PortFuture<'a, EventPage> {
++        self.inner.read_events(s, r, after, limit)
++    }
++    fn read_record<'a>(
++        &'a self,
++        s: &'a Scope,
++        r: &'a RecordRef,
++    ) -> PortFuture<'a, ProtectedRecord> {
++        self.inner.read_record(s, r)
++    }
++    fn commit<'a>(
++        &'a self,
++        s: &'a Scope,
++        r: &'a Id,
++        input: CommitInput,
++    ) -> PortFuture<'a, StoredRun> {
++        Box::pin(async move {
++            match &self.control {
++                CommitControl::Race(barrier) => {
++                    barrier.wait().await;
++                }
++                CommitControl::Fail => {
++                    return Err(ContractError::new(
++                        ErrorCode::PersistenceUnavailable,
++                        "injected.commit",
++                    ));
++                }
++                CommitControl::Pause { .. } | CommitControl::ExpireDuringLeaseRead(_) => {}
++            }
++            let saved = self.inner.commit(s, r, input).await?;
++            if let CommitControl::Pause { entered, release } = &self.control {
++                entered.notify_one();
++                release.acquire().await.unwrap().forget();
++            }
++            Ok(saved)
++        })
++    }
++}
++struct Fixture {
++    store: Arc<MemoryStateStore>,
++    clock: Arc<FakeClock>,
++    ids: Arc<dyn IdSource>,
++    lease: RunLease,
++    cancellation: CancellationToken,
++}
++impl Fixture {
++    async fn new(models: u64, tools: u64, repair: u64, recovery: u64) -> Self {
++        let store = Arc::new(MemoryStateStore::new());
++        let mut input = admission("run", "request", "session", "Read evidence", "1").await;
++        input.snapshot.limits.max_model_calls = models.try_into().unwrap();
++        input.snapshot.limits.max_tool_attempts = tools;
++        input.snapshot.limits.max_repair_attempts = repair;
++        input.snapshot.limits.max_recovery_attempts = recovery;
++        input.snapshot.limits.max_elapsed_ms = 100.try_into().unwrap();
++        input.snapshot.timing = RunTiming::new(0, 100).unwrap();
++        store.admit(&scope(), input).await.unwrap();
++        let lease = store
++            .acquire_lease(&scope(), &id("run"), &id("worker"), 0, 200)
++            .await
++            .unwrap();
++        Self {
++            store,
++            clock: Arc::new(FakeClock::default()),
++            ids: Arc::new(FixedIds::default()),
++            lease,
++            cancellation: CancellationToken::new(),
++        }
++    }
++    async fn budget(&self, store: Arc<dyn StateStore>) -> RunBudget {
++        RunBudget::attach(
++            store,
++            self.clock.clone(),
++            self.ids.clone(),
++            scope(),
++            id("run"),
++            self.lease.clone(),
++            self.cancellation.clone(),
++        )
++        .await
++        .unwrap()
++    }
++    async fn saved(&self) -> RunSnapshot {
++        self.store
++            .load(&scope(), &id("run"))
++            .await
++            .unwrap()
++            .snapshot
++    }
++}
++fn model(purpose: ModelPurpose) -> ReservationKind {
++    ReservationKind::Model { purpose }
++}
++fn counted(counter: &AtomicUsize) -> std::future::Ready<Result<(), ContractError>> {
++    counter.fetch_add(1, Ordering::SeqCst);
++    std::future::ready(Ok(()))
++}
++
++#[tokio::test]
++async fn model_purposes_share_a_limit_and_do_not_consume_the_tool_budget() {
++    let fixture = Fixture::new(3, 1, 0, 0).await;
++    let budget = fixture.budget(fixture.store.clone()).await;
++    let calls = AtomicUsize::new(0);
++    for purpose in [
++        ModelPurpose::Agent,
++        ModelPurpose::Verification,
++        ModelPurpose::Compaction,
++    ] {
++        budget
++            .execute(model(purpose), |_| counted(&calls))
++            .await
++            .unwrap();
++    }
++    let error = budget
++        .execute(model(ModelPurpose::Agent), |_| counted(&calls))
++        .await
++        .unwrap_err();
++    assert_eq!(error.code, ErrorCode::BudgetExceeded);
++    budget
++        .execute(
++            ReservationKind::Tool {
++                call_id: id("planned-call"),
++            },
++            |_| counted(&calls),
++        )
++        .await
++        .unwrap();
++    for kind in [
++        ReservationKind::Repair {},
++        ReservationKind::Recovery {},
++        ReservationKind::Tool {
++            call_id: id("another-call"),
++        },
++    ] {
++        assert_eq!(
++            budget
++                .execute(kind, |_| counted(&calls))
++                .await
++                .unwrap_err()
++                .code,
++            ErrorCode::BudgetExceeded
++        );
++    }
++    let saved = fixture.saved().await;
++    assert_eq!(
++        (
++            calls.load(Ordering::SeqCst),
++            saved.usage.model_calls,
++            saved.usage.tool_attempts
++        ),
++        (4, 3, 1)
++    );
++    assert_eq!(saved.reservations.len(), 4);
++}
++
++#[tokio::test]
++async fn the_last_model_slot_can_only_authorize_one_competing_dispatch() {
++    let fixture = Fixture::new(1, 0, 0, 0).await;
++    let store = Arc::new(ControlledStore {
++        inner: fixture.store.clone(),
++        control: CommitControl::Race(Barrier::new(2)),
++    });
++    let left = fixture.budget(store.clone()).await;
++    let right = fixture.budget(store).await;
++    let calls = AtomicUsize::new(0);
++    let (left, right) = tokio::join!(
++        left.execute(model(ModelPurpose::Agent), |_| counted(&calls)),
++        right.execute(model(ModelPurpose::Verification), |_| counted(&calls)),
++    );
++    let results = [left, right];
++    assert_eq!(results.iter().filter(|r| r.is_ok()).count(), 1);
++    assert_eq!(
++        results.into_iter().find_map(Result::err).unwrap().code,
++        ErrorCode::RevisionConflict
++    );
++    assert_eq!(calls.load(Ordering::SeqCst), 1);
++    let saved = fixture.saved().await;
++    assert_eq!((saved.usage.model_calls, saved.reservations.len()), (1, 1));
++}
++
++#[tokio::test]
++async fn failed_persistence_never_constructs_the_call_or_charges_the_store() {
++    let fixture = Fixture::new(1, 0, 0, 0).await;
++    let store = Arc::new(ControlledStore {
++        inner: fixture.store.clone(),
++        control: CommitControl::Fail,
++    });
++    let budget = fixture.budget(store).await;
++    let calls = AtomicUsize::new(0);
++    assert_eq!(
++        budget
++            .execute(model(ModelPurpose::Agent), |_| counted(&calls))
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::PersistenceUnavailable
++    );
++    assert_eq!(calls.load(Ordering::SeqCst), 0);
++    assert_eq!(fixture.saved().await.usage.model_calls, 0);
++}
++
++#[tokio::test]
++async fn a_stop_during_reservation_blocks_dispatch_without_refunding_the_saved_attempt() {
++    for stop in [
++        ErrorCode::Cancelled,
++        ErrorCode::DeadlineExceeded,
++        ErrorCode::LeaseLost,
++    ] {
++        let fixture = Fixture::new(2, 0, 0, 0).await;
++        let store = Arc::new(ControlledStore {
++            inner: fixture.store.clone(),
++            control: CommitControl::Pause {
++                entered: Notify::new(),
++                release: Semaphore::new(0),
++            },
++        });
++        let budget = fixture.budget(store.clone()).await;
++        let calls = AtomicUsize::new(0);
++        let execute = budget.execute(model(ModelPurpose::Agent), |_| counted(&calls));
++        let interrupt = async {
++            let CommitControl::Pause { entered, release } = &store.control else {
++                unreachable!()
++            };
++            entered.notified().await;
++            match stop {
++                ErrorCode::Cancelled => fixture.cancellation.cancel(),
++                ErrorCode::DeadlineExceeded => fixture.clock.set(100, 100),
++                ErrorCode::LeaseLost => {
++                    fixture
++                        .store
++                        .release_lease(&scope(), &id("run"), &fixture.lease, 0)
++                        .await
++                        .unwrap();
++                    fixture
++                        .store
++                        .acquire_lease(&scope(), &id("run"), &id("replacement"), 0, 200)
++                        .await
++                        .unwrap();
++                }
++                _ => unreachable!(),
++            }
++            release.add_permits(1);
++        };
++        let (result, ()) = tokio::join!(execute, interrupt);
++        assert_eq!(result.unwrap_err().code, stop);
++        assert_eq!(calls.load(Ordering::SeqCst), 0);
++        let saved = fixture.saved().await;
++        assert_eq!((saved.usage.model_calls, saved.reservations.len()), (1, 1));
++    }
++}
++
++#[tokio::test]
++async fn an_unknown_attempt_stays_charged_after_reattach_and_retry_gets_a_new_id() {
++    let fixture = Fixture::new(2, 0, 1, 1).await;
++    let first = fixture.budget(fixture.store.clone()).await;
++    first
++        .execute(model(ModelPurpose::Agent), |_| async {
++            Err::<(), _>(ContractError::new(
++                ErrorCode::PersistenceUnavailable,
++                "response.unknown",
++            ))
++        })
++        .await
++        .unwrap_err();
++    fixture.clock.set(10, 10);
++    let resumed = fixture.budget(fixture.store.clone()).await;
++    resumed
++        .execute(model(ModelPurpose::Agent), |_| async { Ok(()) })
++        .await
++        .unwrap();
++    resumed.reserve(ReservationKind::Repair {}).await.unwrap();
++    resumed.reserve(ReservationKind::Recovery {}).await.unwrap();
++    let saved = fixture.saved().await;
++    assert_eq!(saved.usage.model_calls, 2);
++    assert_eq!(saved.usage.repair_attempts, 1);
++    assert_eq!(saved.usage.recovery_attempts, 1);
++    assert_ne!(
++        saved.reservations[0].attempt_id,
++        saved.reservations[1].attempt_id
++    );
++    assert_eq!(saved.reservations[0].reserved_at_ms, 0);
++    assert_eq!(saved.reservations[1].reserved_at_ms, 10);
++    assert_eq!(saved.usage.elapsed_ms, 10);
++    assert_eq!(saved.timing.deadline_at_ms, 100);
++}
++
++#[tokio::test]
++async fn reused_attempt_identity_cannot_authorize_a_second_physical_call() {
++    let mut fixture = Fixture::new(2, 0, 0, 0).await;
++    fixture.ids = Arc::new(RepeatedId);
++    let budget = fixture.budget(fixture.store.clone()).await;
++    let calls = AtomicUsize::new(0);
++    budget
++        .execute(model(ModelPurpose::Agent), |_| counted(&calls))
++        .await
++        .unwrap();
++    assert_eq!(
++        budget
++            .execute(model(ModelPurpose::Agent), |_| counted(&calls))
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::InvalidSnapshot
++    );
++    assert_eq!(calls.load(Ordering::SeqCst), 1);
++    assert_eq!(fixture.saved().await.usage.model_calls, 1);
++}
++
++#[tokio::test]
++async fn active_elapsed_uses_monotonic_time_and_reattach_counts_offline_time() {
++    let fixture = Fixture::new(3, 0, 0, 0).await;
++    let budget = fixture.budget(fixture.store.clone()).await;
++    fixture.clock.set(50_000, 10);
++    budget.reserve(model(ModelPurpose::Agent)).await.unwrap();
++    fixture.clock.set(-50_000, 20);
++    budget
++        .reserve(model(ModelPurpose::Verification))
++        .await
++        .unwrap();
++    assert_eq!(fixture.saved().await.usage.elapsed_ms, 20);
++    let regression = RunBudget::attach(
++        fixture.store.clone(),
++        fixture.clock.clone(),
++        fixture.ids.clone(),
++        scope(),
++        id("run"),
++        fixture.lease.clone(),
++        fixture.cancellation.clone(),
++    )
++    .await;
++    assert!(matches!(
++        regression,
++        Err(ContractError {
++            code: ErrorCode::ClockRegression,
++            ..
++        })
++    ));
++    fixture.clock.set(95, 40);
++    let resumed = fixture.budget(fixture.store.clone()).await;
++    assert_eq!(resumed.elapsed_ms().unwrap(), 95);
++    fixture.clock.set(100, 45);
++    let calls = AtomicUsize::new(0);
++    assert_eq!(
++        resumed
++            .execute(model(ModelPurpose::Compaction), |_| counted(&calls))
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::DeadlineExceeded
++    );
++    assert_eq!(calls.load(Ordering::SeqCst), 0);
++    assert_eq!(fixture.saved().await.usage.model_calls, 2);
++}
++
++#[tokio::test]
++async fn waiting_observation_consumes_time_but_no_model_attempts() {
++    let fixture = Fixture::new(1, 0, 0, 0).await;
++    let snapshot = fixture.saved().await;
++    let mut commit = support::prepared(&snapshot, fixture.lease.clone(), 0);
++    commit.snapshot.status = RunStatus::Waiting;
++    commit.snapshot.phase = RunPhase::Waiting;
++    commit.snapshot.wait = Some(WaitState {
++        wait_id: id("wait"),
++        target: WaitTarget::Approval {
++            target: ApprovalTarget::Tool {
++                call_id: id("call"),
++                binding_digest: canonical_digest(&serde_json::json!({})),
++            },
++        },
++        expires_at_ms: None,
++    });
++    // A wait target needs a matching planned tool in the saved checkpoint.
++    commit.snapshot.tool_ledger.push(ToolLedgerEntry {
++        call: ToolCall {
++            call_id: id("call"),
++            model_request_id: id("model"),
++            provider_call_id: id("provider-call"),
++            tool_name: id("read"),
++            model_inputs: JsonObject::new(),
++            descriptor_digest: canonical_digest(&serde_json::json!({})),
++            bound_input_ref: None,
++        },
++        state: ToolCallState::Planned {},
++    });
++    fixture
++        .store
++        .commit(&scope(), &id("run"), commit)
++        .await
++        .unwrap();
++    let waiting = fixture.budget(fixture.store.clone()).await;
++    let observer = waiting.wait_for_cancellation_or_deadline();
++    tokio::pin!(observer);
++    assert!(futures_util::poll!(observer.as_mut()).is_pending());
++    fixture.clock.set(100, 100);
++    assert_eq!(
++        observer.await.unwrap_err().code,
++        ErrorCode::DeadlineExceeded
++    );
++    assert_eq!(fixture.saved().await.usage.model_calls, 0);
++    let resumed = fixture.budget(fixture.store.clone()).await;
++    assert_eq!(resumed.elapsed_ms().unwrap(), 100);
++}
++
++#[tokio::test]
++async fn cancellation_after_an_effect_does_not_undo_it_or_refund_the_attempt() {
++    let fixture = Fixture::new(1, 0, 0, 0).await;
++    let budget = fixture.budget(fixture.store.clone()).await;
++    let effects = AtomicUsize::new(0);
++    let error = budget
++        .execute(model(ModelPurpose::Agent), |_| async {
++            effects.fetch_add(1, Ordering::SeqCst);
++            fixture.cancellation.cancel();
++            Ok(())
++        })
++        .await
++        .unwrap_err();
++    assert_eq!(error.code, ErrorCode::Cancelled);
++    assert_eq!(effects.load(Ordering::SeqCst), 1);
++    assert_eq!(fixture.saved().await.usage.model_calls, 1);
++    assert_eq!(
++        budget
++            .execute(model(ModelPurpose::Agent), |_| counted(&effects))
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::Cancelled
++    );
++    assert_eq!(effects.load(Ordering::SeqCst), 1);
++}
++
++#[tokio::test]
++async fn dropping_a_waiter_does_not_cancel_execution_and_a_clock_timer_wakes_at_deadline() {
++    let fixture = Fixture::new(1, 0, 0, 0).await;
++    let budget = fixture.budget(fixture.store.clone()).await;
++    let mut observer = Box::pin(budget.wait_for_cancellation_or_deadline());
++    assert!(futures_util::poll!(observer.as_mut()).is_pending());
++    drop(observer);
++    budget
++        .execute(model(ModelPurpose::Agent), |_| async { Ok(()) })
++        .await
++        .unwrap();
++    assert!(!fixture.cancellation.is_cancelled());
++    let clock = SystemClock::new();
++    let reading = clock.now().unwrap();
++    clock.sleep_until(reading.monotonic_ms + 1).await.unwrap();
++    assert!(clock.now().unwrap().monotonic_ms > reading.monotonic_ms);
++}
++
++#[tokio::test]
++async fn an_in_flight_operation_is_interrupted_when_the_original_deadline_arrives() {
++    let fixture = Fixture::new(1, 0, 0, 0).await;
++    let budget = fixture.budget(fixture.store.clone()).await;
++    let calls = AtomicUsize::new(0);
++    let execution = budget.execute(model(ModelPurpose::Agent), |_| {
++        calls.fetch_add(1, Ordering::SeqCst);
++        std::future::pending::<Result<(), ContractError>>()
++    });
++    tokio::pin!(execution);
++    assert!(futures_util::poll!(execution.as_mut()).is_pending());
++    fixture.clock.set(100, 100);
++    assert_eq!(
++        execution.await.unwrap_err().code,
++        ErrorCode::DeadlineExceeded
++    );
++    assert_eq!(calls.load(Ordering::SeqCst), 1);
++    assert_eq!(fixture.saved().await.usage.model_calls, 1);
++}
++
++#[tokio::test]
++async fn lease_expiration_while_checking_storage_blocks_the_next_call() {
++    let fixture = Fixture::new(1, 0, 0, 0).await;
++    fixture
++        .store
++        .renew_lease(&scope(), &id("run"), &fixture.lease, 0, 10)
++        .await
++        .unwrap();
++    let store = Arc::new(ControlledStore {
++        inner: fixture.store.clone(),
++        control: CommitControl::ExpireDuringLeaseRead(fixture.clock.clone()),
++    });
++    let budget = fixture.budget(store).await;
++    let calls = AtomicUsize::new(0);
++    assert_eq!(
++        budget
++            .execute(model(ModelPurpose::Agent), |_| counted(&calls))
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::LeaseLost
++    );
++    assert_eq!(calls.load(Ordering::SeqCst), 0);
++    assert_eq!(fixture.saved().await.usage.model_calls, 1);
++}
++
++#[tokio::test]
++async fn a_monotonic_clock_regression_cannot_extend_a_live_segment() {
++    let fixture = Fixture::new(2, 0, 0, 0).await;
++    let budget = fixture.budget(fixture.store.clone()).await;
++    fixture.clock.set(20, 20);
++    budget.reserve(model(ModelPurpose::Agent)).await.unwrap();
++    fixture.clock.set(30, 10);
++    let calls = AtomicUsize::new(0);
++    assert_eq!(
++        budget
++            .execute(model(ModelPurpose::Agent), |_| counted(&calls))
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::ClockRegression
++    );
++    assert_eq!(calls.load(Ordering::SeqCst), 0);
++    assert_eq!(fixture.saved().await.usage.model_calls, 1);
++}
++
++#[tokio::test]
++async fn saved_attempts_and_original_deadline_cannot_be_refunded_or_replaced() {
++    let fixture = Fixture::new(2, 1, 0, 0).await;
++    let budget = fixture.budget(fixture.store.clone()).await;
++    budget.reserve(model(ModelPurpose::Agent)).await.unwrap();
++    let before = fixture.saved().await;
++    let mut refund = support::prepared(&before, fixture.lease.clone(), 0);
++    refund.snapshot.reservations.clear();
++    refund.snapshot.usage.model_calls = 0;
++    assert_eq!(
++        fixture
++            .store
++            .commit(&scope(), &id("run"), refund)
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::InvalidTransition
++    );
++    let mut reset = support::prepared(&before, fixture.lease.clone(), 0);
++    reset.snapshot.timing = RunTiming::new(1, 100).unwrap();
++    reset.snapshot.reservations[0].reserved_at_ms = 1;
++    assert_eq!(
++        fixture
++            .store
++            .commit(&scope(), &id("run"), reset)
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::InvalidTransition
++    );
++    let mut extra = support::prepared(&before, fixture.lease.clone(), 0);
++    extra.snapshot.usage.model_calls += 1;
++    assert_eq!(
++        fixture
++            .store
++            .commit(&scope(), &id("run"), extra)
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::InvalidSnapshot
++    );
++    assert_eq!(fixture.saved().await, before);
++}
++
++#[tokio::test]
++async fn restoring_a_snapshot_rejects_missing_reservations_and_forged_counts() {
++    let fixture = Fixture::new(2, 0, 0, 0).await;
++    let budget = fixture.budget(fixture.store.clone()).await;
++    budget.reserve(model(ModelPurpose::Agent)).await.unwrap();
++    let snapshot = fixture.saved().await;
++    let mut missing = snapshot.clone();
++    missing.reservations.clear();
++    let mut forged = snapshot.clone();
++    forged.usage.model_calls = 2;
++    let mut duplicated = snapshot.clone();
++    duplicated
++        .reservations
++        .push(snapshot.reservations[0].clone());
++    duplicated.usage.model_calls = 2;
++    for invalid in [missing, forged, duplicated] {
++        assert_eq!(
++            RunSnapshot::from_json(&serde_json::to_string(&invalid).unwrap())
++                .unwrap_err()
++                .code,
++            ErrorCode::InvalidSnapshot
++        );
++    }
++    assert_eq!(
++        RunSnapshot::from_json(&serde_json::to_string(&snapshot).unwrap()).unwrap(),
++        snapshot
++    );
++}
+diff --git a/crates/wickle/tests/contracts.rs b/crates/wickle/tests/contracts.rs
+index c3853b7bf6c602c3a38c0193940100448bd08506..73cd9e61ae00417c7ad24cc48f1476490df17a52 100644
+--- a/crates/wickle/tests/contracts.rs
++++ b/crates/wickle/tests/contracts.rs
+@@ -719,6 +719,14 @@ async fn checkpoint() -> RunSnapshot {
+         request_digest: admission_digest(&request, &p, system_inputs.as_ref()),
+         request,
+         scope: scope(),
++        timing: RunTiming::new(0, p.profile().limits.max_elapsed_ms.get()).unwrap(),
++        reservations: vec![AttemptReservation {
++            attempt_id: id("first-model-attempt"),
++            kind: ReservationKind::Model {
++                purpose: ModelPurpose::Agent,
++            },
++            reserved_at_ms: 0,
++        }],
+         limits: p.profile().limits.clone(),
+         profile: p,
+         status: RunStatus::Waiting,
+diff --git a/crates/wickle/tests/policy.rs b/crates/wickle/tests/policy.rs
+index 6932d44bbcb93b9e002ff3e6d801fb8c45a09df8..8cce553504c191205f4f263bb9e4b0f62ace4248 100644
+--- a/crates/wickle/tests/policy.rs
++++ b/crates/wickle/tests/policy.rs
+@@ -693,6 +693,14 @@ async fn snapshot() -> RunSnapshot {
+         request_digest: admission_digest(&request, &profile, system_inputs.as_ref()),
+         request,
+         scope: scope(),
++        timing: RunTiming::new(0, profile.profile().limits.max_elapsed_ms.get()).unwrap(),
++        reservations: vec![AttemptReservation {
++            attempt_id: id("first-model-attempt"),
++            kind: ReservationKind::Model {
++                purpose: ModelPurpose::Agent,
++            },
++            reserved_at_ms: 0,
++        }],
+         limits: profile.profile().limits.clone(),
+         profile,
+         status: RunStatus::Failed,
+diff --git a/crates/wickle/tests/state.rs b/crates/wickle/tests/state.rs
+index 48c71f6bca8d65b4773aae455f4884f9b0739ab0..35eeca77ae025cf4cfb6da426b391d8fad5826e0 100644
+--- a/crates/wickle/tests/state.rs
++++ b/crates/wickle/tests/state.rs
+@@ -4,208 +4,8 @@ use serde_json::json;
+ use std::{collections::BTreeSet, sync::Arc};
+ use wickle::*;
+ 
+-fn id(value: &str) -> Id {
+-    Id::new(value).unwrap()
+-}
+-fn scope() -> Scope {
+-    Scope {
+-        tenant_id: id("tenant"),
+-        workspace_id: id("workspace"),
+-        user_id: None,
+-    }
+-}
+-
+-struct Catalog {
+-    revision: &'static str,
+-}
+-impl ProfileResolver for Catalog {
+-    fn resolve<'a>(
+-        &'a self,
+-        reference: &'a ComponentRef,
+-        _: &'a Scope,
+-    ) -> PortFuture<'a, ComponentMetadata> {
+-        Box::pin(async move {
+-            Ok(ComponentMetadata {
+-                reference: ComponentRef {
+-                    version: Some(id(self.revision)),
+-                    ..reference.clone()
+-                },
+-                contract_version: 1,
+-                manifest_digest: canonical_digest(&json!(self.revision)),
+-                config_schema: json!({"type":"object","additionalProperties":false}),
+-                dependencies: vec![],
+-                capabilities: BTreeSet::new(),
+-                required_capabilities: BTreeSet::new(),
+-                required_connections: BTreeSet::new(),
+-                model_name: None,
+-                hook_position: None,
+-                exports: vec![],
+-            })
+-        })
+-    }
+-}
+-
+-fn event(run: &Id, session: &Id, owner: &Scope, seq: u64, payload: RunEventPayload) -> RunEvent {
+-    RunEvent {
+-        schema_version: RunEventSchemaVersion::V1,
+-        event_id: id(&format!("event-{run}-{seq}")),
+-        scope: owner.clone(),
+-        run_id: run.clone(),
+-        session_id: session.clone(),
+-        seq: seq.try_into().unwrap(),
+-        timestamp_ms: 1000 + seq as i64,
+-        payload,
+-    }
+-}
+-
+-async fn admission(
+-    run: &str,
+-    request_id: &str,
+-    session: &str,
+-    text: &str,
+-    revision: &'static str,
+-) -> AdmissionInput {
+-    let owner = scope();
+-    let profile=AgentProfile::from_json(&json!({
+-        "schema_version":"wickle.agent-profile.v1","agent_id":"assistant","version":"1.0.0",
+-        "name":"Assistant","description":"State contract example","instructions":{"text":"Use evidence"},
+-        "model_binding":"primary","tools":[],"skills":[],"connectors":[],"context_policy":{"strategy":"bounded"},"output_contract":{"type":"text"},
+-        "limits":{"max_model_calls":8,"max_tool_attempts":4,"max_repair_attempts":1,"max_recovery_attempts":1,"max_elapsed_ms":10000}
+-    }).to_string()).unwrap();
+-    let profile = ProfileValidator::new(&Catalog { revision })
+-        .validate(&profile, &owner)
+-        .await
+-        .unwrap();
+-    let request = RunRequest {
+-        request_id: id(request_id),
+-        session_id: id(session),
+-        input: vec![InputContent::Text { text: text.into() }],
+-        trigger: RunTrigger::User {},
+-        output_contract: None,
+-    };
+-    let request_record = ProtectedRecord::new(
+-        id(&format!("request-{run}")),
+-        1,
+-        serde_json::to_value(&request).unwrap(),
+-    );
+-    let prompt_record = ProtectedRecord::new(
+-        id(&format!("prompt-{session}")),
+-        1,
+-        json!({"instructions":"Use evidence"}),
+-    );
+-    let snapshot = RunSnapshot {
+-        schema_version: RunSnapshotSchemaVersion::V1,
+-        run_id: id(run),
+-        request_digest: admission_digest(&request, &profile, None),
+-        request: request.clone(),
+-        scope: owner.clone(),
+-        limits: profile.profile().limits.clone(),
+-        profile,
+-        status: RunStatus::Running,
+-        phase: RunPhase::Admission,
+-        model_step_id: None,
+-        usage: BudgetUsage::default(),
+-        model_ledger: vec![],
+-        tool_ledger: vec![],
+-        system_inputs: None,
+-        wait: None,
+-        outcome: None,
+-        assembly_ref: None,
+-        context_batches: vec![],
+-        source_states: vec![],
+-        revision: 0,
+-        last_event_seq: 1,
+-    };
+-    let started = event(
+-        &snapshot.run_id,
+-        &request.session_id,
+-        &owner,
+-        1,
+-        RunEventPayload::RunStarted {
+-            request_ref: request_record.reference().clone(),
+-            profile_digest: snapshot.profile.profile_digest().clone(),
+-        },
+-    );
+-    let message = Message {
+-        message_id: id(&format!("message-{run}")),
+-        run_id: snapshot.run_id.clone(),
+-        sequence: 1.try_into().unwrap(),
+-        role: MessageRole::User,
+-        content: vec![ContentBlock::Content {
+-            content: InputContent::Text { text: text.into() },
+-        }],
+-        origin: MessageOrigin::User,
+-        visibility: Visibility::UserAndModel,
+-    };
+-    AdmissionInput {
+-        snapshot,
+-        prompt_snapshot: prompt_record.reference().clone(),
+-        messages: vec![message],
+-        events: vec![started],
+-        records: vec![request_record, prompt_record],
+-        require_durable: false,
+-    }
+-}
+-
+-fn prepared(snapshot: &RunSnapshot, lease: RunLease, now: i64) -> CommitInput {
+-    let mut next = snapshot.clone();
+-    next.revision += 1;
+-    next.phase = RunPhase::Prepare;
+-    CommitInput {
+-        expected_revision: snapshot.revision,
+-        lease,
+-        now_ms: now,
+-        snapshot: next,
+-        messages: vec![],
+-        events: vec![],
+-        records: vec![],
+-    }
+-}
+-
+-fn finished(snapshot: &RunSnapshot, lease: RunLease, now: i64) -> CommitInput {
+-    let mut next = snapshot.clone();
+-    next.revision += 1;
+-    next.last_event_seq += 1;
+-    next.status = RunStatus::Succeeded;
+-    next.phase = RunPhase::Finish;
+-    let outcome = RunOutcome {
+-        result: OutcomeResult::Succeeded {
+-            completion_basis: CompletionBasis::TurnEnded,
+-        },
+-        output: vec![InputContent::Text {
+-            text: "Completed".into(),
+-        }],
+-        artifacts: vec![],
+-        usage: next.usage.clone(),
+-        checkpoint_revision: next.revision,
+-        verification: None,
+-        unresolved_effects: vec![],
+-    };
+-    let record = ProtectedRecord::new(
+-        id(&format!("outcome-{}", next.run_id)),
+-        1,
+-        serde_json::to_value(&outcome).unwrap(),
+-    );
+-    next.outcome = Some(outcome);
+-    let finished = event(
+-        &next.run_id,
+-        &next.request.session_id,
+-        &next.scope,
+-        next.last_event_seq,
+-        RunEventPayload::RunFinished {
+-            outcome_ref: record.reference().clone(),
+-        },
+-    );
+-    CommitInput {
+-        expected_revision: snapshot.revision,
+-        lease,
+-        now_ms: now,
+-        snapshot: next,
+-        messages: vec![],
+-        events: vec![finished],
+-        records: vec![record],
+-    }
+-}
++mod support;
++use support::*;
+ 
+ #[tokio::test]
+ async fn identical_retries_return_the_original_run_without_replacing_resolved_metadata() {
+diff --git a/crates/wickle/tests/support/mod.rs b/crates/wickle/tests/support/mod.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..6259c1cbb6426f9c1199e21484b86ca567caf127
+--- /dev/null
++++ b/crates/wickle/tests/support/mod.rs
+@@ -0,0 +1,216 @@
++//! Shared realistic run fixtures for storage and execution boundary tests.
++
++use serde_json::json;
++use std::collections::BTreeSet;
++use wickle::*;
++
++pub fn id(value: &str) -> Id {
++    Id::new(value).unwrap()
++}
++pub fn scope() -> Scope {
++    Scope {
++        tenant_id: id("tenant"),
++        workspace_id: id("workspace"),
++        user_id: None,
++    }
++}
++
++pub struct Catalog {
++    pub revision: &'static str,
++}
++impl ProfileResolver for Catalog {
++    fn resolve<'a>(
++        &'a self,
++        reference: &'a ComponentRef,
++        _: &'a Scope,
++    ) -> PortFuture<'a, ComponentMetadata> {
++        Box::pin(async move {
++            Ok(ComponentMetadata {
++                reference: ComponentRef {
++                    version: Some(id(self.revision)),
++                    ..reference.clone()
++                },
++                contract_version: 1,
++                manifest_digest: canonical_digest(&json!(self.revision)),
++                config_schema: json!({"type":"object","additionalProperties":false}),
++                dependencies: vec![],
++                capabilities: BTreeSet::new(),
++                required_capabilities: BTreeSet::new(),
++                required_connections: BTreeSet::new(),
++                model_name: None,
++                hook_position: None,
++                exports: vec![],
++            })
++        })
++    }
++}
++
++pub fn event(
++    run: &Id,
++    session: &Id,
++    owner: &Scope,
++    seq: u64,
++    payload: RunEventPayload,
++) -> RunEvent {
++    RunEvent {
++        schema_version: RunEventSchemaVersion::V1,
++        event_id: id(&format!("event-{run}-{seq}")),
++        scope: owner.clone(),
++        run_id: run.clone(),
++        session_id: session.clone(),
++        seq: seq.try_into().unwrap(),
++        timestamp_ms: 1000 + seq as i64,
++        payload,
++    }
++}
++
++pub async fn admission(
++    run: &str,
++    request_id: &str,
++    session: &str,
++    text: &str,
++    revision: &'static str,
++) -> AdmissionInput {
++    let owner = scope();
++    let profile=AgentProfile::from_json(&json!({
++        "schema_version":"wickle.agent-profile.v1","agent_id":"assistant","version":"1.0.0",
++        "name":"Assistant","description":"State contract example","instructions":{"text":"Use evidence"},
++        "model_binding":"primary","tools":[],"skills":[],"connectors":[],"context_policy":{"strategy":"bounded"},"output_contract":{"type":"text"},
++        "limits":{"max_model_calls":8,"max_tool_attempts":4,"max_repair_attempts":1,"max_recovery_attempts":1,"max_elapsed_ms":10000}
++    }).to_string()).unwrap();
++    let profile = ProfileValidator::new(&Catalog { revision })
++        .validate(&profile, &owner)
++        .await
++        .unwrap();
++    let request = RunRequest {
++        request_id: id(request_id),
++        session_id: id(session),
++        input: vec![InputContent::Text { text: text.into() }],
++        trigger: RunTrigger::User {},
++        output_contract: None,
++    };
++    let request_record = ProtectedRecord::new(
++        id(&format!("request-{run}")),
++        1,
++        serde_json::to_value(&request).unwrap(),
++    );
++    let prompt_record = ProtectedRecord::new(
++        id(&format!("prompt-{session}")),
++        1,
++        json!({"instructions":"Use evidence"}),
++    );
++    let snapshot = RunSnapshot {
++        schema_version: RunSnapshotSchemaVersion::V1,
++        run_id: id(run),
++        request_digest: admission_digest(&request, &profile, None),
++        request: request.clone(),
++        scope: owner.clone(),
++        timing: RunTiming::new(0, profile.profile().limits.max_elapsed_ms.get()).unwrap(),
++        reservations: vec![],
++        limits: profile.profile().limits.clone(),
++        profile,
++        status: RunStatus::Running,
++        phase: RunPhase::Admission,
++        model_step_id: None,
++        usage: BudgetUsage::default(),
++        model_ledger: vec![],
++        tool_ledger: vec![],
++        system_inputs: None,
++        wait: None,
++        outcome: None,
++        assembly_ref: None,
++        context_batches: vec![],
++        source_states: vec![],
++        revision: 0,
++        last_event_seq: 1,
++    };
++    let started = event(
++        &snapshot.run_id,
++        &request.session_id,
++        &owner,
++        1,
++        RunEventPayload::RunStarted {
++            request_ref: request_record.reference().clone(),
++            profile_digest: snapshot.profile.profile_digest().clone(),
++        },
++    );
++    let message = Message {
++        message_id: id(&format!("message-{run}")),
++        run_id: snapshot.run_id.clone(),
++        sequence: 1.try_into().unwrap(),
++        role: MessageRole::User,
++        content: vec![ContentBlock::Content {
++            content: InputContent::Text { text: text.into() },
++        }],
++        origin: MessageOrigin::User,
++        visibility: Visibility::UserAndModel,
++    };
++    AdmissionInput {
++        snapshot,
++        prompt_snapshot: prompt_record.reference().clone(),
++        messages: vec![message],
++        events: vec![started],
++        records: vec![request_record, prompt_record],
++        require_durable: false,
++    }
++}
++
++pub fn prepared(snapshot: &RunSnapshot, lease: RunLease, now: i64) -> CommitInput {
++    let mut next = snapshot.clone();
++    next.revision += 1;
++    next.phase = RunPhase::Prepare;
++    CommitInput {
++        expected_revision: snapshot.revision,
++        lease,
++        now_ms: now,
++        snapshot: next,
++        messages: vec![],
++        events: vec![],
++        records: vec![],
++    }
++}
++
++pub fn finished(snapshot: &RunSnapshot, lease: RunLease, now: i64) -> CommitInput {
++    let mut next = snapshot.clone();
++    next.revision += 1;
++    next.last_event_seq += 1;
++    next.status = RunStatus::Succeeded;
++    next.phase = RunPhase::Finish;
++    let outcome = RunOutcome {
++        result: OutcomeResult::Succeeded {
++            completion_basis: CompletionBasis::TurnEnded,
++        },
++        output: vec![InputContent::Text {
++            text: "Completed".into(),
++        }],
++        artifacts: vec![],
++        usage: next.usage.clone(),
++        checkpoint_revision: next.revision,
++        verification: None,
++        unresolved_effects: vec![],
++    };
++    let record = ProtectedRecord::new(
++        id(&format!("outcome-{}", next.run_id)),
++        1,
++        serde_json::to_value(&outcome).unwrap(),
++    );
++    next.outcome = Some(outcome);
++    let finished = event(
++        &next.run_id,
++        &next.request.session_id,
++        &next.scope,
++        next.last_event_seq,
++        RunEventPayload::RunFinished {
++            outcome_ref: record.reference().clone(),
++        },
++    );
++    CommitInput {
++        expected_revision: snapshot.revision,
++        lease,
++        now_ms: now,
++        snapshot: next,
++        messages: vec![],
++        events: vec![finished],
++        records: vec![record],
++    }
++}
+diff --git a/scripts/check-package.py b/scripts/check-package.py
+index f5277e795f3f2434c0654cefd42ff07b5196b03d..c8972687306e3e2c563c0111cd810fd1b64e199d 100644
+--- a/scripts/check-package.py
++++ b/scripts/check-package.py
+@@ -14,7 +14,7 @@ import tempfile
+ ROOT = Path(__file__).resolve().parent.parent
+ # Changes to core dependencies require an explicit boundary review.
+ CORE_DEPENDENCIES = {
+-    "futures-util", "jsonschema", "serde", "serde_json", "sha2", "thiserror",
++    "futures-util", "getrandom", "jsonschema", "serde", "serde_json", "sha2", "thiserror",
+     "tokio", "tokio-util",
+ }
+ 
+diff --git a/tests/support/budget_consumer.rs b/tests/support/budget_consumer.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..584503998804cc34c268555375f2fac956295626
+--- /dev/null
++++ b/tests/support/budget_consumer.rs
+@@ -0,0 +1,266 @@
++use serde_json::json;
++use std::{cell::Cell, collections::BTreeSet, sync::Arc};
++use wickle::*;
++
++fn id(value: &str) -> Id {
++    Id::new(value).expect("example identifier")
++}
++
++struct Catalog;
++impl ProfileResolver for Catalog {
++    fn resolve<'a>(
++        &'a self,
++        reference: &'a ComponentRef,
++        _: &'a Scope,
++    ) -> PortFuture<'a, ComponentMetadata> {
++        Box::pin(async move {
++            Ok(ComponentMetadata {
++                reference: ComponentRef {
++                    version: Some(id("1")),
++                    ..reference.clone()
++                },
++                contract_version: 1,
++                manifest_digest: canonical_digest(&json!("example model binding")),
++                config_schema: json!({"type":"object","additionalProperties":false}),
++                dependencies: vec![],
++                capabilities: BTreeSet::new(),
++                required_capabilities: BTreeSet::new(),
++                required_connections: BTreeSet::new(),
++                model_name: None,
++                hook_position: None,
++                exports: vec![],
++            })
++        })
++    }
++}
++
++fn context(scope: &Scope) -> ExecutionContext {
++    ExecutionContext::new(
++        ExecutionContextData {
++            scope: scope.clone(),
++            principal_ref: id("caller"),
++            capability_grant_ref: id("grant"),
++            trace_context: None,
++            system_inputs: None,
++        },
++        Default::default(),
++    )
++}
++
++#[tokio::main(flavor = "current_thread")]
++async fn main() -> Result<(), Box<dyn std::error::Error>> {
++    let scope = Scope {
++        tenant_id: id("tenant"),
++        workspace_id: id("workspace"),
++        user_id: None,
++    };
++    let profile = AgentProfile::from_json(
++        r#"{
++          "schema_version":"wickle.agent-profile.v1","agent_id":"assistant","version":"1.0.0",
++          "name":"Assistant","description":"Budget example","instructions":{"text":"Use evidence"},
++          "model_binding":"primary","tools":[],"skills":[],"connectors":[],
++          "context_policy":{"strategy":"bounded"},"output_contract":{"type":"text"},
++          "limits":{"max_model_calls":1,"max_tool_attempts":3,"max_repair_attempts":0,
++                    "max_recovery_attempts":1,"max_elapsed_ms":30000}
++        }"#,
++    )?;
++    let profile = ProfileValidator::new(&Catalog)
++        .validate(&profile, &scope)
++        .await?;
++    let request = RunRequest {
++        request_id: id("request"),
++        session_id: id("session"),
++        input: vec![InputContent::Text {
++            text: "Count available records".into(),
++        }],
++        trigger: RunTrigger::User {},
++        output_contract: None,
++    };
++    let request_record =
++        ProtectedRecord::new(id("request-record"), 1, serde_json::to_value(&request)?);
++    let prompt = ProtectedRecord::new(id("prompt"), 1, json!({"text":"Use evidence"}));
++    let clock = Arc::new(SystemClock::new());
++    let started_at = clock.now()?.utc_ms;
++    let run_id = id("run");
++    let snapshot = RunSnapshot {
++        schema_version: RunSnapshotSchemaVersion::V1,
++        run_id: run_id.clone(),
++        request_digest: admission_digest(&request, &profile, None),
++        request: request.clone(),
++        scope: scope.clone(),
++        limits: profile.profile().limits.clone(),
++        profile,
++        status: RunStatus::Running,
++        phase: RunPhase::Admission,
++        model_step_id: None,
++        usage: BudgetUsage::default(),
++        timing: RunTiming::new(started_at, 30000)?,
++        reservations: vec![],
++        model_ledger: vec![],
++        tool_ledger: vec![],
++        system_inputs: None,
++        wait: None,
++        outcome: None,
++        assembly_ref: None,
++        context_batches: vec![],
++        source_states: vec![],
++        revision: 0,
++        last_event_seq: 1,
++    };
++    let started = RunEvent {
++        schema_version: RunEventSchemaVersion::V1,
++        event_id: id("started"),
++        scope: scope.clone(),
++        run_id: run_id.clone(),
++        session_id: request.session_id.clone(),
++        seq: 1.try_into()?,
++        timestamp_ms: started_at,
++        payload: RunEventPayload::RunStarted {
++            request_ref: request_record.reference().clone(),
++            profile_digest: snapshot.profile.profile_digest().clone(),
++        },
++    };
++    let store = Arc::new(MemoryStateStore::new());
++    store
++        .admit(
++            &scope,
++            AdmissionInput {
++                snapshot,
++                prompt_snapshot: prompt.reference().clone(),
++                messages: vec![Message {
++                    message_id: id("user-message"),
++                    run_id: run_id.clone(),
++                    sequence: 1.try_into()?,
++                    role: MessageRole::User,
++                    content: vec![ContentBlock::Content {
++                        content: request.input[0].clone(),
++                    }],
++                    origin: MessageOrigin::User,
++                    visibility: Visibility::UserAndModel,
++                }],
++                events: vec![started],
++                records: vec![request_record, prompt],
++                require_durable: false,
++            },
++        )
++        .await?;
++    let lease = store
++        .acquire_lease(&scope, &run_id, &id("worker"), clock.now()?.utc_ms, 30000)
++        .await?;
++    let execution = context(&scope);
++    let budget = RunBudget::attach(
++        store.clone(),
++        clock.clone(),
++        Arc::new(RandomIdSource),
++        scope.clone(),
++        run_id.clone(),
++        lease.clone(),
++        execution.cancellation.clone(),
++    )
++    .await?;
++    let dispatches = Cell::new(0);
++    let model_attempt = budget
++        .execute(
++            ReservationKind::Model {
++                purpose: ModelPurpose::Agent,
++            },
++            |reservation| {
++                dispatches.set(dispatches.get() + 1);
++                async move { Ok(reservation.attempt_id) }
++            },
++        )
++        .await?;
++    let refused = budget
++        .execute(
++            ReservationKind::Model {
++                purpose: ModelPurpose::Compaction,
++            },
++            |_| {
++                dispatches.set(dispatches.get() + 1);
++                async { Ok(()) }
++            },
++        )
++        .await;
++    assert_eq!(refused.unwrap_err().code, ErrorCode::BudgetExceeded);
++    assert_eq!(dispatches.get(), 1);
++
++    // This example exercises reservation boundaries; a full driver owns policy,
++    // tool schemas, actual provider/tool dispatch, and result settlement.
++    let count = budget
++        .execute(
++            ReservationKind::Tool {
++                call_id: id("count-records"),
++            },
++            |_| {
++                dispatches.set(dispatches.get() + 1);
++                async { Ok(["first", "second"].len()) }
++            },
++        )
++        .await?;
++    assert_eq!(count, 2);
++    assert_eq!(dispatches.get(), 2);
++
++    // Save a reservation without reporting an execution result, then detach.
++    let unsettled = budget
++        .reserve(ReservationKind::Tool {
++            call_id: id("inspect-record"),
++        })
++        .await?;
++    execution.cancellation.cancel();
++    let cancelled = budget
++        .execute(
++            ReservationKind::Tool {
++                call_id: id("cancelled-call"),
++            },
++            |_| {
++                dispatches.set(dispatches.get() + 1);
++                async { Ok(()) }
++            },
++        )
++        .await;
++    assert_eq!(cancelled.unwrap_err().code, ErrorCode::Cancelled);
++    assert_eq!(dispatches.get(), 2);
++    drop(budget);
++
++    let restored = store.load(&scope, &run_id).await?.snapshot;
++    let restored = RunSnapshot::from_json(&serde_json::to_string(&restored)?)?;
++    assert_eq!(restored.usage.model_calls, 1);
++    assert_eq!(restored.usage.tool_attempts, 2);
++    assert_eq!(restored.reservations.len(), 3);
++    assert!(restored.reservations.contains(&unsettled));
++    assert!(
++        restored
++            .reservations
++            .iter()
++            .any(|saved| saved.attempt_id == model_attempt)
++    );
++    let resumed = RunBudget::attach(
++        store.clone(),
++        clock,
++        Arc::new(RandomIdSource),
++        scope.clone(),
++        run_id.clone(),
++        lease,
++        context(&scope).cancellation,
++    )
++    .await?;
++    let before = store.load(&scope, &run_id).await?.snapshot.reservations;
++    assert_eq!(
++        resumed
++            .reserve(ReservationKind::Model {
++                purpose: ModelPurpose::Verification,
++            })
++            .await
++            .unwrap_err()
++            .code,
++        ErrorCode::BudgetExceeded
++    );
++    assert_eq!(
++        store.load(&scope, &run_id).await?.snapshot.reservations,
++        before
++    );
++    println!(
++        "budget consumer: model limit preserved; tool budget independent; cancellation dispatched 0 additional calls; unsettled reservation retained after reattach"
++    );
++    Ok(())
++}
+diff --git a/tests/support/state_consumer.rs b/tests/support/state_consumer.rs
+index 50e0adfab5281c7d6169a3f0880535418c44455e..3143281f2beef0fd5ef1b0d5cdcc1dfaabd268c4 100644
+--- a/tests/support/state_consumer.rs
++++ b/tests/support/state_consumer.rs
+@@ -69,6 +69,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+         request_digest: admission_digest(&request, &profile, None),
+         request: request.clone(),
+         scope: scope.clone(),
++        timing: RunTiming::new(1000, profile.profile().limits.max_elapsed_ms.get()).unwrap(),
++        reservations: vec![],
+         limits: profile.profile().limits.clone(),
+         profile,
+         status: RunStatus::Running,

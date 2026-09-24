@@ -1,0 +1,1219 @@
+diff --git a/README.de.md b/README.de.md
+index 4742f12ee69b9d3f50719c406c19f9c061da2d94..5808d241f3745ef3ead5d30de3ce67f333ea32a9 100644
+--- a/README.de.md
++++ b/README.de.md
+@@ -46,6 +46,8 @@ pub async fn run_once(
+ 
+ `start` liefert ein Ausführungshandle, `outcome` das gespeicherte Ergebnis. `Guarded::ApprovalRequired` erfordert eine Freigabe durch die Anwendung. Das Beispiel nimmt bereits konfigurierte Komponenten entgegen; deren Einrichtung erklärt die Agentenanleitung.
+ 
++Ein Beispiel ohne Modellzugangsdaten startest du im Quellcode-Verzeichnis mit `python3 scripts/check-package.py --consumer agent`. Siehe [Schnellstart](docs/quickstart.md).
++
+ ## Funktionen
+ 
+ - **Getrennte Eingaben:** Das Modell liefert seine Argumente; vertrauenswürdige IDs werden aus Systemeingaben ergänzt.
+@@ -55,6 +57,10 @@ pub async fn run_once(
+ - **Zugriffskontrolle:** Host-Richtlinien und getrennte Organisations- und Arbeitsbereichsgrenzen.
+ - **Kontext und Ausgabe:** Artefakte, Belege, Kontextkomprimierung und Ergebnisvalidierung.
+ 
++- **Schemaanpassung:** Behält die ursprünglichen Eingaberegeln bei und übersetzt Schemas und Argumente für den jeweiligen Anbieter.
++- **Explizite Modelloptionen:** Profile und Run überschreiben die Bindungsvorgaben; die Herkunft jeder Option bleibt gespeichert.
++- **Unterbrechung und Diagnose:** Speichert Anwendungszustand bei wiederherstellbaren Unterbrechungen und zeigt gespeicherte Schritte mit maskierten sensiblen Werten.
++
+ ## Modellanbieter und Adapter
+ 
+ Diese Dienste lassen sich über optionale Crates anbinden. Modellversionen, Deployments, API-Verträge und Optionen werden explizit konfiguriert. Die Anleitungen beschreiben unterstützte Operationen und Einschränkungen.
+@@ -73,6 +79,12 @@ Verwende `wickle-state-sqlite` für lokale Persistenz und `wickle-adapter-runtim
+ 
+ ## Dokumentation
+ 
++- [Schnellstart](docs/quickstart.md)
++- [Migration zu v0.2.0](docs/migration-v0.2.md)
++- [Anbieterspezifische Werkzeugverträge](docs/provider-tool-schemas.md)
++- [Unterbrechungsrichtlinien](docs/interruption-policy.md)
++- [Diagnose gespeicherter Schritte](docs/step-inspection.md)
++
+ - [Installation](docs/installation.md)
+ - [Agenten, Anfragen und Ergebnisse](docs/agents.md)
+ - [Werkzeuge und Systemeingaben](docs/tool-inputs.md)
+diff --git a/README.es.md b/README.es.md
+index c67ea2ee3a7015afc7e0a8a253c81b09406b7617..bd31a9b336a3ee0940dd65f99f1703be24bc8b2f 100644
+--- a/README.es.md
++++ b/README.es.md
+@@ -46,6 +46,8 @@ pub async fn run_once(
+ 
+ `start` devuelve un identificador de ejecución y `outcome` su resultado guardado. `Guarded::ApprovalRequired` indica que la aplicación debe obtener aprobación. El ejemplo recibe componentes previamente configurados; consulta la guía de agentes para prepararlos.
+ 
++Prueba un ejemplo sin credenciales de modelos con `python3 scripts/check-package.py --consumer agent` desde una copia del código fuente. Consulta el [inicio rápido](docs/quickstart.md).
++
+ ## Características
+ 
+ - **Entradas separadas:** el modelo aporta sus argumentos; los identificadores de confianza se inyectan desde entradas del sistema.
+@@ -55,6 +57,10 @@ pub async fn run_once(
+ - **Autorización:** políticas del Host y ámbitos de organización y espacio de trabajo.
+ - **Contexto y resultados:** artefactos, evidencias, compresión y validación de salidas.
+ 
++- **Adaptación de esquemas:** conserva las restricciones originales al traducir esquemas y argumentos para cada proveedor.
++- **Opciones explícitas:** Profile y Run reemplazan los valores de la vinculación; el origen de cada opción queda guardado.
++- **Interrupción e inspección:** adjunta estado de la aplicación a pausas recuperables e inspecciona pasos guardados con datos sensibles ocultos.
++
+ ## Proveedores y adaptadores
+ 
+ Conecta estos servicios mediante crates opcionales. Configura explícitamente versiones de modelo, despliegues, contratos API y opciones. Consulta las guías para conocer operaciones y limitaciones.
+@@ -73,6 +79,12 @@ Usa `wickle-state-sqlite` para persistencia local y `wickle-adapter-runtime` par
+ 
+ ## Documentación
+ 
++- [Inicio rápido](docs/quickstart.md)
++- [Migrar a v0.2.0](docs/migration-v0.2.md)
++- [Contratos de herramientas por proveedor](docs/provider-tool-schemas.md)
++- [Políticas de interrupción](docs/interruption-policy.md)
++- [Inspección de pasos guardados](docs/step-inspection.md)
++
+ - [Instalación](docs/installation.md)
+ - [Agentes, solicitudes y resultados](docs/agents.md)
+ - [Herramientas y entradas del sistema](docs/tool-inputs.md)
+diff --git a/README.fr.md b/README.fr.md
+index 6ea6efff8477c0d66fa13df1e95f3b6ea308ecdd..b9b5688a199f5a3c17e89301f0c2d23d59bc4c9f 100644
+--- a/README.fr.md
++++ b/README.fr.md
+@@ -46,6 +46,8 @@ pub async fn run_once(
+ 
+ `start` renvoie un handle d’exécution et `outcome` le résultat enregistré. `Guarded::ApprovalRequired` demande une approbation dans l’application. Les composants de cet exemple sont configurés par l’application ; consultez le guide des agents.
+ 
++Essayez un exemple sans identifiants de modèle avec `python3 scripts/check-package.py --consumer agent` depuis une copie des sources. Consultez le [démarrage rapide](docs/quickstart.md).
++
+ ## Fonctionnalités
+ 
+ - **Entrées séparées :** seuls les arguments du modèle sont exposés ; les identifiants fiables proviennent des entrées système.
+@@ -55,6 +57,10 @@ pub async fn run_once(
+ - **Autorisations :** politiques du Host et isolation des organisations et espaces de travail.
+ - **Contexte et sorties :** artefacts, preuves, compression et validation des résultats.
+ 
++- **Adaptation des schémas :** conserve les contraintes originales lors de la traduction des schémas et arguments pour chaque fournisseur.
++- **Options explicites :** Profile puis Run remplacent les valeurs de la liaison ; l’origine de chaque option est conservée.
++- **Interruption et inspection :** associe un état applicatif aux arrêts récupérables et permet d’inspecter les étapes enregistrées en masquant les valeurs sensibles.
++
+ ## Modèles et adaptateurs
+ 
+ Connectez ces services avec des crates facultatifs. Les versions, déploiements, contrats API et options restent explicites. Consultez les guides pour les opérations disponibles et leurs limites.
+@@ -73,6 +79,12 @@ Utilisez `wickle-state-sqlite` pour la persistance locale et `wickle-adapter-run
+ 
+ ## Documentation
+ 
++- [Démarrage rapide](docs/quickstart.md)
++- [Migration vers v0.2.0](docs/migration-v0.2.md)
++- [Contrats d’outils par fournisseur](docs/provider-tool-schemas.md)
++- [Politiques d’interruption](docs/interruption-policy.md)
++- [Inspection des étapes enregistrées](docs/step-inspection.md)
++
+ - [Installation](docs/installation.md)
+ - [Agents, requêtes et résultats](docs/agents.md)
+ - [Outils et entrées système](docs/tool-inputs.md)
+diff --git a/README.ja.md b/README.ja.md
+index 9dd85e52245eadff9edd2d69cf93a3897b04cd0e..c10a3d518a25ed5cff6d55e7530656fc0a19d258 100644
+--- a/README.ja.md
++++ b/README.ja.md
+@@ -46,6 +46,8 @@ pub async fn run_once(
+ 
+ `start` は実行ハンドル、`outcome` は保存済みの結果を返します。`Guarded::ApprovalRequired` は承認が必要な状態です。例の構成要素はアプリケーション側で用意します。詳細は実行ガイドを参照してください。
+ 
++モデルの認証情報なしで試すには、ソースを取得して `python3 scripts/check-package.py --consumer agent` を実行します。手順は[クイックスタート](docs/quickstart.md)を参照してください。
++
+ ## 主な機能
+ 
+ - **ツール入力の分離:** モデル用引数だけを公開し、workspace ID などはシステム入力から注入します。
+@@ -55,6 +57,10 @@ pub async fn run_once(
+ - **アクセス制御:** Host ポリシーで組織とワークスペースの範囲を分離します。
+ - **文脈と出力:** アーティファクトと根拠、文脈圧縮、構造化出力、verifier に対応します。
+ 
++- **ツールスキーマの変換:** 元の入力制約を保ち、プロバイダーごとのスキーマと引数表現に変換します。
++- **明示的なモデルオプション:** バインディングの既定値を Profile、Run の順に上書きし、設定の由来を保存します。
++- **中断と診断:** 復旧可能な中断にアプリ状態を記録し、機密値を伏せた保存済みステップを確認できます。
++
+ ## モデルとアダプター
+ 
+ 以下のサービスを個別の crate で接続できます。モデルバージョン、デプロイ名、API 契約、オプションを明示します。対応操作と制限は各ガイドを確認してください。
+@@ -73,6 +79,12 @@ pub async fn run_once(
+ 
+ ## ドキュメント
+ 
++- [クイックスタート](docs/quickstart.md)
++- [v0.2.0 への移行](docs/migration-v0.2.md)
++- [プロバイダー別ツール契約](docs/provider-tool-schemas.md)
++- [中断ポリシー](docs/interruption-policy.md)
++- [保存済みステップの診断](docs/step-inspection.md)
++
+ - [依存関係の設定](docs/installation.md)
+ - [バインディング・リクエスト・結果](docs/agents.md)
+ - [ツールとシステム入力](docs/tool-inputs.md)
+diff --git a/README.ko.md b/README.ko.md
+index 7a69f07c5bdbcd1c0562712a50572910e4fc1a58..c75206c6b2ae799a032ed4930f4ec36c80d278b9 100644
+--- a/README.ko.md
++++ b/README.ko.md
+@@ -46,6 +46,8 @@ pub async fn run_once(
+ 
+ `start`는 실행 핸들을 반환하고, `outcome`은 저장된 결과를 반환합니다. `Guarded::ApprovalRequired`이면 애플리케이션에서 승인을 받아야 합니다. 이 예제의 구성요소는 호출하는 애플리케이션에서 준비하며, 바인딩 설정은 에이전트 실행 가이드를 참고하세요.
+ 
++모델 자격증명 없이 예제를 실행하려면 소스 체크아웃에서 `python3 scripts/check-package.py --consumer agent`를 실행하세요. [빠른 시작](docs/quickstart.md)에 전체 절차가 있습니다.
++
+ ## 주요 기능
+ 
+ - **도구 입력 분리:** 모델이 작성할 인자만 노출하고, workspace ID·user ID 등 신뢰할 값은 등록된 시스템 입력으로 주입합니다.
+@@ -55,6 +57,10 @@ pub async fn run_once(
+ - **범위별 접근 제어:** Host 정책과 바인딩으로 조직·워크스페이스의 접근 범위를 구분합니다.
+ - **문맥과 결과 처리:** 원본 artifact와 근거를 유지하고 문맥 압축, 구조화 출력 검사, verifier 기반 검증을 수행합니다.
+ 
++- **도구 스키마 변환:** 원래 입력 제약을 유지하면서 공급자별 스키마와 인자 표현으로 변환합니다.
++- **명시적 모델 옵션:** 바인딩 기본값에 Profile·Run 설정을 순서대로 적용하고 옵션의 출처를 저장합니다.
++- **중단과 진단:** 복구 가능한 중단에 앱 상태를 기록하고, 민감한 값을 가린 저장 단계 진단을 조회합니다.
++
+ ## 모델 제공자와 어댑터
+ 
+ 다음 서비스를 선택형 crate로 연결할 수 있습니다. 모델 버전, 배포 이름, API 계약, 제공자별 옵션을 명시적으로 설정합니다. 지원 작업과 모델별 제약은 제공자 가이드를 확인하세요.
+@@ -73,6 +79,12 @@ pub async fn run_once(
+ 
+ ## 사용 문서
+ 
++- [빠른 시작](docs/quickstart.md)
++- [v0.2.0 이관](docs/migration-v0.2.md)
++- [공급자별 도구 계약](docs/provider-tool-schemas.md)
++- [중단 정책](docs/interruption-policy.md)
++- [저장 단계 진단](docs/step-inspection.md)
++
+ - [설치와 의존성 구성](docs/installation.md)
+ - [에이전트 바인딩·요청·결과](docs/agents.md)
+ - [도구와 시스템 입력](docs/tool-inputs.md)
+diff --git a/README.md b/README.md
+index 2eafc056d84f947c0ddeb499766d54b609da8a44..687a8c157695ae194452b4bea62e4322ab503a01 100644
+--- a/README.md
++++ b/README.md
+@@ -46,6 +46,8 @@ pub async fn run_once(
+ 
+ `start` returns a handle to the Run; `outcome` returns its saved result. `Guarded::ApprovalRequired` means the application must obtain approval. The example accepts components configured by your application; see the agent guide for binding setup.
+ 
++Run an example without model credentials: `python3 scripts/check-package.py --consumer agent` from a source checkout. See the [quickstart](docs/quickstart.md).
++
+ ## Features
+ 
+ - **Tool input ownership:** expose only model-owned arguments; inject workspace IDs, user IDs and other trusted values through registered system inputs.
+@@ -55,6 +57,10 @@ pub async fn run_once(
+ - **Scoped access:** separate organizations and workspaces through Host policy and scoped bindings.
+ - **Context and output:** preserve artifacts and evidence, compact context, and validate structured outputs or verifier criteria.
+ 
++- **Tool schema adaptation:** preserve canonical constraints while compiling schemas and argument encodings for each provider.
++- **Explicit model options:** override binding defaults with Profile and Run settings, with stored option provenance.
++- **Interruption and inspection:** attach application state to recoverable stops and inspect saved steps with sensitive fields redacted.
++
+ ## Model providers and adapters
+ 
+ Optional crates connect the core to the following services. Model versions, deployment names, API contracts and provider options remain explicit. Consult the provider guide for supported operations and model-specific limitations.
+@@ -73,6 +79,12 @@ Use `wickle-state-sqlite` for local persistence and `wickle-adapter-runtime` to
+ 
+ ## Documentation
+ 
++- [Quickstart](docs/quickstart.md)
++- [Migrate to v0.2.0](docs/migration-v0.2.md)
++- [Provider Tool contracts](docs/provider-tool-schemas.md)
++- [Interruption policies](docs/interruption-policy.md)
++- [Saved-step inspection](docs/step-inspection.md)
++
+ - [Install and configure dependencies](docs/installation.md)
+ - [Agent bindings, requests and results](docs/agents.md)
+ - [Tools and system inputs](docs/tool-inputs.md)
+diff --git a/README.ru.md b/README.ru.md
+index 921a302fa9844b6e03fffc989b7b68b33a1661ce..0f264275c9495fcf6beed32b71e52ae2c5363d74 100644
+--- a/README.ru.md
++++ b/README.ru.md
+@@ -46,6 +46,8 @@ pub async fn run_once(
+ 
+ `start` возвращает дескриптор выполнения, а `outcome` — сохранённый результат. `Guarded::ApprovalRequired` означает, что приложение должно получить одобрение. Пример принимает готовые компоненты; настройка описана в руководстве по агентам.
+ 
++Запустите пример без ключей моделей из каталога исходников: `python3 scripts/check-package.py --consumer agent`. Подробности в [быстром старте](docs/quickstart.md).
++
+ ## Возможности
+ 
+ - **Разделение входов:** модель задаёт только свои аргументы; доверенные ID поступают из системных входов.
+@@ -55,6 +57,10 @@ pub async fn run_once(
+ - **Контроль доступа:** политики Host и изоляция организаций и рабочих пространств.
+ - **Контекст и результаты:** артефакты, доказательства, сжатие контекста и проверка вывода.
+ 
++- **Адаптация схем:** сохраняет исходные ограничения при преобразовании схем и аргументов для каждого провайдера.
++- **Явные параметры модели:** Profile и Run переопределяют настройки привязки; источник каждого параметра сохраняется.
++- **Прерывание и диагностика:** сохраняет состояние приложения при восстанавливаемой остановке и позволяет просматривать сохранённые шаги со скрытыми конфиденциальными значениями.
++
+ ## Модели и адаптеры
+ 
+ Эти сервисы подключаются отдельными crate. Версии моделей, развёртывания, API-контракты и параметры задаются явно. Поддерживаемые операции и ограничения описаны в руководствах.
+@@ -73,6 +79,12 @@ pub async fn run_once(
+ 
+ ## Документация
+ 
++- [Быстрый старт](docs/quickstart.md)
++- [Переход на v0.2.0](docs/migration-v0.2.md)
++- [Контракты инструментов провайдеров](docs/provider-tool-schemas.md)
++- [Политики прерывания](docs/interruption-policy.md)
++- [Диагностика сохранённых шагов](docs/step-inspection.md)
++
+ - [Установка](docs/installation.md)
+ - [Агенты, запросы и результаты](docs/agents.md)
+ - [Инструменты и системные входы](docs/tool-inputs.md)
+diff --git a/README.zh-CN.md b/README.zh-CN.md
+index 56506759690ed850cf505ae938ec6042c772e0ec..0c292c67fb2177a699c2534cb22e999b8542847a 100644
+--- a/README.zh-CN.md
++++ b/README.zh-CN.md
+@@ -46,6 +46,8 @@ pub async fn run_once(
+ 
+ `start` 返回执行句柄，`outcome` 返回已保存的结果。`Guarded::ApprovalRequired` 表示应用需要取得批准。示例中的组件由应用预先配置，详见运行指南。
+ 
++无需模型凭据即可运行示例：在源码目录执行 `python3 scripts/check-package.py --consumer agent`。完整步骤见[快速开始](docs/quickstart.md)。
++
+ ## 主要功能
+ 
+ - **工具输入分离：** 仅向模型公开其负责的参数，工作区 ID 等可信值由系统输入注入。
+@@ -55,6 +57,10 @@ pub async fn run_once(
+ - **访问范围：** 通过 Host 策略隔离组织与工作区。
+ - **上下文与输出：** 管理原始文件和证据，支持上下文压缩、结构化输出与 verifier。
+ 
++- **工具模式转换：** 保留原始输入约束，并转换为各提供者支持的模式和参数表示。
++- **显式模型选项：** 按绑定默认值、Profile、Run 的顺序覆盖设置，并保存选项来源。
++- **中断与诊断：** 为可恢复的中断记录应用状态，查看已保存步骤时隐藏敏感值。
++
+ ## 模型和适配器
+ 
+ 可使用独立 crate 接入以下服务。明确配置模型版本、部署名称、API 契约及提供者选项；具体支持范围与限制见相关指南。
+@@ -73,6 +79,12 @@ pub async fn run_once(
+ 
+ ## 使用文档
+ 
++- [快速开始](docs/quickstart.md)
++- [迁移到 v0.2.0](docs/migration-v0.2.md)
++- [提供者工具契约](docs/provider-tool-schemas.md)
++- [中断策略](docs/interruption-policy.md)
++- [已保存步骤诊断](docs/step-inspection.md)
++
+ - [安装依赖](docs/installation.md)
+ - [绑定、请求和结果](docs/agents.md)
+ - [工具与系统输入](docs/tool-inputs.md)
+diff --git a/docs/agents.md b/docs/agents.md
+index 9ea33764237a8b8e885727d11562bfcd0bac294c..938f66097a35e7579b9ab09eb001b7384494c1fe 100644
+--- a/docs/agents.md
++++ b/docs/agents.md
+@@ -1,5 +1,8 @@
+ # Run an agent
+ 
++For a runnable Host, begin with [the quickstart](quickstart.md). Existing
++applications can follow [the v0.2.0 migration guide](migration-v0.2.md).
++
+ `create_agent` builds a scope-bound facade from an `AgentProfile` and existing
+ Host components. The runtime executes text requests through admission, context
+ preparation, model routing, and serial tool calls until a turn ends or execution
+@@ -388,3 +391,16 @@ The submitted snapshot records caller options and Host-provided system inputs,
+ not newly resolved catalog defaults. Current effective configuration remains in
+ the separate execution snapshot. Older records without submitted-input evidence
+ use their historical comparison path rather than fabricated new metadata.
++
++## Saved execution configuration
++
++The selected model port compiles exposed Tool schemas into a saved
++[provider contract](provider-tool-schemas.md). The core restores proposed
++arguments before defaults, validation and system binding. Binding, Profile and
++Run options follow the [documented precedence](model-routing.md); auxiliary
++purposes keep separate configuration. Use [saved-step inspection](step-inspection.md)
++to read that evidence without repeating execution.
++
++An [interruption policy](interruption-policy.md) can attach validated application
++state to a recoverable stop. Use [durable controls](run-controls.md) for command
++receipts, interval-specific outcomes and read-only deadline observation.
+diff --git a/docs/compatibility.md b/docs/compatibility.md
+index 7319ca490fbb7c7a3e9668b1dcc72de7874124c7..d686b43f61f438a99b689cf3bcba7c977ca3d311 100644
+--- a/docs/compatibility.md
++++ b/docs/compatibility.md
+@@ -26,7 +26,8 @@ A successful database open or JSON decode is not a successful recovery test. Ver
+ 
+ ## Upgrade support
+ 
+-No automatic migration to a future runtime format is promised by this guide. Use the migration and compatibility instructions shipped with the target release. Where an active execution cannot be migrated safely, stop accepting new work, resolve or finish active executions with the original runtime, and then upgrade using a backed-up store.
++No automatic migration to a future runtime format is promised by this guide. Use the migration and compatibility instructions shipped with the target release.
++For this contract change, follow [the v0.2.0 migration guide](migration-v0.2.md). Where an active execution cannot be migrated safely, stop accepting new work, resolve or finish active executions with the original runtime, and then upgrade using a backed-up store.
+ 
+ Do not start an older runtime against a store that has written a newer format unless downgrade support is explicitly documented. Restoring a database backup does not undo external tool effects; reconcile those effects before resuming restored executions.
+ 
+diff --git a/docs/contracts.md b/docs/contracts.md
+index afc5d4651bb568db2e008820352dc8f7d4e9edbb..2fe607a1072e2d6fe9b59f12c7054359b96b5fea 100644
+--- a/docs/contracts.md
++++ b/docs/contracts.md
+@@ -3,7 +3,8 @@
+ Wickle provides profile validation, scoped state and policy contracts, and a
+ bounded model-call boundary. The [agent runtime](agents.md) connects these
+ contracts to Agent and RunHandle, including serial execution of registered tools.
+-Dynamic runtime component assembly is still being implemented.
++Scoped runtime component assembly is available through the optional
++[adapter runtime](adapters.md).
+ 
+ `AgentProfile` contains data and registered references. A `ProfileResolver` is
+ Host code that supplies approved metadata for a scope. `ProfileValidator` checks
+@@ -93,19 +94,23 @@ adapter version, and Host connection revision. Credentials remain in the adapter
+ Host binding. `ModelRequest` contains an explicit model projection and finite
+ input/response limits; execution context and system tool inputs are not copied in.
+ 
+-`RunRequest.model_options` pins Host-authorized, request-specific options at
+-admission. `RouteRequest.options` carries them as candidate constraints, and
+-`ProjectionInput.options` becomes `ModelRequest.options` unchanged. Empty maps
++`RunRequest.model_options` pins Host-authorized, request-specific overrides at
++admission. Binding defaults are overridden by Profile and then Run options;
++`RouteRequest.options` carries the logical overrides as candidate constraints.
++The validated effective configuration becomes `ModelRequest.options`, with its
++origins saved in the prepared step. Verification and compaction use separate
++purpose-specific options. Empty maps
+ remain omitted in saved JSON. Model options are included in request digests and
+ byte limits; same-route retries preserve them. See the [context guide](context.md)
+ for catalog validation and the explicit adapter-mapping boundary.
+ 
+ `collect_model_response` accepts complete text and tool proposals only after the
+ whole stream passes protocol validation. Missing completion, malformed or ambiguous
+-JSON, duplicate call IDs, contradictory finish reasons, and exceeded limits return
++protocol envelopes, duplicate call IDs, contradictory finish reasons, and exceeded limits return
+ `ModelProtocolError`. Failed responses expose bounded partial text, with no partial
+ tool plan. Unknown tools and schema-invalid arguments remain explicit rejection
+-states in `ProposedToolCall`; these proposals are not authorized executions.
++states in `ProposedToolCall`; complete invalid argument JSON is preserved for
++bounded repair. These proposals are not authorized executions.
+ 
+ `OpaqueContinuation` is tied to the exact route digest, including model and
+ connection versions. A different route must receive a valid fresh projection.
+diff --git a/docs/installation.md b/docs/installation.md
+index 96697a020473d4a2df1b2cf65b26f99b66272592..aaa9a52a076472b9ccda9b35327e6f6b880e54d9 100644
+--- a/docs/installation.md
++++ b/docs/installation.md
+@@ -24,7 +24,8 @@ server process is required. See [running an agent](agents.md). Credentials,
+ connection permissions and configuration loading belong to your Host; the library
+ does not load `.env` files.
+ 
+-To verify a source checkout, run:
++Start with [the runnable Host tutorial](quickstart.md) to select one packaged
++consumer. To verify a source checkout in full, run:
+ 
+ ```sh
+ cargo test --workspace --locked
+diff --git a/docs/interruption-policy.md b/docs/interruption-policy.md
+index e5adc2fea8bb834672969f3650148a3c6bd96bda..469ee9e2f3025f8f71221c9612d80a1ebcefff91 100644
+--- a/docs/interruption-policy.md
++++ b/docs/interruption-policy.md
+@@ -67,3 +67,21 @@ execution; recovery depends on stored checkpoints and lease fencing.
+ Timeouts require cooperative asynchronous implementations. Blocking callbacks
+ cannot be forcibly stopped by a Rust future timeout. Isolate such extensions
+ in a Host-managed process when hard termination is required.
++
++## Runnable policy and recovery example
++
++The [agent consumer](../tests/support/agent_consumer.rs) supplies a
++`MaintenancePolicy` with a pinned identity, configuration and application-state
++schema. On `info.interruption.cause == HostShutdown`, it returns `Pause` with
++an `operations` state; other causes use the protected default. The state records
++application metadata and does not replace the core status.
++
++```sh
++python3 scripts/check-package.py --consumer agent
++```
++
++After the stop, the example reads the authorized snapshot, obtains its
++`recovery_record`, and submits a `ResumeAction::Recover` with a new stable command
++ID. The model becomes available again, the new handle succeeds, the old handle
++retains its interrupted outcome, and repeating the command performs no new work.
++The example uses synthetic model ports and real SQLite, not a live provider.
+diff --git a/docs/migration-v0.2.md b/docs/migration-v0.2.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..b6a24a3a5483c36679d1719059558b928921ea13
+--- /dev/null
++++ b/docs/migration-v0.2.md
+@@ -0,0 +1,98 @@
++# Migrate to v0.2.0
++
++Version 0.2 changes Rust contracts and adds execution history. Rebuild the Host
++and its custom ports; do not replace the library binary while old workers still
++own active executions. The library release, JSON format identifiers and provider
++model versions are separate. A v0.2 library still uses several `wickle.*.v1` data
++formats; do not rename those markers.
++
++## Prepare existing data
++
++1. Stop accepting new work in your Host, including scheduled submissions.
++2. Finish or resolve legacy nonterminal Runs with the original runtime. This
++   includes approval/input waits and unknown external effects. Do not rewrite
++   them as successful or assume an unconfirmed write did not occur.
++3. Stop the old workers and create a consistent database backup. With the SQLite
++   CLI, for example:
++
++   ```sh
++   sqlite3 state.sqlite3 ".backup state-before-v0.2.0.sqlite3"
++   ```
++
++   Use SQLite's [backup facilities](https://sqlite.org/backup.html) or
++   [CLI backup command](https://sqlite.org/cli.html); copying only a live main
++   database file can omit WAL data. Keep the backup outside the application’s
++   writable working data.
++4. Upgrade all Wickle crates together and build your custom ports against the
++   new types. Exercise the application against a backup copy first.
++5. Read and compare stored terminal outcomes and event histories before accepting
++   new requests. Confirm that new requests, waits, recovery and external effect
++   reconciliation work in your own Host.
++
++Legacy terminal records remain readable without rewriting them. The first
++successful new admission can write a `wickle.state-store.v2` scope checkpoint in
++one transaction, retaining the original terminal records and marking legacy Run
++IDs. Merely opening or reading the database does not upgrade a checkpoint.
++
++Legacy active records lack the ownership/command history required by the new
++runtime. `execution.legacy_drain_required` prevents new admission into such a
++scope; `execution.legacy_checkpoint` rejects execution-history access. There is
++no automatic active-run migration that invents actors, segments or receipts.
++See [SQLite storage](sqlite-state-store.md).
++
++Do not downgrade a store after it has written the newer format. Restore a
++compatible backup if you need to return to the old runtime, and reconcile any
++external effects that occurred after that backup. A database restore does not
++undo those effects.
++
++## Update Rust integrations
++
++| Integration | Changes to account for |
++| --- | --- |
++| `AgentBindings` | Supply `interruption_policy: None` or a versioned `InterruptionPolicyBinding`. Custom state requires `AppStateSchema`. |
++| Profile and requests | Configure `model_options` explicitly where needed. `RunRequest.max_output_tokens` is optional; runtime and model caps still apply. |
++| Model bindings | Provide `default_options`; effective options use Binding → Profile → Run precedence. Verification and compaction use their own purpose configuration. |
++| Status/outcome matches | Handle recoverable `Interrupted` and its `AppState` separately from terminal cancellation, failure and exhaustion. |
++| Handles and commands | A handle identifies an execution segment. Resume returns a new interval; an older handle's saved outcome does not change. Use stable command IDs. |
++| Custom stores | Implement `ExecutionTransactions` atomically with checkpoints, events, command acceptance and lease ownership. Do not emulate it with unrelated reads/writes. |
++| Admission/commit DTOs | Supply original principal, grant and submitted snapshot evidence; preserve control-command settlement and segment records. Compiler errors identify the new required fields. |
++| Custom model ports | Return a pure versioned `ProviderToolSchemaCompiler` when native schema pass-through is insufficient. Keep transport retries disabled. |
++| Minimal Run views | `RunView.deadline_expired` is read-only. Low-level `PolicyGate::run_view` now takes a `Clock`; `Agent::get_run` supplies its configured clock. |
++| Direct Gemini/Vertex codecs | `encode_request` and `encode_vertex_request` return JSON bytes. Send them as the HTTP body; do not JSON-serialize the byte vector again. |
++
++Run `cargo check` and your application's behavioral tests after updating struct
++literals, exhaustive enum matches and custom trait implementations. The package
++examples show working public-interface composition:
++
++```sh
++python3 scripts/check-package.py --consumer agent
++python3 scripts/check-package.py --consumer resume
++python3 scripts/check-package.py --consumer execution_contract
++```
++
++## Preserve pinned contracts
++
++`RequestSnapshot` keeps original submitted JSON and its canonicalization version.
++Compare a retransmission using that saved version before resolving today's
++configuration. Do not recalculate historical digests with a new encoder or
++reconstruct number spellings already lost by an older serializer.
++
++Prepared steps retain resolved options, Tool sets, provider schema projections,
++decoding plans and context identities. Retry uses that preparation with a new
++physical-attempt reservation; an authorized route change creates a new projection.
++Current permissions still apply to pinned data and tools.
++
++Provider Tool contract format v2 explains only the encodings actually in use.
++Saved v1 contracts restore their exact original guidance, digest and codec.
++OpenAI/Azure compiler revision 2 bounds reference expansion; a saved compiler-1
++contract is decoded from its stored representation rather than recompiled.
++Unknown contract or assembler formats are rejected instead of silently upgraded.
++
++Keep system values, opaque model continuation and protected records out of public
++logs. Use [inspect_step](step-inspection.md) for redacted stored evidence; a
++reservation does not prove that a model request reached the provider.
++
++Before rollout, run the complete package check without `--consumer` and verify
++your own storage, authorization and effect adapters. Local provider fixtures and
++[observed live smoke checks](model-support.md) have different scopes; neither
++promotes every account/model combination to supported production use.
+diff --git a/docs/model-providers.md b/docs/model-providers.md
+index cb642c381db24ca293d391565e633bb9fda835ab..62350dd39a26f93a5464aa94011a15f7a43e298b 100644
+--- a/docs/model-providers.md
++++ b/docs/model-providers.md
+@@ -26,7 +26,7 @@ The Host controls configuration and credential refresh. [Environment examples](p
+ 
+ Shared encoding does not imply identical service features. OpenAI/Azure use the original Responses mode; xAI adds separate reasoning identity and usage handling. Anthropic/Bedrock share Messages content while authentication, framing and metadata differ. Gemini/Vertex share content and SSE handling while their function schemas and output formats differ.
+ 
+-For example, direct Gemini API v1 cannot represent closed Tool input objects in OpenAPI parameters; its v1beta JSON Schema path can. Vertex v1 supports JSON Schema function declarations. Mantle Messages rejects native JSON-schema output. Bedrock inference profile identity is distinct from the underlying model release and request origin region.
++For example, direct Gemini API v1 cannot express object closure in OpenAPI parameters. Its compiler preserves that rule in canonical context and core validation; v1beta can also express it in its native JSON Schema declaration. Vertex v1 supports JSON Schema function declarations. Mantle Messages rejects native JSON-schema output. Bedrock inference profile identity is distinct from the underlying model release and request origin region.
+ 
+ All adapters enforce scope/target/API matching, finite deadlines, bounded streams and no hidden transport retries. Provider-native tools, implicit server conversation state and automatic truncation are not substitutes for the core loop. Consult each guide for supported options and explicit limitations.
+ 
+@@ -37,3 +37,7 @@ The independent package check runs each provider's HTTP/SSE consumer and a commo
+ These checks establish library and transport-contract behavior. They do not establish every model version's live availability, account permissions or production support. Actual model/account verification and support promotion require separate evidence; missing metadata remains unknown.
+ 
+ See the [model-version evidence matrix](model-support.md) for selected release identities and the distinction between local contract checks and live smoke results.
++
++Tool schema compilation and saved argument decoding are described in
++[provider Tool contracts](provider-tool-schemas.md). Unsupported schema keywords
++are retained as canonical constraints rather than causing a Tool to disappear.
+diff --git a/docs/model-support.md b/docs/model-support.md
+index b9a77181873392a00d5b242e654bdf5c68e538c0..45d61d996db0fc9396037e711aa51e590f9328ae 100644
+--- a/docs/model-support.md
++++ b/docs/model-support.md
+@@ -18,21 +18,49 @@ The following identities are exercised by the provider tests. Every row has loca
+ 
+ | Provider path | Model IDs | API contract exercised by the two-release check | Target scope of fixtures | Evidence level |
+ | --- | --- | --- | --- | --- |
+-| OpenAI | `gpt-6-astra`, `gpt-5.6-sol` | Responses `v1` | Public-API shape; no regional availability claim | Astra: live smoke below; Sol: `contract_tested` |
+-| Azure OpenAI | `gpt-6-astra`, `gpt-5.6-sol` | Responses `v1` | Two separate deployment selectors; declared model revisions `2026-09-03` and `2026-07-09`; live region/deployment access unverified | `contract_tested` |
+-| Anthropic | `claude-opus-5`, `claude-opus-4-8` | Messages `2023-06-01` | Direct-API shape; no regional availability claim | `contract_tested` |
++| OpenAI | `gpt-6-astra`, `gpt-5.6-sol` | Responses `v1` | Public-API shape; no regional availability claim | Astra: observed smoke below; Sol: local only |
++| Azure OpenAI | `gpt-6-astra`, `gpt-5.6-sol` | Responses `v1` | Two deployment selectors with fixture revisions `2026-09-03` and `2026-07-09` | Astra: observed deployment smoke; Sol: local only |
++| Anthropic | `claude-opus-5`, `claude-opus-4-8` | Messages `2023-06-01` | Direct-API shape; no regional availability claim | Opus 5: observed smoke; Opus 4.8: local only |
+ | AWS Bedrock | `anthropic.claude-opus-5`, `anthropic.claude-opus-4-8` | Native Messages `2023-06-01` | Runtime and Mantle; fixture origin region `us-east-1`, not verified inference residency or access | `contract_tested` |
+-| Gemini API | `gemini-3.8-flash`, `gemini-3.7-flash` | `stream_generate_content` / `v1beta` | AI Studio API shape; no regional availability claim | `contract_tested` |
++| Gemini API | `gemini-3.8-flash`, `gemini-3.7-flash` | `stream_generate_content` / `v1beta` | Two-release fixture uses v1beta; 3.8 additionally exercised through v1 | 3.8: observed v1/v1beta smokes; 3.7: local only |
+ | Vertex AI | `gemini-3.8-flash`, `gemini-3.7-flash` | `stream_generate_content` / `v1` | `global` with a fixture project; account availability unverified | `contract_tested` |
+-| xAI | `grok-4.6`, `grok-4.5` | Responses `v1` | Public-API shape; cluster availability unverified | `contract_tested` |
++| xAI | `grok-4.6`, `grok-4.5` | Responses `v1` | Public-API shape; cluster availability is configuration-specific | 4.6: observed smoke; 4.5: local only |
+ 
+ Model identifiers and platform distinctions were checked against the official [OpenAI Astra](https://developers.openai.com/api/docs/models/gpt-6-astra) and [Sol](https://developers.openai.com/api/docs/models/gpt-5.6-sol) pages, [Azure model catalog](https://learn.microsoft.com/en-us/azure/foundry/foundry-models/concepts/models-sold-directly-by-azure), [Claude migration guide](https://platform.claude.com/docs/en/models/opus-5/migration-guide), [Claude on Bedrock](https://platform.claude.com/docs/en/build-with-claude/claude-in-amazon-bedrock), [Gemini catalog](https://ai.google.dev/gemini-api/docs/models), [Vertex 3.7](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/gemini/3-7-flash) and [3.8](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/gemini/3-8-flash) pages, and [xAI 4.5](https://docs.x.ai/developers/models/grok-4.5) and [current models](https://docs.x.ai/developers/models). Vendor documentation is not a Wickle live-test result.
+ 
+ ## Observed live smoke checks
+ 
+-[OpenAI smoke evidence](validation/openai-live-smoke.json) records real `gpt-6-astra` calls using `medium` effort and a 4,096-token output limit. A tool loop made two model requests and one tool execution; reopening SQLite and repeating the same request made no additional model calls. A separate native JSON-schema request also passed. The JSON check timestamp is recorded in the evidence file.
+-
+-The provider did not report a separate immutable model version in that JSON response. The summary preserves that unknown value and the original absence of a production-support claim. Raw credentials, request identifiers, database locations and generated contents are omitted. Other provider paths and Sol have no live verification in this matrix.
++The [sanitized observation summary](validation/provider-smoke-summary.json)
++records synthetic read-only Tool loops from pre-merge development executions.
++Each successful case made two model requests, two metadata requests and one Tool
++execution, produced the expected calculated result, reopened SQLite successfully,
++and made no extra calls when the same Start request was repeated.
++
++| Path | Model and options | Observed API |
++| --- | --- | --- |
++| OpenAI | `gpt-6-astra`, medium reasoning effort, 4,096 output-token limit | Responses v1 |
++| Azure OpenAI | `gpt-6-astra`, medium reasoning effort, 4,096 output-token limit | Responses v1 on one explicit resource deployment |
++| Anthropic | `claude-opus-5`, medium effort, 4,096 output-token limit | Messages 2023-06-01 |
++| Gemini API | `models/gemini-3.8-flash`, medium thinking, 4,096 output-token limit | Separate v1 and v1beta checks |
++| xAI | `grok-4.6`, high reasoning effort, 4,096 output-token limit | Responses v1 |
++
++The summary preserves Run start timestamps and actual reported model/version
++fields. Its `merged_implementation_commit` locates the resulting change; it is
++not a claim that the live run used that exact post-merge checkout. It omits credentials, account/deployment targets,
++request identifiers, database paths and generated content. These observations do
++not automatically establish `live_verified` for a newly versioned binding or a
++different account. They make no general immutable-release or production-readiness
++claim. Full JSON-output and failure behavior are separate contracts; a successful
++Tool loop does not prove every feature combination.
++
++Bedrock had no configured model selector for the new contract check. During these checks,
++Vertex inference was not attempted because credential refresh/project access was
++unavailable. Their local contract results remain valid and their new live checks
++remain unverified. Earlier version results do not replace these checks.
++
++The earlier [OpenAI native JSON smoke](validation/openai-live-smoke.json) remains
++available as a distinct historical observation. Missing reported versions remain
++unknown rather than being filled from requested selectors.
+ 
+ ## Coexistence, upgrades and limits
+ 
+diff --git a/docs/quickstart.md b/docs/quickstart.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..c84f6d84c74f44a878f206e01ffaf8d43de39cb8
+--- /dev/null
++++ b/docs/quickstart.md
+@@ -0,0 +1,92 @@
++# Start with a runnable Host
++
++Wickle runs inside your Rust process. Your application supplies authentication,
++model connections, storage and tools. The examples below use synthetic model
++ports and temporary SQLite files, so you can learn the lifecycle without model
++credentials or paid requests.
++
++## Run the packaged example
++
++Install Rust 1.85 or later, rustup and Python 3.9 or later, then use a source
++checkout:
++
++```sh
++git clone https://github.com/Epsilondelta-ai/wickle.git
++cd wickle
++python3 scripts/check-package.py --consumer agent
++```
++
++Cargo may download build dependencies on the first run. The script packages the
++libraries, extracts them into a separate temporary workspace, verifies base
++contracts and runs the selected consumer. It removes that temporary workspace
++when finished. Add `--allow-dirty` only when intentionally testing local edits.
++
++The [complete agent example](../tests/support/agent_consumer.rs) demonstrates:
++
++1. A scoped catalog, policy, SQLite store and two model ports.
++2. Binding defaults overridden by Profile options and then Run options.
++3. Model fallback under shared budgets, saved output and event replay.
++4. Duplicate Start without another model call.
++5. A custom interruption policy that records application-owned maintenance data.
++6. Explicit recovery into a new execution segment, while the old handle keeps
++   its interrupted outcome.
++7. A saved-step inspection with connection details redacted and no extra model
++   calls or storage writes.
++
++For approvals and system-bound Tool inputs, run another complete example:
++
++```sh
++python3 scripts/check-package.py --consumer resume
++python3 scripts/check-package.py --consumer tool_schema
++```
++
++The [resume example](../tests/support/resume_consumer.rs) persists an approval
++wait, reopens SQLite with fresh Host instances, authenticates a reviewer and
++finishes the original call without repeating its effect. The
++[schema example](../tests/support/tool_schema_consumer.rs) separates model and
++system inputs, restores native and OpenAI strict provider contracts, and preserves
++omission before applying defaults.
++These examples are illustrative Host implementations, not production
++credential or authorization policies.
++
++Omit `--consumer` to run the complete package and business-consumer suite. The
++selector does not change the default CI coverage.
++
++## Configure your application
++
++Install the core and required adapters from the same release tag using the
++[installation guide](installation.md). Then configure these boundaries:
++
++| Boundary | Your application supplies |
++| --- | --- |
++| Profile | Instructions, selected component references, completion mode and limits |
++| Model | A catalog, explicit routing rules, a scoped adapter and authoritative inspection evidence |
++| State | `MemoryStateStore` for ephemeral work or a durable `StateStore` such as SQLite |
++| Authorization | A `PolicyGate` that evaluates current authenticated authority |
++| Tools | Reviewed schemas, executors and explicit model-owned parameter names |
++| System inputs | Trusted identifiers and registered schemas, supplied through execution context |
++| Extensions | Optional sources, Skills, hooks, interruption policy and artifact storage |
++
++See [Agent bindings](agents.md) for the full constructor and
++[provider configuration](model-providers.md) to replace the synthetic model.
++The library does not read `.env`; configuration loading belongs to your Host.
++
++## Follow the saved outcome
++
++`Agent::start` returns `Guarded<RunHandle>`. Handle an approval challenge through
++your application's authorization flow. A completed guard supplies a handle;
++await `handle.outcome(&context)` to read that execution interval's saved result.
++
++Use `Waiting` to present the stored approval or input request. Use `Interrupted`
++for a recoverable stop and submit an explicit recovery command after checking the
++saved evidence. A command ID is a retry identity: reuse the same ID and payload
++for the same submission. An old handle remains tied to its original segment;
++use the new handle or `get_run` for the latest state.
++
++`Succeeded` with `turn_ended` means the model turn finished. Choose `verified`
++completion when a business criterion must be checked before success. See
++[verification](verification.md), [interruption policies](interruption-policy.md),
++[durable controls](run-controls.md) and [saved-step inspection](step-inspection.md).
++
++Applications upgrading an existing store should first read
++[migrating to v0.2.0](migration-v0.2.md).
+diff --git a/docs/run-controls.md b/docs/run-controls.md
+index 113aea3f67e695798ff8c6f44b1bb343d9bfa245..70f3240164518592851fb7df98e881cd6362ae98 100644
+--- a/docs/run-controls.md
++++ b/docs/run-controls.md
+@@ -11,8 +11,9 @@ authorized lookup. `get_run` reads current metadata without expiring or cancelli
+ work. Its `deadline_expired` flag observes the original Run deadline for nonterminal
+ runs using the injected clock, without acquiring a lease or updating stored usage.
+ A clock earlier than the stored high-water time returns `ClockRegression`.
+-Terminal views report false. `RunHandle::cancel(command_id, context)` accepts the
+-caller’s stable retry key.
++Terminal views report false. `RunHandle::cancel(reason, context)` generates a
++fresh command ID. Use `submit_control_command` with an explicit `ControlCommand`
++when the caller needs a stable retry key.
+ 
+ The owning driver checks pending commands at dispatch boundaries and during its
+ heartbeat. It saves the outcome and command consumption in one fenced commit.
+diff --git a/docs/sqlite-state-store.md b/docs/sqlite-state-store.md
+index 0053f6190c7ad1728475ccfff09c95218e87ab29..eb2e74759466aac97384ab2d5ffb682283f9c293 100644
+--- a/docs/sqlite-state-store.md
++++ b/docs/sqlite-state-store.md
+@@ -62,8 +62,9 @@ SQLite serializes writers. It is a reference implementation for local persistenc
+ applications with larger storage or concurrency needs can supply another
+ `StateStore` implementation.
+ 
+-All committed events and protected records are retained. No pruning or schema
+-migration is performed. The Host controls database file access and should treat
++All committed events and protected records are retained. No pruning is performed.
++The supported execution-history checkpoint upgrade is described below; arbitrary
++future database migrations are not implied. The Host controls database file access and should treat
+ checkpoint data as protected application state. A checksum detects inconsistent
+ data; it does not replace access control.
+ 
+diff --git a/docs/validation/provider-smoke-summary.json b/docs/validation/provider-smoke-summary.json
+new file mode 100644
+index 0000000000000000000000000000000000000000..ae1396ba9e8da751ed8229432939e63eeb9db301
+--- /dev/null
++++ b/docs/validation/provider-smoke-summary.json
+@@ -0,0 +1,216 @@
++{
++  "schema_version": "wickle.provider-smoke-summary.v1",
++  "scope": "Synthetic read-only Tool, default/omitted and null model arguments, system binding, computed answer, SQLite reopen and duplicate suppression. Runs used pre-merge development code. Merged commit references locate the resulting changes; they do not certify execution of those exact post-merge checkouts or promote future bindings/accounts.",
++  "observations": [
++    {
++      "provider": "openai",
++      "model_id": "gpt-6-astra",
++      "api_contract": {
++        "operation": "responses",
++        "version": "v1"
++      },
++      "result": "passed",
++      "model_options": {
++        "reasoning_effort": "medium"
++      },
++      "max_output_tokens": 4096,
++      "model_requests": 2,
++      "metadata_requests": 2,
++      "tool_executions": 1,
++      "sqlite_reopen_verified": true,
++      "duplicate_start_extra_calls": 0,
++      "system_input_binding_verified": true,
++      "reported_models": [
++        {
++          "model_id": "gpt-6-astra",
++          "model_version": null
++        },
++        {
++          "model_id": "gpt-6-astra",
++          "model_version": null
++        }
++      ],
++      "immutable_release_claim": false,
++      "production_support_claim": false,
++      "run_started_at": "2026-09-23T14:44:50.551000+00:00",
++      "merged_implementation_commit": "1fbb643b1ae798b1312a305e9869b8a2a3b456b9"
++    },
++    {
++      "provider": "azure-openai",
++      "model_id": "gpt-6-astra",
++      "api_contract": {
++        "operation": "responses",
++        "version": "v1"
++      },
++      "result": "passed",
++      "model_options": {
++        "reasoning_effort": "medium"
++      },
++      "max_output_tokens": 4096,
++      "model_requests": 2,
++      "metadata_requests": 2,
++      "tool_executions": 1,
++      "sqlite_reopen_verified": true,
++      "duplicate_start_extra_calls": 0,
++      "system_input_binding_verified": true,
++      "reported_models": [
++        {
++          "model_id": "gpt-6-astra",
++          "model_version": null
++        },
++        {
++          "model_id": "gpt-6-astra",
++          "model_version": null
++        }
++      ],
++      "immutable_release_claim": false,
++      "production_support_claim": false,
++      "run_started_at": "2026-09-23T08:59:54.656000+00:00",
++      "merged_implementation_commit": "c81215a7a4b4872366b9491ed3cb0751e4610820"
++    },
++    {
++      "provider": "anthropic",
++      "model_id": "claude-opus-5",
++      "api_contract": {
++        "operation": "messages",
++        "version": "2023-06-01"
++      },
++      "result": "passed",
++      "model_options": {
++        "effort": "medium"
++      },
++      "max_output_tokens": 4096,
++      "model_requests": 2,
++      "metadata_requests": 2,
++      "tool_executions": 1,
++      "sqlite_reopen_verified": true,
++      "duplicate_start_extra_calls": 0,
++      "system_input_binding_verified": true,
++      "reported_models": [
++        {
++          "model_id": "claude-opus-5",
++          "model_version": null
++        },
++        {
++          "model_id": "claude-opus-5",
++          "model_version": null
++        }
++      ],
++      "immutable_release_claim": false,
++      "production_support_claim": false,
++      "run_started_at": "2026-09-23T09:30:47.611000+00:00",
++      "merged_implementation_commit": "b0da12cc9415c99326df5189c7918f311d4f3395"
++    },
++    {
++      "provider": "google-gemini",
++      "model_id": "models/gemini-3.8-flash",
++      "api_contract": {
++        "operation": "stream_generate_content",
++        "version": "v1"
++      },
++      "result": "passed",
++      "model_options": {
++        "thinking_level": "medium"
++      },
++      "max_output_tokens": 4096,
++      "model_requests": 2,
++      "metadata_requests": 2,
++      "tool_executions": 1,
++      "sqlite_reopen_verified": true,
++      "duplicate_start_extra_calls": 0,
++      "system_input_binding_verified": true,
++      "reported_models": [
++        {
++          "model_id": null,
++          "model_version": "gemini-3.8-flash"
++        },
++        {
++          "model_id": null,
++          "model_version": "gemini-3.8-flash"
++        }
++      ],
++      "immutable_release_claim": false,
++      "production_support_claim": false,
++      "run_started_at": "2026-09-23T11:05:57.579000+00:00",
++      "merged_implementation_commit": "da7c0537883b0bb8c9cb18c34a760176bbe9430d"
++    },
++    {
++      "provider": "google-gemini",
++      "model_id": "models/gemini-3.8-flash",
++      "api_contract": {
++        "operation": "stream_generate_content",
++        "version": "v1beta"
++      },
++      "result": "passed",
++      "model_options": {
++        "thinking_level": "medium"
++      },
++      "max_output_tokens": 4096,
++      "model_requests": 2,
++      "metadata_requests": 2,
++      "tool_executions": 1,
++      "sqlite_reopen_verified": true,
++      "duplicate_start_extra_calls": 0,
++      "system_input_binding_verified": true,
++      "reported_models": [
++        {
++          "model_id": null,
++          "model_version": "gemini-3.8-flash"
++        },
++        {
++          "model_id": null,
++          "model_version": "gemini-3.8-flash"
++        }
++      ],
++      "immutable_release_claim": false,
++      "production_support_claim": false,
++      "run_started_at": "2026-09-23T11:07:51.009000+00:00",
++      "merged_implementation_commit": "da7c0537883b0bb8c9cb18c34a760176bbe9430d"
++    },
++    {
++      "provider": "xai",
++      "model_id": "grok-4.6",
++      "api_contract": {
++        "operation": "responses",
++        "version": "v1"
++      },
++      "result": "passed",
++      "model_options": {
++        "reasoning_effort": "high"
++      },
++      "max_output_tokens": 4096,
++      "model_requests": 2,
++      "metadata_requests": 2,
++      "tool_executions": 1,
++      "sqlite_reopen_verified": true,
++      "duplicate_start_extra_calls": 0,
++      "system_input_binding_verified": true,
++      "reported_models": [
++        {
++          "model_id": "grok-4.6",
++          "model_version": null
++        },
++        {
++          "model_id": "grok-4.6",
++          "model_version": null
++        }
++      ],
++      "immutable_release_claim": false,
++      "production_support_claim": false,
++      "run_started_at": "2026-09-23T11:57:26.232000+00:00",
++      "merged_implementation_commit": "7d9c034a23ddb41fa397433f61ff0c8e5d4d72a2"
++    }
++  ],
++  "not_run": [
++    {
++      "provider": "aws-bedrock",
++      "reason": "No configured model selector for the new contract check.",
++      "checked_on": "2026-09-23"
++    },
++    {
++      "provider": "google-vertex",
++      "reason": "Current credential refresh/project authorization unavailable; local contracts passed.",
++      "checked_on": "2026-09-23"
++    }
++  ]
++}
+diff --git a/scripts/check-package.py b/scripts/check-package.py
+index c26934450608471053e9535a3903c003563c85a5..6653b929953a97a4caab176a50b9db6e3040e30b 100644
+--- a/scripts/check-package.py
++++ b/scripts/check-package.py
+@@ -31,6 +31,11 @@ def source_digest(directory):
+ def main():
+     parser = argparse.ArgumentParser(description=__doc__)
+     parser.add_argument("--allow-dirty", action="store_true")
++    runnable = sorted(path.stem.removesuffix("_consumer")
++                      for path in (ROOT / "tests/support").glob("*_consumer.rs")
++                      if path.name not in {"gather_consumer.rs", "report_process_consumer.rs"})
++    parser.add_argument("--consumer", choices=runnable,
++                        help="Run base package checks and one consumer; omit for the full suite")
+     args = parser.parse_args()
+     toolchain = subprocess.check_output(
+         ["rustup", "show", "active-toolchain"], cwd=ROOT, text=True
+@@ -166,12 +171,17 @@ def main():
+         subprocess.run(["cargo", "run", "--locked", "--offline", "--bin", "wickle-package-consumer"],
+                        cwd=consumer, env=env, check=True)
+         for example in examples:
++            if args.consumer and example.stem != f"{args.consumer}_consumer":
++                continue
+             subprocess.run(["cargo", "run", "--locked", "--offline", "--bin", example.stem],
+                            cwd=consumer, env=env, check=True)
+         # Two independent application manifests consume the same immutable core
+         # archive. Their own business code and selected adapter sets differ.
+         if source_digest(package_paths["wickle"]) != core_source_digest:
+             raise RuntimeError("Package verification modified the extracted core")
++        if args.consumer:
++            print(f"Selected packaged consumer: {args.consumer} passed (base contracts and immutable package source verified)", flush=True)
++            return
+         for scenario, entry, helper, selected in [
+             ("gather", "gather_consumer.rs", "source_consumer.rs",
+              ["wickle", "wickle-model-router", "wickle-state-sqlite"]),
+diff --git a/tests/support/agent_consumer.rs b/tests/support/agent_consumer.rs
+index 40311b221126c798c0a74425e1e80f9854a5927f..44ac8f3122320bb908ceb893e831926e1155ca32 100644
+--- a/tests/support/agent_consumer.rs
++++ b/tests/support/agent_consumer.rs
+@@ -58,7 +58,7 @@ fn routing_snapshot(scope: &Scope) -> Result<RoutingSnapshot, ContractError> {
+         let capabilities = ModelCapabilities {
+             revision: id("capabilities"),
+             features: BTreeSet::from([id("text")]),
+-            options_schema: json!({"type":"object","properties":{"reasoning_effort":{"enum":["high"]}},"additionalProperties":false}),
++            options_schema: json!({"type":"object","properties":{"reasoning_effort":{"enum":["low","medium","high"]}},"additionalProperties":false}),
+             context_window: 4096.try_into().unwrap(),
+             max_output_tokens: 512.try_into().unwrap(),
+         };
+@@ -74,7 +74,7 @@ fn routing_snapshot(scope: &Scope) -> Result<RoutingSnapshot, ContractError> {
+             evidence: vec![],
+         };
+         let mut binding = ModelBinding {
+-            default_options: Default::default(),
++            default_options: JsonObject::from([("reasoning_effort".into(), json!("low"))]),
+             binding: reference(name),
+             model: model.reference(),
+             requested_model: model.model_id.clone(),
+@@ -196,7 +196,7 @@ struct ExampleModel {
+     entered: tokio::sync::Notify,
+     route: ResolvedModelRoute,
+     calls: AtomicUsize,
+-    fail: bool,
++    fail: AtomicBool,
+ }
+ impl ModelPort for ExampleModel {
+     fn binding(&self) -> ModelPortBinding {
+@@ -221,7 +221,7 @@ impl ModelPort for ExampleModel {
+             self.entered.notify_one();
+             return Box::pin(stream::pending());
+         }
+-        let events = if self.fail {
++        let events = if self.fail.load(Ordering::SeqCst) {
+             vec![Ok(ModelEvent::ResponseError {
+                 kind: ModelFailureKind::RateLimited,
+                 metadata: ModelResponseMetadata::default(),
+@@ -229,7 +229,7 @@ impl ModelPort for ExampleModel {
+         } else {
+             vec![
+                 Ok(ModelEvent::TextDelta {
+-                    text: "second provider result".into(),
++                    text: format!("{} provider result", self.route.provider),
+                 }),
+                 Ok(ModelEvent::ResponseCompleted {
+                     finish: ModelFinish::Stop,
+@@ -241,6 +241,23 @@ impl ModelPort for ExampleModel {
+         Box::pin(stream::iter(events))
+     }
+ }
++// Application metadata remains separate from the runtime status.
++struct MaintenancePolicy;
++impl InterruptionPolicy for MaintenancePolicy {
++    fn identity(&self) -> VersionedRef { reference("maintenance-policy") }
++    fn decide<'a>(&'a self, info: &'a InterruptionInfo) -> PortFuture<'a, InterruptionDecision> {
++        Box::pin(async move {
++            Ok(if matches!(&info.interruption.cause, InterruptionCause::HostShutdown) {
++                InterruptionDecision {
++                    action: InterruptionAction::Pause,
++                    app_state: Some(AppState { namespace: id("operations"), status: id("maintenance"), metadata: info.configuration.clone() }),
++                }
++            } else {
++                InterruptionDecision { action: InterruptionAction::UseDefault, app_state: None }
++            })
++        })
++    }
++}
+ struct Estimate;
+ impl ModelTokenEstimator for Estimate {
+     fn estimate(&self, request: &ModelRequest) -> Result<u64, ContractError> {
+@@ -276,14 +293,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+         entered: tokio::sync::Notify::new(),
+         route: snapshot.route_for_binding(&reference("first"))?,
+         calls: AtomicUsize::new(0),
+-        fail: true,
++        fail: AtomicBool::new(true),
+     });
+     let second = Arc::new(ExampleModel {
+         hold: AtomicBool::new(false),
+         entered: tokio::sync::Notify::new(),
+         route: snapshot.route_for_binding(&reference("second"))?,
+         calls: AtomicUsize::new(0),
+-        fail: false,
++        fail: AtomicBool::new(false),
+     });
+     let policy = Arc::new(PolicyGate::new(
+         Arc::new(ExamplePolicy),
+@@ -309,7 +326,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+         r#"{
+         "schema_version":"wickle.agent-profile.v1","agent_id":"assistant","version":"1.0.0",
+         "name":"Assistant","description":"Agent consumer","instructions":{"text":"Use supplied information"},
+-        "model_binding":"primary","tools":[],"skills":[],"connectors":[],
++        "model_binding":"primary","model_options":{"reasoning_effort":"medium"},"tools":[],"skills":[],"connectors":[],
+         "context_policy":{"strategy":"bounded"},"output_contract":{"type":"text"},
+         "limits":{"max_model_calls":4,"max_tool_attempts":0,"max_repair_attempts":0,"max_recovery_attempts":2,"max_elapsed_ms":10000}
+     }"#,
+@@ -317,7 +334,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+     let agent = create_agent(
+         profile,
+         AgentBindings {
+-            interruption_policy: None,
++            interruption_policy: Some(InterruptionPolicyBinding {
++                policy: Arc::new(MaintenancePolicy),
++                configuration: JsonObject::from([("reason".into(), json!("maintenance"))]),
++                app_state_schema: Some(AppStateSchema {
++                    namespace: id("operations"),
++                    schema: json!({"type":"object","properties":{"namespace":{"const":"operations"},"status":{"enum":["maintenance"]},"metadata":{"type":"object","properties":{"reason":{"type":"string"}},"required":["reason"],"additionalProperties":false}},"required":["namespace","status","metadata"],"additionalProperties":false}),
++                }),
++                timeout_ms: 1000.try_into()?,
++            }),
+             scope: scope.clone(),
+             state: store.clone(),
+             policy,
+@@ -397,6 +422,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+     assert_eq!(second.calls.load(Ordering::SeqCst), 1);
+     let view = completed(agent.get_run(&run_id, &context).await?)?;
+     assert_eq!(view.status, RunStatus::Succeeded);
++    assert!(!view.deadline_expired);
+     let events: Vec<_> = handle
+         .events(started.seq.get(), context.clone())
+         .try_collect()
+@@ -424,6 +450,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+     let stopped_outcome = completed(tokio::time::timeout(Duration::from_secs(5), stopped.outcome(&context)).await??)?;
+     assert!(matches!(&stopped_outcome.result, OutcomeResult::Interrupted { interruption }
+         if interruption.cause == InterruptionCause::HostShutdown && interruption.recoverable));
++    assert_eq!(stopped_outcome.app_state.as_ref().map(|state| &state.status), Some(&id("maintenance")));
+     let reopened = SqliteStateStore::open(&database)?;
+     let saved = reopened.load(&scope, stopped.run_id()).await?;
+     assert_eq!(saved.snapshot.outcome, Some(stopped_outcome.clone()));
+@@ -451,14 +478,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+     assert_eq!(composition.recorded_run_outcome.as_ref().and_then(|outcome| outcome.completion_basis), Some(CompletionBasis::TurnEnded));
+     assert!(composition.attempts.iter().any(|attempt| attempt.evidence.contains(&InspectionEvidence::ResponseObserved)));
+     assert_eq!(composition.model.as_ref().and_then(|model| model.configuration.as_ref()).and_then(|configuration| configuration.effective.get("reasoning_effort")), Some(&json!("high")));
++    assert_eq!(composition.model.as_ref().and_then(|model| model.configuration.as_ref()).and_then(|configuration| configuration.sources.get("reasoning_effort")), Some(&ModelOptionSource::Run));
+     let encoded = serde_json::to_value(&inspection)?;
+     assert!(encoded["composition"]["model"].get("connection_ref").is_none());
+     assert!(encoded["composition"]["model"].get("target").is_none());
+     assert_eq!(SqliteStateStore::open(&database)?.load(&scope, &run_id).await?, restored);
+     assert_eq!(first.calls.load(Ordering::SeqCst), 2);
+     assert_eq!(second.calls.load(Ordering::SeqCst), 1);
++    // Recover a separate cooperatively interrupted interval through the public
++    // API. The synthetic primary becomes available after the stop.
++    let recover_request = RunRequest { request_id: id("recoverable-request"), session_id: id("recoverable-session"), input: vec![InputContent::Text { text: "Continue after maintenance".into() }], trigger: RunTrigger::User {}, model_options: JsonObject::from([("reasoning_effort".into(), json!("high"))]), max_output_tokens: None, output_contract: None };
++    let paused = completed(agent.start(recover_request.clone(), context.clone()).await?)?;
++    tokio::time::timeout(Duration::from_secs(5), first.entered.notified()).await?;
++    completed(paused.stop_execution(InterruptionCause::HostShutdown, &context).await?)?;
++    let paused_outcome = completed(paused.outcome(&context).await?)?;
++    assert_eq!(paused_outcome.result.status(), RunStatus::Interrupted);
++    let checkpoint = SqliteStateStore::open(&database)?.load(&scope, paused.run_id()).await?;
++    let source = checkpoint.snapshot.recovery_record(id("maintenance-recovery"))?;
++    first.hold.store(false, Ordering::SeqCst);
++    first.fail.store(false, Ordering::SeqCst);
++    let command = ResumeCommand { run_id: paused.run_id().clone(), expected_revision: checkpoint.snapshot.revision, command_id: id("recover-maintenance"), action: ResumeAction::Recover { recovery_ref: source.reference().clone() } };
++    let recovered = completed(agent.resume(command.clone(), context.clone()).await?)?;
++    let recovered_outcome = completed(recovered.outcome(&context).await?)?;
++    assert_eq!(recovered_outcome.result.status(), RunStatus::Succeeded);
++    assert_eq!(recovered_outcome.output, vec![InputContent::Text { text: "first provider result".into() }]);
++    assert_ne!(paused.segment_id(), recovered.segment_id());
++    assert_eq!(completed(paused.outcome(&context).await?)?, paused_outcome);
++    let duplicate = completed(agent.resume(command, context.clone()).await?)?;
++    assert_eq!(duplicate.segment_id(), recovered.segment_id());
++    assert_eq!(completed(duplicate.outcome(&context).await?)?, recovered_outcome);
++    assert_eq!(first.calls.load(Ordering::SeqCst), 4);
++    assert_eq!(second.calls.load(Ordering::SeqCst), 1);
+     println!(
+-        "agent consumer: pure construction, detached execution after observer drop, fallback under shared budgets, stored outcome and event replay, duplicate request without new model calls, SQLite reopen, recoverable host stop, durable replay and read-only stored composition inspection"
++        "agent consumer: pure construction, detached execution after observer drop, fallback under shared budgets, stored outcome and event replay, duplicate request without new model calls, SQLite reopen, custom interruption state and recovery, immutable prior outcomes, option provenance, durable replay and read-only stored composition inspection"
+     );
+     Ok(())
+ }
+diff --git a/tests/support/recovery_consumer.rs b/tests/support/recovery_consumer.rs
+index 024f45d1ccb389123d3aca7cec19e816f963c75c..63fd759424b9a65387d4fe0792398787c1a3f163 100644
+--- a/tests/support/recovery_consumer.rs
++++ b/tests/support/recovery_consumer.rs
+@@ -65,7 +65,7 @@ mod host {
+         let scope = Scope { tenant_id: id("tenant"), workspace_id: id("workspace"), user_id: None };
+         let store = Arc::new(SqliteStateStore::open(directory.join("state.sqlite"))?);
+         let routing = routing_snapshot(&scope)?;
+-        let model = Arc::new(ProcessModel { inner: ExampleModel { hold: AtomicBool::new(false), entered: tokio::sync::Notify::new(), route: routing.route_for_binding(&reference("first"))?, calls: AtomicUsize::new(0), fail: false }, directory: directory.to_owned(), interrupt });
++        let model = Arc::new(ProcessModel { inner: ExampleModel { hold: AtomicBool::new(false), entered: tokio::sync::Notify::new(), route: routing.route_for_binding(&reference("first"))?, calls: AtomicUsize::new(0), fail: AtomicBool::new(false) }, directory: directory.to_owned(), interrupt });
+         let policy = Arc::new(PolicyGate::new(Arc::new(ExamplePolicy), Duration::from_secs(1))?);
+         let profile = AgentProfile::from_json(r#"{
+             "schema_version":"wickle.agent-profile.v1","agent_id":"assistant","version":"1.0.0",
+diff --git a/tests/support/tool_schema_consumer.rs b/tests/support/tool_schema_consumer.rs
+index 31e9d9919fe0bea172100981bc8fa1d556a8b410..fdd4e9322f4beee8721a98bad0f4e6de0e87b6ee 100644
+--- a/tests/support/tool_schema_consumer.rs
++++ b/tests/support/tool_schema_consumer.rs
+@@ -159,6 +159,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+     compiled.validate_model_inputs(&decoded)?;
+     assert_eq!(decoded, model_inputs);
+     assert_eq!(reopened.canonical_name(), &id("search_reports"));
++    let strict_target = ProviderToolTarget {
++        model: Some(reference("example-model")),
++        provider: id("openai"),
++        api_contract: ApiContract { operation: id("responses"), version: id("v1") },
++        capability_revision: id("strict-capabilities"),
++    };
++    let strict = CompiledToolContract::compile(&compiled, strict_target.clone(), &wickle_model_responses::ResponsesToolSchemaCompiler, limits)?;
++    let wire = strict.encode_arguments(&model_inputs)?;
++    assert_eq!(wire["limit"]["present"], false);
++    let restored_strict = CompiledToolContract::restore(&serde_json::to_string(&strict)?, &compiled, &strict_target, strict.digest(), limits)?;
++    let canonical = restored_strict.decode_arguments(&serde_json::to_string(&wire)?, limits)?;
++    assert_eq!(canonical, model_inputs);
++    let normalized = compiled.normalize_model_inputs(&canonical)?;
++    assert_eq!(normalized["limit"], json!(10));
++    let mut forged = wire;
++    forged.insert("workspace_id".into(), json!("f7fba7f5-f8e7-4f44-b885-45d0688e9f33"));
++    assert!(restored_strict.decode_arguments(&serde_json::to_string(&forged)?, limits).is_err());
+     let request = model_request(compiled.to_model_tool());
+     assert_eq!(
+         propose(&request, &model_inputs).await?.tool_calls[0].validation,
+@@ -184,7 +201,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+             .is_err()
+     );
+     println!(
+-        "tool schema consumer: query/limit exposed; hidden schema omitted; hidden input rejected by the model boundary; full UUID schema checked; compiled identity preserved and changed registry rejected"
++        "tool schema consumer: query/limit exposed; hidden schema omitted; hidden input rejected by the model boundary; full UUID schema checked; native and strict provider contracts restored with omission/default semantics; compiled identity preserved and changed registry rejected"
+     );
+     Ok(())
+ }

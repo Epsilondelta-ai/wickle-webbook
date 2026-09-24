@@ -1,0 +1,14 @@
+node_modules/
+dist/
+public/content/
+playwright-report/
+test-results/
+.env
+.env.*
+!.env.example
+supabase/.temp/
+release/
+verification/*.json
+verification/*.png
+verification/*.log
+.DS_Store

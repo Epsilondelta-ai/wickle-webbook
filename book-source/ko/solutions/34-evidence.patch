@@ -1,0 +1,796 @@
+diff --git a/README.de.md b/README.de.md
+index 6829bc33335ca26fe72c735d232fe99a14285e22..8c89d2a1ec756bd1ecf53d1023b90b6180d86857 100644
+--- a/README.de.md
++++ b/README.de.md
+@@ -27,3 +27,5 @@ Der [Leitfaden für Modellanbieter](docs/model-providers.md) beschreibt die Anbi
+ Die Anleitung für [MCP-Werkzeuge](docs/mcp.md) beschreibt die Verbindung geprüfter Werkzeuge über stdio.
+ 
+ Die Anleitung für [Ereigniskonsumenten](docs/event-consumers.md) beschreibt die Übermittlung von Ausführungsdaten an Speicher- und Graphdienste durch den Host.
++
++Die [Versionsmatrix](docs/model-support.md) unterscheidet lokale Vertragstests von Prüfungen mit realen Diensten.
+diff --git a/README.es.md b/README.es.md
+index fce42f13b227d0d3b1b2083c90b4a0f63fa55cef..1f5d01cc9700db33005813adcabbd898664f18d0 100644
+--- a/README.es.md
++++ b/README.es.md
+@@ -27,3 +27,5 @@ La [guía de proveedores de modelos](docs/model-providers.md) explica cómo cone
+ La guía de [herramientas MCP](docs/mcp.md) explica cómo conectar herramientas revisadas mediante stdio.
+ 
+ La guía de [consumidores de eventos](docs/event-consumers.md) describe la entrega de registros a servicios de memoria y grafos desde el Host.
++
++La [matriz de versiones](docs/model-support.md) distingue las pruebas locales de contrato de las comprobaciones con servicios reales.
+diff --git a/README.fr.md b/README.fr.md
+index aa87022c69a4c545d7326a2ef77be18665cce659..31be9449a7ee5b3b0a28c566ffa97c9901ce2d1c 100644
+--- a/README.fr.md
++++ b/README.fr.md
+@@ -27,3 +27,5 @@ Le [guide des fournisseurs de modèles](docs/model-providers.md) présente les a
+ Le guide des [outils MCP](docs/mcp.md) explique comment connecter des outils approuvés via stdio.
+ 
+ Le guide des [consommateurs d’événements](docs/event-consumers.md) décrit la transmission des résultats aux services de mémoire et de graphe par le Host.
++
++La [matrice des versions](docs/model-support.md) distingue les tests locaux des vérifications effectuées sur les services réels.
+diff --git a/README.ja.md b/README.ja.md
+index 7e1bcd6428f876e3a705f06263146c493470d3fc..d2728d87daee726b7f7c577c12ddc29e56d142df 100644
+--- a/README.ja.md
++++ b/README.ja.md
+@@ -27,3 +27,5 @@ Agent Profile でエージェントの振る舞いを設定し、アダプター
+ [MCP ツール接続](docs/mcp.md)では、確認済みのツールを stdio で接続する方法を説明します。
+ 
+ [イベントコンシューマー](docs/event-consumers.md)では、Host が実行記録をメモリやグラフサービスに渡す方法を説明します。
++
++[モデルバージョン別の検証表](docs/model-support.md)で、ローカル契約テストと実接続の結果を区別しています。
+diff --git a/README.ko.md b/README.ko.md
+index c2ba8dbb3d97da66c58f47d1a4b6a554cc87da2e..66fd89421e6931455ab2d8727d8334bf19b9c40f 100644
+--- a/README.ko.md
++++ b/README.ko.md
+@@ -27,3 +27,5 @@ Agent Profile로 에이전트의 동작을 구성하고, 어댑터를 통해 다
+ [MCP 도구 연결](docs/mcp.md)은 검토한 도구를 stdio로 연결하는 방법을 설명합니다.
+ 
+ [이벤트 소비자](docs/event-consumers.md) 가이드는 Host가 실행 기록을 기억·그래프 서비스에 전달하는 방법을 설명합니다.
++
++[모델 버전별 검증 행렬](docs/model-support.md)에서 로컬 계약 검증과 실제 연결 결과를 구분해 확인할 수 있습니다.
+diff --git a/README.md b/README.md
+index 409f5ae6bf585f306cb90c2df3460b7429ca5140..c551340cc5be1f18e36f9652fc51b11fb0d8d680 100644
+--- a/README.md
++++ b/README.md
+@@ -27,3 +27,5 @@ The [model provider guide](docs/model-providers.md) covers OpenAI, Azure OpenAI,
+ See [MCP tools](docs/mcp.md) for connecting reviewed tools over stdio.
+ 
+ See [event consumers](docs/event-consumers.md) for Host-managed delivery to memory and graph services.
++
++The [model-version evidence matrix](docs/model-support.md) distinguishes local contract checks from live smoke results.
+diff --git a/README.ru.md b/README.ru.md
+index 889825d6b252040ac76007dc9420ab15d975d712..4a6579b4f1e59bbf91b8a05c570f9bb841d833ae 100644
+--- a/README.ru.md
++++ b/README.ru.md
+@@ -27,3 +27,5 @@ Wickle — движок агентов, который EpsilonDelta разраб
+ Руководство по [инструментам MCP](docs/mcp.md) описывает подключение проверенных инструментов через stdio.
+ 
+ Руководство по [обработчикам событий](docs/event-consumers.md) описывает передачу записей выполнения в сервисы памяти и графов на стороне Host.
++
++[Матрица версий моделей](docs/model-support.md) разделяет локальные проверки контрактов и результаты реальных подключений.
+diff --git a/README.zh-CN.md b/README.zh-CN.md
+index cf45565622e4aed68435b0d6190cdebe7e76000d..1e34024ae2dde35b1c2dd7a5127086de3f9c1a7c 100644
+--- a/README.zh-CN.md
++++ b/README.zh-CN.md
+@@ -27,3 +27,5 @@ Wickle 是 EpsilonDelta 正在使用 Rust 开发的智能体引擎，旨在以
+ [MCP 工具连接](docs/mcp.md)介绍如何通过 stdio 连接已审核的工具。
+ 
+ [事件消费者](docs/event-consumers.md)介绍 Host 如何将执行记录传递给记忆和图服务。
++
++[模型版本验证矩阵](docs/model-support.md)区分本地契约测试与实际连接结果。
+diff --git a/crates/wickle-model-anthropic/tests/messages.rs b/crates/wickle-model-anthropic/tests/messages.rs
+index 1b30ad28e37902af474127aa1560bc7ff563d8b2..262797b5616f2b60c4cf4d7ed628544cb21a48f2 100644
+--- a/crates/wickle-model-anthropic/tests/messages.rs
++++ b/crates/wickle-model-anthropic/tests/messages.rs
+@@ -537,3 +537,33 @@ async fn inspection_missing_drift_cancellation_and_size_limits_are_reported() {
+         assert_eq!(server.requests.lock().unwrap().len(), 1);
+     }
+ }
++
++#[tokio::test]
++async fn two_documented_release_ids_coexist_without_replacing_connection_state() {
++    let releases = ["claude-opus-5", "claude-opus-4-8"];
++    let server = Server::new(
++        releases
++            .iter()
++            .map(|release| Reply::sse(&events(release, release)))
++            .collect(),
++    )
++    .await;
++    let connection = connection(&server);
++    let model = AnthropicModel::new(connection.clone());
++    for (index, release) in releases.iter().enumerate() {
++        let mut request = request(&connection, release);
++        request.route.binding = reference(&format!("binding-{index}"));
++        request.route.model_version = id(&format!("fixture-revision-{index}"));
++        let result = collect_model_response(&request, model.generate(&request, &context(&request)))
++            .await
++            .unwrap();
++        assert_eq!(result.text, *release);
++        assert_eq!(result.metadata.reported_model_id, Some(id(release)));
++        assert!(result.metadata.reported_model_version.is_none());
++    }
++    let requests = server.requests.lock().unwrap();
++    assert_eq!(requests.len(), 2);
++    for (request, release) in requests.iter().zip(releases) {
++        assert_eq!(request.body["model"], release);
++    }
++}
+diff --git a/crates/wickle-model-azure-openai/tests/responses.rs b/crates/wickle-model-azure-openai/tests/responses.rs
+index e9b02faef06a6fb0d874d528ef28f4cc9088b6cf..0627c9ceac7c59f05b1d57405f984b97d94e6943 100644
+--- a/crates/wickle-model-azure-openai/tests/responses.rs
++++ b/crates/wickle-model-azure-openai/tests/responses.rs
+@@ -514,3 +514,48 @@ async fn arm_scope_and_target_rejection_precedes_credential_lookup() {
+         assert!(server.requests.lock().unwrap().is_empty());
+     }
+ }
++
++#[tokio::test]
++async fn two_documented_releases_keep_deployment_and_model_identity_distinct() {
++    let releases = ["gpt-6-astra", "gpt-5.6-sol"];
++    let server = Server::new(
++        releases
++            .iter()
++            .map(|release| Reply::sse(&events(release, release)))
++            .collect(),
++    )
++    .await;
++    let mut bindings = vec![];
++    for (index, release) in releases.iter().enumerate() {
++        let mut options = options(&server);
++        options.deployment = format!("deployment-{index}");
++        let connection = AzureOpenAiConnection::new(
++            scope(),
++            reference(&format!("account-{index}")),
++            Arc::new(AzureCredential::ApiKey("fixture-key".into())),
++            options,
++        )
++        .unwrap();
++        let mut request = request(&connection, release);
++        request.route.model_version = id(if index == 0 {
++            "2026-09-03"
++        } else {
++            "2026-07-09"
++        });
++        bindings.push((AzureOpenAiModel::new(connection), request));
++    }
++    for ((model, request), release) in bindings.iter().zip(releases) {
++        let result = collect_model_response(request, model.generate(request, &context(request)))
++            .await
++            .unwrap();
++        assert_eq!(result.text, release);
++        assert_eq!(result.metadata.reported_model_id, Some(id(release)));
++        assert!(result.metadata.reported_model_version.is_none());
++    }
++    let requests = server.requests.lock().unwrap();
++    assert_eq!(requests.len(), 2);
++    for (index, request) in requests.iter().enumerate() {
++        assert_eq!(request.body["model"], format!("deployment-{index}"));
++        assert_eq!(request.path, "/openai/v1/responses");
++    }
++}
+diff --git a/crates/wickle-model-bedrock/tests/bedrock.rs b/crates/wickle-model-bedrock/tests/bedrock.rs
+index 1f83c394dc9a76765728fbd09897e5513901cbdf..375098aaa36c9d8db6072286f0c6c860b37ca189 100644
+--- a/crates/wickle-model-bedrock/tests/bedrock.rs
++++ b/crates/wickle-model-bedrock/tests/bedrock.rs
+@@ -647,3 +647,50 @@ async fn credential_lookup_obeys_cancellation_and_deadline_before_http() {
+         assert!(server.requests.lock().unwrap().is_empty());
+     }
+ }
++
++#[tokio::test]
++async fn two_documented_releases_keep_independent_selectors() {
++    let releases = ["anthropic.claude-opus-5", "anthropic.claude-opus-4-8"];
++    for endpoint in [BedrockEndpoint::Runtime, BedrockEndpoint::Mantle] {
++        let server = Server::new(
++            releases
++                .iter()
++                .map(|release| reply(BedrockOperation::Messages, &events(release, release)))
++                .collect(),
++        )
++        .await;
++        let mut bindings = vec![];
++        for (index, release) in releases.iter().enumerate() {
++            let mut options = options(&server);
++            options.selector = BedrockSelector::Foundation((*release).into());
++            options.operation = BedrockOperation::Messages;
++            options.endpoint = endpoint;
++            let connection = BedrockConnection::new(
++                scope(),
++                reference(&format!("account-{index}")),
++                Arc::new(BedrockCredential::Bearer("fixture-bearer".into())),
++                options,
++            )
++            .unwrap()
++            .with_clock(Arc::new(FixedClock));
++            let mut request = request(&connection, release);
++            request.route.model_version = id(&format!("fixture-revision-{index}"));
++            bindings.push((BedrockModel::new(connection), request));
++        }
++        for ((model, request), release) in bindings.iter().zip(releases) {
++            let result =
++                collect_model_response(request, model.generate(request, &context(request)))
++                    .await
++                    .unwrap();
++            assert_eq!(result.text, release);
++            assert_eq!(result.metadata.reported_model_id, Some(id(release)));
++            assert!(result.metadata.reported_model_version.is_none());
++        }
++        let requests = server.requests.lock().unwrap();
++        assert_eq!(requests.len(), 2);
++        for (request, release) in requests.iter().zip(releases) {
++            assert_eq!(request.body["model"], release);
++            assert_eq!(request.path, "/anthropic/v1/messages");
++        }
++    }
++}
+diff --git a/crates/wickle-model-gemini/src/codec.rs b/crates/wickle-model-gemini/src/codec.rs
+index 84a9b2927b2312d7230356ca0ddb97e67854854a..8346a17cd1d56c118a528ceb4a7048df7ee1e045 100644
+--- a/crates/wickle-model-gemini/src/codec.rs
++++ b/crates/wickle-model-gemini/src/codec.rs
+@@ -221,8 +221,10 @@ fn encode(
+                     .as_str()
+                     .filter(|s| matches!(*s, "minimal" | "low" | "medium" | "high"))
+                     .ok_or_else(|| error(ErrorCode::ModelOptionUnsupported, "thinking_level"))?;
+-                if model_name(request.route.model_id.as_str())? == "gemini-3.8-flash"
+-                    && level == "minimal"
++                if matches!(
++                    model_name(request.route.model_id.as_str())?,
++                    "gemini-3.7-flash" | "gemini-3.8-flash"
++                ) && level == "minimal"
+                 {
+                     return Err(error(ErrorCode::ModelOptionUnsupported, "thinking_level"));
+                 }
+diff --git a/crates/wickle-model-gemini/tests/generate.rs b/crates/wickle-model-gemini/tests/generate.rs
+index 1930a196f369974771cfbfa335388b301dbd9411..e63412d84d1bbe8ac979d28fd39df9a32bdfca52 100644
+--- a/crates/wickle-model-gemini/tests/generate.rs
++++ b/crates/wickle-model-gemini/tests/generate.rs
+@@ -612,3 +612,61 @@ async fn idless_parallel_results_are_matched_in_original_call_order() {
+             .all(|p| p["functionResponse"].get("id").is_none())
+     );
+ }
++
++#[tokio::test]
++async fn minimal_thinking_is_rejected_for_both_flash_releases_before_network() {
++    for release in ["gemini-3.7-flash", "gemini-3.8-flash"] {
++        let server = Server::new(vec![reply(&events("would otherwise succeed"))]).await;
++        let connection = connection(&server);
++        let mut request = request(&connection, release);
++        request
++            .options
++            .insert("thinking_level".into(), json!("minimal"));
++        let model = GeminiModel::new(connection);
++        let error = collect_model_response(&request, model.generate(&request, &context(&request)))
++            .await
++            .expect_err("unsupported option must fail before dispatch");
++        assert_eq!(error.kind, ModelFailureKind::Unsupported);
++        assert!(server.requests.lock().unwrap().is_empty());
++    }
++}
++
++#[tokio::test]
++async fn two_documented_release_ids_keep_path_and_reported_revision_separate() {
++    let releases = ["gemini-3.8-flash", "gemini-3.7-flash"];
++    let replies = releases
++        .iter()
++        .enumerate()
++        .map(|(index, release)| {
++            let mut data = events(release);
++            data[0]["modelVersion"] = json!(format!("fixture-revision-{index}"));
++            reply(&data)
++        })
++        .collect();
++    let server = Server::new(replies).await;
++    let connection = connection(&server);
++    let model = GeminiModel::new(connection.clone());
++    for (index, release) in releases.iter().enumerate() {
++        let mut request = request(&connection, release);
++        request.route.binding = reference(&format!("binding-{index}"));
++        request.route.model_version = id(&format!("fixture-revision-{index}"));
++        let result = collect_model_response(&request, model.generate(&request, &context(&request)))
++            .await
++            .unwrap();
++        assert_eq!(result.text, *release);
++        assert_eq!(
++            result.metadata.reported_model_version,
++            Some(id(&format!("fixture-revision-{index}")))
++        );
++        assert!(result.metadata.reported_model_id.is_none());
++    }
++    let requests = server.requests.lock().unwrap();
++    assert_eq!(requests.len(), 2);
++    for (request, release) in requests.iter().zip(releases) {
++        assert!(
++            request
++                .path
++                .contains(&format!("/models/{release}:streamGenerateContent"))
++        );
++    }
++}
+diff --git a/crates/wickle-model-openai/tests/responses.rs b/crates/wickle-model-openai/tests/responses.rs
+index b0d86436329318b70855a38f1b2e44cb6355c41e..eb65664ee600169ae5c8d9c2e6ee72a99e726788 100644
+--- a/crates/wickle-model-openai/tests/responses.rs
++++ b/crates/wickle-model-openai/tests/responses.rs
+@@ -583,3 +583,33 @@ async fn final_content_cannot_move_between_messages_or_parts() {
+         }
+     }
+ }
++
++#[tokio::test]
++async fn two_documented_release_ids_coexist_without_replacing_connection_state() {
++    let releases = ["gpt-6-astra", "gpt-5.6-sol"];
++    let server = Server::new(
++        releases
++            .iter()
++            .map(|release| Reply::sse(&events(release, release)))
++            .collect(),
++    )
++    .await;
++    let connection = connection(&server);
++    let model = OpenAiModel::new(connection.clone());
++    for (index, release) in releases.iter().enumerate() {
++        let mut request = request(&connection, release);
++        request.route.binding = reference(&format!("binding-{index}"));
++        request.route.model_version = id(&format!("fixture-revision-{index}"));
++        let result = collect_model_response(&request, model.generate(&request, &context(&request)))
++            .await
++            .unwrap();
++        assert_eq!(result.text, *release);
++        assert_eq!(result.metadata.reported_model_id, Some(id(release)));
++        assert!(result.metadata.reported_model_version.is_none());
++    }
++    let requests = server.requests.lock().unwrap();
++    assert_eq!(requests.len(), 2);
++    for (request, release) in requests.iter().zip(releases) {
++        assert_eq!(request.body["model"], release);
++    }
++}
+diff --git a/crates/wickle-model-vertex/tests/vertex.rs b/crates/wickle-model-vertex/tests/vertex.rs
+index 677e60a01913fa0cf12fd4502d41aac5b768f25c..66f650dc5b85788940b14042a7cc243c18834574 100644
+--- a/crates/wickle-model-vertex/tests/vertex.rs
++++ b/crates/wickle-model-vertex/tests/vertex.rs
+@@ -514,3 +514,61 @@ async fn metadata_token_and_http_waits_obey_cancellation_and_deadline() {
+         }
+     }
+ }
++
++#[tokio::test]
++async fn minimal_thinking_is_rejected_for_both_flash_releases_before_network() {
++    for release in ["gemini-3.7-flash", "gemini-3.8-flash"] {
++        let server = Server::new(vec![reply(&events("would otherwise succeed"))]).await;
++        let connection = connection(&server);
++        let mut request = request(&connection, release);
++        request
++            .options
++            .insert("thinking_level".into(), json!("minimal"));
++        let model = VertexModel::new(connection);
++        let error = collect_model_response(&request, model.generate(&request, &context(&request)))
++            .await
++            .expect_err("unsupported option must fail before dispatch");
++        assert_eq!(error.kind, ModelFailureKind::Unsupported);
++        assert!(server.requests.lock().unwrap().is_empty());
++    }
++}
++
++#[tokio::test]
++async fn two_documented_release_ids_keep_path_and_reported_revision_separate() {
++    let releases = ["gemini-3.8-flash", "gemini-3.7-flash"];
++    let replies = releases
++        .iter()
++        .enumerate()
++        .map(|(index, release)| {
++            let mut data = events(release);
++            data[0]["modelVersion"] = json!(format!("fixture-revision-{index}"));
++            reply(&data)
++        })
++        .collect();
++    let server = Server::new(replies).await;
++    let connection = connection(&server);
++    let model = VertexModel::new(connection.clone());
++    for (index, release) in releases.iter().enumerate() {
++        let mut request = request(&connection, release);
++        request.route.binding = reference(&format!("binding-{index}"));
++        request.route.model_version = id(&format!("fixture-revision-{index}"));
++        let result = collect_model_response(&request, model.generate(&request, &context(&request)))
++            .await
++            .unwrap();
++        assert_eq!(result.text, *release);
++        assert_eq!(
++            result.metadata.reported_model_version,
++            Some(id(&format!("fixture-revision-{index}")))
++        );
++        assert!(result.metadata.reported_model_id.is_none());
++    }
++    let requests = server.requests.lock().unwrap();
++    assert_eq!(requests.len(), 2);
++    for (request, release) in requests.iter().zip(releases) {
++        assert!(
++            request
++                .path
++                .contains(&format!("/models/{release}:streamGenerateContent"))
++        );
++    }
++}
+diff --git a/crates/wickle-model-xai/tests/responses.rs b/crates/wickle-model-xai/tests/responses.rs
+index c89f9f3a1bd7256f696e229990a56f3d5f283ad3..331614b1af296d806f0eb3803530a6edfcffcb15 100644
+--- a/crates/wickle-model-xai/tests/responses.rs
++++ b/crates/wickle-model-xai/tests/responses.rs
+@@ -551,3 +551,33 @@ async fn reasoning_exceptions_never_allow_invalid_executable_identities() {
+         }
+     }
+ }
++
++#[tokio::test]
++async fn two_documented_release_ids_coexist_without_replacing_connection_state() {
++    let releases = ["grok-4.6", "grok-4.5"];
++    let server = Server::new(
++        releases
++            .iter()
++            .map(|release| Reply::sse(&events(release, release)))
++            .collect(),
++    )
++    .await;
++    let connection = connection(&server);
++    let model = XaiModel::new(connection.clone());
++    for (index, release) in releases.iter().enumerate() {
++        let mut request = request(&connection, release);
++        request.route.binding = reference(&format!("binding-{index}"));
++        request.route.model_version = id(&format!("fixture-revision-{index}"));
++        let result = collect_model_response(&request, model.generate(&request, &context(&request)))
++            .await
++            .unwrap();
++        assert_eq!(result.text, *release);
++        assert_eq!(result.metadata.reported_model_id, Some(id(release)));
++        assert!(result.metadata.reported_model_version.is_none());
++    }
++    let requests = server.requests.lock().unwrap();
++    assert_eq!(requests.len(), 2);
++    for (request, release) in requests.iter().zip(releases) {
++        assert_eq!(request.body["model"], release);
++    }
++}
+diff --git a/docs/model-providers.md b/docs/model-providers.md
+index f311c30fd93d33669203f1d66529c062bbad96ec..cb642c381db24ca293d391565e633bb9fda835ab 100644
+--- a/docs/model-providers.md
++++ b/docs/model-providers.md
+@@ -35,3 +35,5 @@ All adapters enforce scope/target/API matching, finite deadlines, bounded stream
+ The independent package check runs each provider's HTTP/SSE consumer and a common dispatcher conformance consumer across all seven concrete adapters. The latter checks binding isolation and rejects foreign scopes, unknown credential revisions and incompatible API contracts before network access. Provider fixtures separately exercise successful encoding, streaming, Tool replay, usage and failures.
+ 
+ These checks establish library and transport-contract behavior. They do not establish every model version's live availability, account permissions or production support. Actual model/account verification and support promotion require separate evidence; missing metadata remains unknown.
++
++See the [model-version evidence matrix](model-support.md) for selected release identities and the distinction between local contract checks and live smoke results.
+diff --git a/docs/model-support.md b/docs/model-support.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..b9a77181873392a00d5b242e654bdf5c68e538c0
+--- /dev/null
++++ b/docs/model-support.md
+@@ -0,0 +1,45 @@
++# Model versions and validation evidence
++
++Wickle does not install a default model catalog or silently choose the newest release. The Host registers model identities, binding revisions, API contracts, target restrictions and capability schemas. Register another release as another definition/binding; keep the saved catalog and route for an existing Run. See [model routing](model-routing.md) and [provider adapters](model-providers.md).
++
++## Validation levels
++
++| Level | Meaning |
++| --- | --- |
++| `planned` | Declared configuration without sufficient passing contract evidence |
++| `contract_tested` | The stated local contract checks passed; account access and remote model availability remain unverified |
++| `live_verified` | The stated real-service checks passed for that configuration; the label does not transfer to other versions, regions, credentials or untested features |
++
++`ModelBinding` evidence is tied to its contract digest. `min_support` can reject planned or contract-only bindings. A local fixture cannot establish real model availability, an immutable provider version or production readiness.
++
++## Selected release matrix
++
++The following identities are exercised by the provider tests. Every row has local HTTP/SSE request/response identity checks for both listed releases. These checks use bounded local servers, not vendor accounts. Broader tool, replay, metadata and failure contracts are covered by each adapter's existing tests, with their own scope.
++
++| Provider path | Model IDs | API contract exercised by the two-release check | Target scope of fixtures | Evidence level |
++| --- | --- | --- | --- | --- |
++| OpenAI | `gpt-6-astra`, `gpt-5.6-sol` | Responses `v1` | Public-API shape; no regional availability claim | Astra: live smoke below; Sol: `contract_tested` |
++| Azure OpenAI | `gpt-6-astra`, `gpt-5.6-sol` | Responses `v1` | Two separate deployment selectors; declared model revisions `2026-09-03` and `2026-07-09`; live region/deployment access unverified | `contract_tested` |
++| Anthropic | `claude-opus-5`, `claude-opus-4-8` | Messages `2023-06-01` | Direct-API shape; no regional availability claim | `contract_tested` |
++| AWS Bedrock | `anthropic.claude-opus-5`, `anthropic.claude-opus-4-8` | Native Messages `2023-06-01` | Runtime and Mantle; fixture origin region `us-east-1`, not verified inference residency or access | `contract_tested` |
++| Gemini API | `gemini-3.8-flash`, `gemini-3.7-flash` | `stream_generate_content` / `v1beta` | AI Studio API shape; no regional availability claim | `contract_tested` |
++| Vertex AI | `gemini-3.8-flash`, `gemini-3.7-flash` | `stream_generate_content` / `v1` | `global` with a fixture project; account availability unverified | `contract_tested` |
++| xAI | `grok-4.6`, `grok-4.5` | Responses `v1` | Public-API shape; cluster availability unverified | `contract_tested` |
++
++Model identifiers and platform distinctions were checked against the official [OpenAI Astra](https://developers.openai.com/api/docs/models/gpt-6-astra) and [Sol](https://developers.openai.com/api/docs/models/gpt-5.6-sol) pages, [Azure model catalog](https://learn.microsoft.com/en-us/azure/foundry/foundry-models/concepts/models-sold-directly-by-azure), [Claude migration guide](https://platform.claude.com/docs/en/models/opus-5/migration-guide), [Claude on Bedrock](https://platform.claude.com/docs/en/build-with-claude/claude-in-amazon-bedrock), [Gemini catalog](https://ai.google.dev/gemini-api/docs/models), [Vertex 3.7](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/gemini/3-7-flash) and [3.8](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/gemini/3-8-flash) pages, and [xAI 4.5](https://docs.x.ai/developers/models/grok-4.5) and [current models](https://docs.x.ai/developers/models). Vendor documentation is not a Wickle live-test result.
++
++## Observed live smoke checks
++
++[OpenAI smoke evidence](validation/openai-live-smoke.json) records real `gpt-6-astra` calls using `medium` effort and a 4,096-token output limit. A tool loop made two model requests and one tool execution; reopening SQLite and repeating the same request made no additional model calls. A separate native JSON-schema request also passed. The JSON check timestamp is recorded in the evidence file.
++
++The provider did not report a separate immutable model version in that JSON response. The summary preserves that unknown value and the original absence of a production-support claim. Raw credentials, request identifiers, database locations and generated contents are omitted. Other provider paths and Sol have no live verification in this matrix.
++
++## Coexistence, upgrades and limits
++
++The [version-matrix consumer](../tests/support/version_matrix_consumer.rs) registers 14 identities in one catalog across seven provider namespaces. Its release revisions, capability differences, target and evidence records are synthetic test data. They exercise coexistence, provider-scoped aliases, changed capability rejection, exact catalog restoration, target tampering, lifecycle rejection and support-level gates; they are not vendor capability declarations.
++
++Provider tests separately pass both documented model IDs through their concrete adapters. Azure keeps the deployment selector separate from the reported model; Gemini keeps the requested model separate from the reported revision. Missing model versions are not filled from requested values.
++
++Gemini 3.7 and 3.8 both reject `minimal` thinking before dispatch. This includes [Gemini 3.7's documented restriction](https://ai.google.dev/gemini-api/docs/models/gemini-3.7-flash), rather than applying only the newest model's rule. For other per-release options, register accurate capability schemas and retain provider-specific adapter validation. Do not copy one release's option schema to another without verification.
++
++Run the adapter tests with `cargo test --workspace --locked`. Run `python3 scripts/check-package.py --allow-dirty` for the extracted-package consumers. See [test environment setup](provider-setup.md) to conduct additional live checks in a separate Host; the library does not read `.env`.
+diff --git a/docs/validation/openai-live-smoke.json b/docs/validation/openai-live-smoke.json
+new file mode 100644
+index 0000000000000000000000000000000000000000..9938bd40978bf9ebb1423962055c12f450492b20
+--- /dev/null
++++ b/docs/validation/openai-live-smoke.json
+@@ -0,0 +1,26 @@
++{
++  "provider": "openai",
++  "model": "gpt-6-astra",
++  "api_contract": "responses/v1",
++  "reasoning_effort": "medium",
++  "max_output_tokens": 4096,
++  "validation_status": "live_verified",
++  "scope": "pre-release smoke checks for this configuration",
++  "production_support_claim": false,
++  "native_json_schema": {
++    "checked_at_ms": 1789309046133,
++    "passed": true,
++    "reported_model_id": "gpt-6-astra",
++    "reported_model_version": null
++  },
++  "agent_tool_loop": {
++    "passed": true,
++    "model_posts": 2,
++    "metadata_gets": 2,
++    "tool_executions": 1,
++    "duplicate_start_extra_calls": 0,
++    "sqlite_reopen_verified": true,
++    "stored_tool_result_verified": true,
++    "system_workspace_injection_verified": true
++  }
++}
+diff --git a/tests/support/version_matrix_consumer.rs b/tests/support/version_matrix_consumer.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..6581cfc69d0bd4b4eb2735ea26ead2d80e2ab1cc
+--- /dev/null
++++ b/tests/support/version_matrix_consumer.rs
+@@ -0,0 +1,246 @@
++// Synthetic catalog evidence and capabilities; no provider availability is claimed.
++use serde_json::json;
++use std::collections::{BTreeMap, BTreeSet};
++use wickle::*;
++use wickle_model_router::ImmutableModelCatalog;
++
++fn id(value: &str) -> Id {
++    Id::new(value).expect("example identifier")
++}
++
++fn reference(value: &str) -> VersionedRef {
++    VersionedRef {
++        id: id(value),
++        version: id("1"),
++    }
++}
++
++fn definition(provider: &str, version: &str, wire: &str, features: &[&str]) -> ModelDefinition {
++    ModelDefinition {
++        model_key: id("example-model"),
++        family: id("example-family"),
++        provider: id(provider),
++        model_id: id(wire),
++        model_version: id(version),
++        version_semantics: VersionSemantics::Pinned,
++        lifecycle: ModelLifecycle::Active,
++        capabilities: ModelCapabilities {
++            revision: id(version),
++            features: features.iter().map(|value| id(value)).collect(),
++            options_schema: json!({
++                "type":"object", "properties":{"fixture_option":{"const":version}}, "additionalProperties":false
++            }),
++            context_window: 8192.try_into().unwrap(),
++            max_output_tokens: 2048.try_into().unwrap(),
++        },
++        evidence: vec![ModelEvidence {
++            source_ref: id("example-provider-manifest"),
++            observed_at_ms: 1000,
++        }],
++    }
++}
++
++fn definition_ref(model: &ModelDefinition) -> ModelDefinitionRef {
++    ModelDefinitionRef {
++        provider: model.provider.clone(),
++        model_key: model.model_key.clone(),
++        model_version: model.model_version.clone(),
++    }
++}
++
++fn binding(model: &ModelDefinition, name: &str) -> Result<ModelBinding, ContractError> {
++    let mut binding = ModelBinding {
++        binding: reference(name),
++        model: definition_ref(model),
++        requested_model: model.model_id.clone(),
++        adapter: reference("example-adapter"),
++        connection_ref: reference(name),
++        target: BTreeMap::from([("region".into(), json!("example-region"))]),
++        target_schema: json!({
++            "type":"object", "properties":{"region":{"const":"example-region"}},
++            "required":["region"], "additionalProperties":false
++        }),
++        api_contract: ApiContract {
++            operation: id("messages"),
++            version: id("api-contract-1"),
++        },
++        deployment_revision: Some(id(name)),
++        version_semantics: VersionSemantics::Pinned,
++        capabilities: model.capabilities.clone(),
++        support: ModelSupportStatus::ContractTested,
++        evidence: vec![],
++    };
++    binding.evidence.push(ModelValidationEvidence {
++        kind: ModelValidationKind::ContractTest,
++        binding_digest: binding.contract_digest(model)?,
++        checked_at_ms: 1001,
++        evidence_ref: id("example-contract-fixture-result"),
++        passed: true,
++    });
++    Ok(binding)
++}
++
++#[tokio::main(flavor = "current_thread")]
++async fn main() -> Result<(), Box<dyn std::error::Error>> {
++    let scope = Scope {
++        tenant_id: id("tenant"),
++        workspace_id: id("workspace"),
++        user_id: None,
++    };
++    let specs = [
++        ("openai", "gpt-6-astra", "gpt-5.6-sol"),
++        ("azure-openai", "gpt-6-astra", "gpt-5.6-sol"),
++        ("anthropic", "claude-opus-5", "claude-opus-4-8"),
++        (
++            "aws-bedrock",
++            "anthropic.claude-opus-5",
++            "anthropic.claude-opus-4-8",
++        ),
++        ("google-gemini", "gemini-3.8-flash", "gemini-3.7-flash"),
++        ("google-vertex", "gemini-3.8-flash", "gemini-3.7-flash"),
++        ("xai", "grok-4.6", "grok-4.5"),
++    ];
++    let mut snapshot = ModelCatalogSnapshot {
++        revision: id("catalog-1"),
++        scope: scope.clone(),
++        models: vec![],
++        bindings: vec![],
++        aliases: vec![],
++    };
++    for (provider, first, second) in specs {
++        let a = definition(provider, "fixture-r1", first, &["text"]);
++        let b = definition(provider, "fixture-r2", second, &["text", "tool_calling"]);
++        snapshot.aliases.push(ModelAlias {
++            provider: id(provider),
++            alias: id("preferred"),
++            target: definition_ref(&a),
++        });
++        snapshot
++            .bindings
++            .push(binding(&a, &format!("{provider}-a"))?);
++        snapshot
++            .bindings
++            .push(binding(&b, &format!("{provider}-b"))?);
++        snapshot.models.extend([a, b]);
++    }
++    let catalog = ImmutableModelCatalog::new(snapshot.clone())?;
++    let saved = serde_json::to_string(catalog.snapshot())?;
++    let requirements = CatalogRequirements {
++        features: BTreeSet::from([id("tool_calling")]),
++        options: JsonObject::new(),
++        input_tokens: 1024,
++        max_output_tokens: 256.try_into().unwrap(),
++        version_policy: VersionPolicy::RequirePinned,
++        min_support: ModelSupportStatus::ContractTested,
++    };
++    for (provider, first, second) in specs {
++        let a = catalog
++            .get_binding(
++                &scope,
++                &id("catalog-1"),
++                &reference(&format!("{provider}-a")),
++            )
++            .await?;
++        let b = catalog
++            .get_binding(
++                &scope,
++                &id("catalog-1"),
++                &reference(&format!("{provider}-b")),
++            )
++            .await?;
++        assert_eq!(a.model.provider, id(provider));
++        assert_eq!(b.model.provider, id(provider));
++        assert_eq!(a.model.model_id, id(first));
++        assert_eq!(b.model.model_id, id(second));
++        assert_eq!(a.model.model_key, b.model.model_key);
++        assert_ne!(a.model.model_version, b.model.model_version);
++        assert!(a.validate(&requirements).is_err());
++        b.validate(&requirements)?;
++        let wrong = JsonObject::from([("fixture_option".into(), json!("fixture-r2"))]);
++        assert!(a.binding.capabilities.validate_options(&wrong).is_err());
++        b.binding.capabilities.validate_options(&wrong)?;
++        let mut live = requirements.clone();
++        live.min_support = ModelSupportStatus::LiveVerified;
++        assert!(b.validate(&live).is_err());
++        let mut upgraded = snapshot.clone();
++        upgraded.revision = id("catalog-2");
++        upgraded
++            .aliases
++            .iter_mut()
++            .find(|alias| alias.provider == id(provider))
++            .unwrap()
++            .target = definition_ref(&b.model);
++        let new = ImmutableModelCatalog::new(upgraded)?;
++        for (other, _, _) in specs {
++            let target = new
++                .resolve_alias(&scope, &id("catalog-2"), &id(other), &id("preferred"))
++                .await?;
++            assert_eq!(
++                target.model_version,
++                id(if other == provider {
++                    "fixture-r2"
++                } else {
++                    "fixture-r1"
++                })
++            );
++        }
++        let restored = ImmutableModelCatalog::restore(&saved, &catalog.digest())?;
++        assert_eq!(
++            restored
++                .resolve_alias(&scope, &id("catalog-1"), &id(provider), &id("preferred"))
++                .await?
++                .model_version,
++            id("fixture-r1")
++        );
++        assert!(
++            restored
++                .get_binding(
++                    &scope,
++                    &id("catalog-2"),
++                    &reference(&format!("{provider}-a"))
++                )
++                .await
++                .is_err()
++        );
++    }
++    let mut forged = snapshot.clone();
++    forged.bindings[0].support = ModelSupportStatus::LiveVerified;
++    assert!(ImmutableModelCatalog::new(forged).is_err());
++    let mut planned = snapshot.clone();
++    planned.bindings[1].support = ModelSupportStatus::Planned;
++    planned.bindings[1].evidence.clear();
++    let planned = ImmutableModelCatalog::new(planned)?;
++    assert!(
++        planned
++            .get_binding(&scope, &id("catalog-1"), &reference("openai-b"))
++            .await?
++            .validate(&requirements)
++            .is_err()
++    );
++    let mut retired = snapshot.clone();
++    retired.models[1].lifecycle = ModelLifecycle::Retired;
++    retired.bindings[1] = binding(&retired.models[1], "openai-b")?;
++    let retired = ImmutableModelCatalog::new(retired)?;
++    assert!(
++        retired
++            .get_binding(&scope, &id("catalog-1"), &reference("openai-b"))
++            .await?
++            .validate(&requirements)
++            .is_err()
++    );
++    let mut changed: serde_json::Value = serde_json::from_str(&saved)?;
++    changed["bindings"][0]["target"]["region"] = json!("different-region");
++    assert!(ImmutableModelCatalog::restore(&changed.to_string(), &catalog.digest()).is_err());
++    let mut foreign = scope.clone();
++    foreign.workspace_id = id("foreign");
++    assert!(
++        catalog
++            .get_binding(&foreign, &id("catalog-1"), &reference("openai-a"))
++            .await
++            .is_err()
++    );
++    println!(
++        "version matrix: 7 provider namespaces / 14 coexisting catalog identities; capability differences, scoped alias upgrades, immutable restoration, target drift and planned/live/retired gates passed (synthetic evidence, no provider calls)"
++    );
++    Ok(())
++}
